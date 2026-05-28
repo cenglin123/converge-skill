@@ -335,7 +335,7 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | Rubrics 维度库、评分标准、与 verdict 的关系 | `refs/rubrics.md` |
 | 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `refs/decomposition-protocol.md` |
 | 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `refs/testing-toolbox.md` |
-| 文档一致性审计：检测文档声明的断言与代码/配置实际是否一致 | `refs/document-audit.md` |
+| 文档一致性审计：取文档断言逐条对账代码/配置，产出报告交给标准 converge 接管修复 | `refs/document-audit.md` |
 
 ---
 

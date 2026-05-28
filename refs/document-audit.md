@@ -1,119 +1,44 @@
 # 文档一致性审计
 
-> 项目文档会漂移。六个月前写的"本项目使用 SQLite"，现在后端跑的是 PostgreSQL，而中间没有一次 commit 显式触发过"改数据库"这一步——这是无数次微调的累积。文档审计把 converge 的对抗验证用到文档身上：取文档中的事实断言，去代码和配置里逐条对账，不一致就修，修完再查。
+> 项目文档会漂移。六个月前写的"本项目使用 SQLite"，现在后端跑的是 PostgreSQL。文档审计做一件事：取文档中的事实断言，去代码和配置里逐条对账，不一致就标出来。**只观察，不修改。** 如有 conflict，输出报告交给标准 converge 流程接管修复。
+
+## 定位
+
+本模式是**审计**（事后、不写回），不是 converge。按 SKILL.md 的语义边界——审计只记录不裁决，converge 做多轮写回。文档审计负责前半段（找出问题），converge 负责后半段（修对问题）。
 
 ## 触发条件
 
-- 周期性维护（每 5 次 converge 或每月执行一次）
-- 当 agent 在执行任务时依赖文档信息，但发现实际行动与文档描述不符
 - 用户显式触发："审计文档一致性""检查文档是否过期"
+- 当 agent 在执行任务时依赖文档信息，但发现实际行动与文档描述不符
+- 周期性维护（建议每 5 次 converge 或每月一次，由项目维护计划决定，本模式不内置调度）
 
-## 流程（converge 多轮模式）
+## 流程
 
-### Round 0：合同谈判（可选）
+### 1. Spawn Reviewer 做审计
 
-可跳过（本模式的工作范围天然由文档体系定义）。若跳过，Reviewer 默认审计范围：入口文件（AGENTS.md 及其同步副本 CLAUDE.md / GEMINI.md）的硬约束段 + docs/overview.md + docs/deployment.md。若启用 Round 0，按 `contract-negotiation.md` 协商审计范围。
+Orchestrator 按下方 Reviewer Prompt 模板 spawn 独立 Reviewer，产出审计报告。
 
-### Round 1：Reviewer 提取断言并对比
+### 2. 判定并分流
 
-Reviewer 读取目标项目的文档体系，提取**可验证的事实断言**，逐一对比可验证来源。
+Orchestrator 读 Reviewer 输出：
 
-#### 断言提取规则
+- **零 conflict**：审计通过，报告归档。
+- **有 conflict**：以审计报告为输入，触发标准 converge 运行。此次 converge 的**产物是修正后的文档**，走完整 converge 流程——合同谈判（协商修复范围）、每轮新 Reviewer、D11 裁决、振荡检测、retrospective。
 
-1. **初始深度**：首轮提取 15-30 条信息密度最高的断言（优先入口文件硬约束段 → docs/overview.md → docs/deployment.md → docs/api.md → 其他）
-2. **排除内容**：不可客观验证的陈述不纳入——设计原因（"为什么选 SQLite"）、环境陷阱（"Windows 上需先装 VS Build Tools"，这类经验性内容"适用性"而非"正确性"）、协作约定仅在可通过配置验证时才纳入（如 "所有 PR 需 review" 可通过 GitHub branch protection 设置验证）
-3. **规格文档区分**：描述目标状态的设计文档（如 ARCHITECTURE.md 中的"计划迁移到 k8s"）不纳入一致性审计——其可验证来源是 plan 文件而非当前代码
+Stale 断言不触发 converge，记录到 health-report 即可。
 
-#### 断言类型与可验证来源
+### 3. 报告放置
 
-| 断言类型 | 文档来源示例 | 可验证来源（优先级递降） |
-|---------|------------|----------------------|
-| 技术栈声明（"本项目使用 Python 3.12"） | docs/overview.md | pyproject.toml / .python-version / CI workflow |
-| 入口文件同步（"AGENTS.md / CLAUDE.md / GEMINI.md 内容一致"） | 入口文件自身 | MD5 比对三个文件 |
-| 构建产物路径（"构建产物在 dist/"） | 入口文件硬约束段 | package.json scripts / CI config |
-| 测试命令（"运行 pytest"） | docs/deployment.md | CI workflow / Makefile / task runner config |
-| 目录结构（"模块在 src/ 下"） | STRUCTURE.md | 文件系统（Glob） |
-| API 约定（"返回 JSON，字段 camelCase"） | docs/api.md | API schema 文件 / 实际响应 |
-| 架构描述（"微服务，三个独立部署单元"） | docs/overview.md | workspace config / Dockerfile / CI |
-| 部署环境（"生产环境用 k8s"） | docs/deployment.md | k8s manifest / helmfile / CI deploy step |
-
-> 可验证来源的发现流程参照 `testing-toolbox.md` 的命令发现方法，避免 Reviewer 自行猜测。
-
-#### 输出格式
-
-Reviewer 的输出直接作为 round-N.md 的 Reviewer 完整输出：
-
-```yaml
-round: {N}
-verdict: <可执行 | 阻断需修复>
-blocking_issues:
-  - id: 1
-    document: docs/overview.md
-    claim: "本项目使用 Python 3.12"
-    verified_source: pyproject.toml#requires-python
-    actual: ">=3.11"
-    verdict: conflict  # match | stale | conflict
-    description: |
-      文档声称 Python 3.12，实际 requires-python=">=3.11"，文档限定了一个具体版本而实际接受范围版本。
-    plan_amendment_required: false
-    location: docs/overview.md §技术栈
-```
-
-#### 判定标准
-
-| verdict | 含义 | 示例 |
-|---------|------|------|
-| `match` | 文档与事实一致 | 文档说 3.12，`python-version` 文件是 3.12 |
-| `stale` | 文档信息过时但不直接误导 | 文档说 3.11，实际已升级到 3.12 |
-| `conflict` | 文档与事实矛盾，agent 会基于错误信息决策 | 文档说用 SQLite，实际 `DATABASE_URL` 指向 PostgreSQL |
-
-**部分真值处理**：当文档声明的范围与实际范围不一致时——文档声明是实际范围的子集 → `stale`（信息不完整），文档声明是实际范围的超集 → `conflict`（包含错误断言），文档声明与实际范围有交集但不重合 → `conflict`。
-
-阈值：所有 verdict 为 `conflict` 的断言自动成为 blocking_issues。
-
-#### 对齐率口径
-
-不计算单一对齐率——按 `conflict` 密度和 `stale` 密度两个指标分别报告：
-
-```
-conflict 密度 = conflict 数 / 总断言数
-stale 密度 = stale 数 / 总断言数
-```
-
-一个 conflict 密度 10% 的审计比 stale 密度 40% 的审计更紧急，合并计算会掩盖这个差异。
-
-### Round 1+：Executor 修复 + Reviewer 重审
-
-1. Executor 只修复 `conflict` 断言（`stale` 不触发修复——信息过时不值得立即修正，记录到 health-report 即可，由用户择机决策）
-2. 修复后 Executor 在 attempts.md 追加 entry（格式同 converge 标准 attempt log）
-3. 同一 Reviewer 重审修复结果（同 context 内验收，通过 `SendMessage` 续命）
-4. 重审仅检查：(a) conflict 是否已修正；(b) 修正是否引入了新 conflict
-5. 零 conflict → 收敛成立
-
-## 产物目录
-
-走 converge 标准目录结构：
-
-```
-.converge/active/<YYYYMMDD-doc-audit-<项目>>/
-├── contract.md            # Round 0 产物（可选，跳过则不生成）
-├── round-1.md             # Reviewer 审计报告
-├── round-2.md             # 重审报告（如有）
-├── attempts.md            # Executor 修复记录
-├── _orchestrator-state.md
-└── retrospective.md       # 收敛完成后
-```
+审计报告写入 `docs/plans/active/`（作为后续 converge 的 plan 输入）。converge 产物走标准 `.converge/active/<slug>/` 目录。
 
 ## Reviewer Prompt 模板
 
-Orchestrator 在 spawn Reviewer 时拼装以下 prompt：
-
 ```text
-You are a document consistency auditor. This is Round {N}.
+You are a document consistency auditor. This is a single-pass audit, NOT a convergence loop.
 
 ## Required reading
-1. Project entry files: AGENTS.md, CLAUDE.md, GEMINI.md (behavior rules + hard constraints — note: these should be identical; flag divergence as a finding)
-2. Project STRUCTURE.md (if exists, doc index)
+1. Project entry files: AGENTS.md, CLAUDE.md, GEMINI.md (note: these should be identical; if not, flag as a finding)
+2. Project STRUCTURE.md (if exists)
 3. Project docs/*.md (overview, deployment, api, pitfalls — as applicable)
 4. This charter: <document-audit.md path>
 
@@ -124,66 +49,96 @@ For each claim, locate the actual truth source (code, config, CI, file system)
 and compare.
 
 Claim extraction priority:
-1. Entry files (AGENTS.md + CLAUDE.md + GEMINI.md) hard constraints section — also check if they are in sync
-2. docs/overview.md (tech stack, architecture)
+1. Entry files hard constraints section — also check if AGENTS.md / CLAUDE.md / GEMINI.md are in sync
+2. docs/overview.md (tech stack, architecture claims)
 3. docs/deployment.md (deploy environment, startup commands)
 4. docs/api.md (if exists)
 5. STRUCTURE.md (directory claims only — verify with Glob)
 
 Do NOT extract:
 - Design rationale ("why SQLite")
-- Environment traps ("first build needs setup.sh")
-- Collaboration conventions (unless GitHub branch protection settings can verify them)
+- Environment traps ("first build needs setup.sh") 
+- Collaboration conventions (unless config-verifiable, e.g. GitHub branch protection)
 - Target-state descriptions in design docs (not yet implemented)
 
-For partial truth: doc subset of reality → stale; doc superset of reality → conflict;
-doc and reality overlap partially → conflict.
+## Verdict rules
+
+| verdict | meaning | example |
+|---------|---------|---------|
+| match | doc matches reality | doc says 3.12, .python-version is 3.12 |
+| stale | doc outdated but not directly misleading | doc says 3.11, actual is 3.12 |
+| conflict | doc contradicts reality, agent would make wrong decisions | doc says SQLite, DATABASE_URL points to PostgreSQL |
+
+Partial truth: doc claims subset of reality → stale (incomplete). Doc claims superset of reality → conflict (wrong). Partial overlap → conflict.
+
+Important: when doc and code/config conflict, do NOT assume doc is wrong. The doc may reflect correct design intent and the code may have drifted. Flag the contradiction without assigning blame — the subsequent converge run will determine which side to fix.
 
 ## Output format
 
 ```yaml
-round: {N}
-verdict: <可执行 | 阻断需修复>
-blocking_issues:
+audit_result:
+  total_claims: N
+  match_count: N
+  stale_count: N
+  conflict_count: N
+  conflict_density: "<conflict_count / total_claims>"
+  stale_density: "<stale_count / total_claims>"
+
+matched_claims:
+  - document: <path>
+    claim: "<exact quote>"
+    verified_source: <file#section>
+    actual: "<what source says>"
+
+stale_claims:
+  - document: <path>
+    claim: "<exact quote>"
+    verified_source: <file#section>
+    actual: "<what source says>"
+    note: "<why stale not conflict>"
+
+conflict_claims:
   - id: N
     document: <path>
-    claim: "<exact quote from doc>"
+    claim: "<exact quote>"
     verified_source: <file#section>
-    actual: "<what the source actually says>"
-    verdict: <match | stale | conflict>
+    actual: "<what source says>"
     description: |
-      <one paragraph explaining the discrepancy>
-    plan_amendment_required: false
+      <nature of contradiction — does NOT prescribe which side to fix>
     location: <doc section>
+    possible_interpretations:
+      - "doc is correct, code/config drifted"
+      - "code/config is correct, doc is stale"
 ```
 
-All `conflict` items become blocking_issues. All `stale` items go into suggestion_issues.
-`match` items are listed in a separate `matched_claims` array for the report.
+If conflict_count > 0, the audit report becomes the input to a standard converge run.
+The converge run's deliverable is the fixed documentation.
 ```
 
-## Reviewer 自检清单（Pilot 后追加模板化）
+## 与 converge 的衔接
 
-Orchestrator 在 spawn 时不额外注入——以下由 Reviewer 在开始工作前自检：
+审计报告产出 conflict 后，Orchestrator 启动一次标准 converge，收敛对象为**被标记的文档**：
 
-- [ ] 是否已读入口文件（AGENTS.md / CLAUDE.md / GEMINI.md）硬约束段，三者是否内容一致
+1. Round 0 合同谈判：Executor 提议修复范围（只修 conflict 还是连 stale 一起修）、Rubrics 维度、完成标准
+2. Round 1+：标准 converge 流程——每轮新 Reviewer、D11 裁决、振荡检测
+3. 修复不限于文档——如果 conflict 的根因是代码错误（如文档正确但实现偏差），则修复代码而非文档
+4. 产物写入 `.converge/active/<YYYYMMDD-doc-fix>/`
+
+## Reviewer 自检清单
+
+- [ ] 是否已读入口文件（AGENTS.md / CLAUDE.md / GEMINI.md），三者是否内容一致
 - [ ] 是否已读 docs/overview.md 技术栈/架构声明
 - [ ] 是否已读 docs/deployment.md 部署/环境声明
 - [ ] 是否参照 `testing-toolbox.md` 的命令发现流程定位可验证来源
 - [ ] 是否区分了规格文档（目标状态）和参考文档（当前状态）
 - [ ] 断言数量是否在 15-30 条范围内
-- [ ] 每条 conflict/stale 是否引用了具体文件行或配置键
+- [ ] 每条 conflict 是否标注了双向可能的解释（doc 错 vs code 错）
+- [ ] 是否仅做观察，未尝试修改任何文件
 
 ## 与现有机制的关系
 
-| 机制 | 对象 | 时态 | 反馈路径 | 本模式 |
-|------|------|------|---------|--------|
-| converge（plan/code） | plan / 代码产物 | 事中 | 多轮写回 | 机制同构，对象不同 |
-| audit | Agent 行为 / 宪法执行 | 事后 | 不写回 | 与本模式不同——本模式走 converge 写回，**主动修正** |
-| testing-toolbox | 代码测试/lint | 事中 | 测试结果 | 互补——测试审代码，本模式审代码的说明书 |
-
-## 实施建议
-
-- 初始频率：每 5 次 converge 或每月一次
-- 审计范围：先覆盖入口文件（AGENTS.md / CLAUDE.md / GEMINI.md）硬约束段 + docs/overview.md + docs/deployment.md
-- 断言提取粒度：首轮 15-30 条，pilot 后根据 conflict 密度调整——密度太低（< 5%）说明提取太保守，密度太高（> 30%）缩小范围
-- Pilot 收敛后视复盘决定是否将 Reviewer 自检清单模板化到独立文件
+| 机制 | 本模式 |
+|------|--------|
+| converge | 审计报告产出 conflict → 触发标准 converge 修复文档（或代码） |
+| audit | 同构——事后观察，不写回 |
+| testing-toolbox | 互补——测试审代码，本模式审"代码的说明书" |
