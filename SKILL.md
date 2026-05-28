@@ -110,7 +110,7 @@ D11=a 是默认目标。b/c 需用户显式确认。
 
 ### Round 0 · 合同谈判（可选前置）
 
-> 详细流程和 contract.md 格式见 `contract-negotiation.md`。Rubrics 维度选择见 `rubrics.md`。
+> 详细流程和 contract.md 格式见 `refs/contract-negotiation.md`。Rubrics 维度选择见 `refs/rubrics.md`。
 
 ```
 0a. Orchestrator 判断是否跳过（用户要求 / 对象极简 → 跳过并记录理由）
@@ -126,15 +126,15 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ```
 1. 创建 .converge/active/<slug>/ 目录
-2. 初始化 _orchestrator-state.md（格式见 state-schema.md）
+2. 初始化 _orchestrator-state.md（格式见 refs/state-schema.md）
 3. for round in 1..max_outer_loops:
-   a. Spawn 新 reviewer（prompt 模板见 reviewer-prompt.md，若存在 contract.md 则一并传入）
-   b. 输出写入 round-N.md（格式见 state-schema.md），记录 instance_id
+   a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）
+   b. 输出写入 round-N.md（格式见 refs/state-schema.md），记录 instance_id
    c. Orchestrator 处理：overturn 检测、等价标注、antipattern 关联
    d. 若 verdict = 可执行 → 收敛！执行完成前必检清单，写 retrospective.md，移 done/
    e. 若有 contract_amendment_required → 先回写 contract.md 再继续
-   f. Spawn 新 executor（prompt 模板见 executor-prompt.md）
-   f. Executor 修复后更新 attempts.md（格式见 state-schema.md）
+   f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
+   f. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
    g. plan_amendment_required 时先回写 plan 本体再改下游
    h. （可选）Continue 做 inner loop reviewer 验收
 4. 超 max_outer_loops → 预算软停，询问用户
@@ -203,7 +203,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | "用户没回复，我默认他同意继续" | b/c 类收敛和预算软停都需要**显式**用户确认 |
 | "降级了但不用告诉用户吧，反正是内部细节" | 降级模式下结论可信度降低，**用户有权知道**。必须告知用户当前处于降级模式及影响 |
 
-> 执行上述语义判定时，参考 `orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
+> 执行上述语义判定时，参考 `refs/orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
 
 ---
 
@@ -265,7 +265,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
     └── retrospective.md        # 复盘（必填）
 ```
 
-> 格式规范见 `state-schema.md`。slug 命名：`<YYYYMMDD>-<对象简述>`。
+> 格式规范见 `refs/state-schema.md`。slug 命名：`<YYYYMMDD>-<对象简述>`。
 >
 > 收敛后修订时：done/ → active/ → 修订 → 重新归档 done/。retrospective 追加修订记录，不覆盖原有内容。
 
@@ -273,7 +273,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ## 层级模式（Planner → 多个 Orchestrator）
 
-> 当项目规模超出单次收敛的合理范围时，可启用层级式并行收敛。详细协议见 `decomposition-protocol.md`。
+> 当项目规模超出单次收敛的合理范围时，可启用层级式并行收敛。详细协议见 `refs/decomposition-protocol.md`。
 
 ### 架构
 
@@ -293,7 +293,7 @@ Planner（主控）
   └── 每阶段汇报收敛状态
 ```
 
-**两层是默认值**。深层（3+）需要 Planner justify（scope 粒度分析 + 并行收益估算）。详见 `decomposition-protocol.md`。
+**两层是默认值**。深层（3+）需要 Planner justify（scope 粒度分析 + 并行收益估算）。详见 `refs/decomposition-protocol.md`。
 
 ### 启用条件
 
@@ -327,14 +327,14 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 
 | 需求 | 文件 |
 |------|------|
-| Spawn reviewer 时拼装 prompt | `reviewer-prompt.md` |
-| Spawn executor 时拼装 prompt | `executor-prompt.md` |
-| 写 round-N.md / attempts.md / state / retrospective | `state-schema.md` |
-| 执行 overturn/Type R 判定、inner loop 验收等语义判断 | `orchestrator-guide.md` |
-| Round 0 合同谈判流程、contract.md 格式 | `contract-negotiation.md` |
-| Rubrics 维度库、评分标准、与 verdict 的关系 | `rubrics.md` |
-| 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `decomposition-protocol.md` |
-| 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `testing-toolbox.md` |
+| Spawn reviewer 时拼装 prompt | `refs/reviewer-prompt.md` |
+| Spawn executor 时拼装 prompt | `refs/executor-prompt.md` |
+| 写 round-N.md / attempts.md / state / retrospective | `refs/state-schema.md` |
+| 执行 overturn/Type R 判定、inner loop 验收等语义判断 | `refs/orchestrator-guide.md` |
+| Round 0 合同谈判流程、contract.md 格式 | `refs/contract-negotiation.md` |
+| Rubrics 维度库、评分标准、与 verdict 的关系 | `refs/rubrics.md` |
+| 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `refs/decomposition-protocol.md` |
+| 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `refs/testing-toolbox.md` |
 
 ---
 
