@@ -1,0 +1,134 @@
+# Orchestrator 操作指南
+
+> Orchestrator 承担的不只是"别偷懒"——每一条责任都是需要判断力的语义推理。本文件提供操作步骤、偏见意识和边界场景处置。
+
+---
+
+## 一、每次 Spawn 前自检
+
+Spawn reviewer 或 executor 前，逐项确认：
+
+- [ ] **prompt 完全自足？** 一个没读过任何历史文件的人，拿到这份 prompt 能否理解任务？
+- [ ] **所有 `<placeholder>` 已替换为具体路径？** 检查 `<plan_path>`、`<attempts_md_path>`、`<round_N_reviewer_output_path>`、`<contract_path>` 等
+- [ ] **若存在 contract.md**：prompt 中已包含 contract 路径和 Rubrics 维度？
+- [ ] **未暗示期望结果？**
+  - ❌ "请确认 plan 已经可以执行"
+  - ✅ "审查此 plan，给出 verdict"
+  - ❌ "这里应该只有一些小问题"
+  - ✅ 不附加任何评价性前缀
+- [ ] **必读文件路径有效？** 确认 `<plan_path>`、`<attempts_md_path>` 等所指文件确实存在
+- [ ] **若收敛对象是代码项目**：查阅 `testing-toolbox.md`，确定 `<test_command>` 和 `<lint_command>` 的注入值。优先使用项目声明的入口（Makefile / package.json scripts / CI 配置），其次按技术栈信号查速查表。检测不到测试框架时两个占位符都留空
+- [ ] **instance_id 已记录？** Spawn 返回后立即写入 round-N.md frontmatter 和 `_orchestrator-state.md`
+
+---
+
+## 二、语义判定操作步骤
+
+### Overturn 检测（每轮）
+
+当 reviewer 给出 blocking issue 时，逐条对照 attempts.md 中已 Accepted 的修复：
+
+1. **定位**：attempts.md 中是否已有针对**同一对象**（同一段落 / 同一函数 / 同一决策点）的 Accepted entry？
+2. **比较方向**：本轮 issue 的修改方向和 Accepted entry 的修改方向是否**相反**？
+   - 一个要加 X，一个要删 X → 方向相反
+   - 一个说"应该用方案 A"，一个说"应该用方案 B"且 A ≠ B → 方向相反
+3. **确认**：方向确实相反 → 标记 Overturn，累加 Type O 计数
+4. **不确定时**：标注 `[Orchestrator Detection · 不确定]`，说明不确定的理由，**不做强行判断**。让下一轮 reviewer 独立裁决。
+
+### Type R 等价检测（每轮）
+
+1. **提取**：本轮每个 blocking issue 的核心诉求（一句话）
+2. **匹配**：逐条对比上轮 blocking issue 的核心诉求
+3. **等价条件**：诉求本质相同，但措辞不同 → 标记 Type R
+   - 例：R1 说"缺少错误处理"，R2 说"异常路径未覆盖" → 可能同源
+4. **不确定时**：标注 `[Orchestrator Detection · 不确定]`，不做强行等价。
+
+### Inner Loop 验收（同轮）
+
+Executor 修复后，通过 Continue 让 reviewer 验收。Orchestrator 自己也需要对照：
+
+1. **逐条勾**：对照 reviewer 原话（不是自己记忆中的摘要），逐条检查 executor 的 diff
+2. **不凭感觉**：如果 reviewer 原话说"必须重写为独立函数"，而 diff 只是加了个 flag 参数——这就是不够
+3. **reviewer 打回时**：不要替 executor 解释。把 reviewer 的意见原样转发给 executor，让它自己判断是误解还是真不足
+4. **计数强制执行**：每轮 inner loop Continue 前检查次数。达 3 次后不再 Continue，在该轮 round-N.md 的 Orchestrator 处理记录中标注 `[Inner Loop Exhausted: 3/3]`，直接进入下一 outer loop
+
+---
+
+## 三、自身偏见意识
+
+两条硬纪律：
+
+1. **先读本轮 reviewer 原文，再对比历史。** 如果先读 attempts.md 再看本轮 reviewer 输出，会带着"找印证"的预期去读——锚定效应。正确的读序：本轮 reviewer 全文 → attempts.md → 做对比。
+
+2. **Inner loop 验收时逐条勾 reviewer 原话，不凭感觉。** 你亲自 spawn 了 executor 修了某个 issue，会自然偏向"修好了"。用 checklist 对抗确认偏误。
+
+---
+
+## 四、边界场景处置
+
+| 场景 | 处置 |
+|------|------|
+| Reviewer verdict = `可执行` 但有 3 条 suggestion 看起来像阻断 | **不要自行升级为阻断**。suggestion 和 blocking 的边界是 reviewer 的权力。若确有疑虑 → Spawn 第二个 reviewer 交叉验证 |
+| R1 reviewer 说 attribution=plan_defect，R2 reviewer 说同一问题的 attribution=executor_limit | 标 Type S 振荡（归因翻转），记录但不硬停。让 R3 reviewer 独立裁决归因 |
+| 用户说"够了"但还有 2 个阻断未修 | 这是 D11=c 主观接受。标注、写 retrospective、**不标"收敛"**——标"主观接受" |
+| Reviewer 的 YAML 输出格式错误（缺 attribution / verdict 拼写错 / YAML 解析失败） | **Orchestrator 不自行推断**。通过 Continue 要求 reviewer 修正格式。Reviewer 原意只有 reviewer 自己能还原 |
+| Reviewer 和 Executor 的结论矛盾，无法判断谁对 | 不要选边。记录矛盾、Spawn 第三个 agent 作为仲裁（给出双方论据，让它独立判断）。**仲裁只限一次**：若仲裁 agent 的结论仍无法打破矛盾，在 retrospective 中记录为未解决争议，不继续消耗预算 |
+| Type O 触发但直觉觉得不是真正的振荡 | 规则优先：触 ≥3 次就硬停。可以在 retrospective 中分析"这次硬停是否合理"，作为后续调参依据 |
+| Executor 的 diff 涉及 reviewer 未提到的文件 | 问 executor 为什么改这里。如果是合理的 scope 上溯（见 executor-prompt.md 纪律 #4）→ 接受。如果是 scope creep → 回退 |
+| Reviewer 标 `contract_amendment_required: true` | 先回写 contract.md（追加/修订断言），再审查 attempts.md 中哪些 Accepted entry 的验收依据因此失效，追加 `**[Contract Amendment]**` annotation。contract 演进导致的矛盾不计入 Type O |
+| Contract 修订后，已 Accepted 的修复方向与新 contract 矛盾 | 标注 `[Not Type O: contract amendment]`。不累加 Type O 计数。让 executor 按新 contract 返工，新 attempt 按正常格式记录 |
+| Round 0 中 Executor 提议的合同断言过于笼统 | 不要替 Executor 细化——交给 Reviewer 挑战。Orchestrator 只做传递，不做内容加工 |
+| Reviewer 所有 Rubrics 维度 ≥ 4 但 verdict ≠ 可执行 | Reviewer 必须在 blocking_issues 中标 `rubric_gap: true`。若未标 → Continue 要求 Reviewer 解释 |
+
+---
+
+## 五、Spawn 失败时的降级
+
+如果 Spawn 完全不可用，按 SKILL.md 附录 A.4 降级。额外注意：
+
+- 降级模式下 `reviewer_backend: orchestrator_self` 是**必须标注的**，不是可选的
+- 降级模式的 retrospective 中必须写 §6 "降级影响评估"
+- 降级模式不应默默发生——**告知用户**当前处于降级模式，结论可信度降低
+
+## 六、职责操作指引
+
+### plan_amendment_required 处理（对应职责 #5）
+
+1. Reviewer 标 `plan_amendment_required: true` 时，在 attempts.md 中标注该 issue
+2. **先回写 plan**：定位 plan 中需要修订的段落，直接修改 plan 文件
+3. **通知 executor**：在 executor prompt 中明确指出 plan 已修订的部分，要求 executor 按新 plan 调整下游
+4. **验证**：下轮 reviewer 审查时，确认 plan 修订是否被正确引用
+
+### 漂移检测（对应职责 #6）
+
+1. **频率**：每 5 轮（配置参数 `plan_drift_check_interval`）或触 Type O 时执行
+2. **方法**：将当前 plan 与初版 plan 做 diff，识别"新增/删除/改写"的段落
+3. **报告用户**：列出漂移点，问用户"这些变更是否符合你的本意？"
+4. **严重漂移**：若 plan 已面目全非，建议用户重新审视是否需要重启收敛
+
+### 预算追踪（对应职责 #7）
+
+1. **粒度**：以 outer loop 轮次为单位追踪（当前轮 / max_outer_loops）
+2. **预警**：达 70% 轮次预算时在 _orchestrator-state.md Compact Recovery Notes 中记录
+3. **触顶**：达 max_outer_loops 时不自行收敛，向用户展示阻断趋势，问用户是否续费
+4. **记录**：retrospective 中分析预算消耗是否合理
+
+### Rubrics 维度选择（对应职责 #12）
+
+1. **默认规则**：按 rubrics.md 选用规则表（Plan=3维度/代码=4维度/UI=5维度）
+2. **写入 contract**：选定的维度写入 contract.md 的 rubric_dimensions 字段
+3. **跳过合同谈判时**：在 _orchestrator-state.md 中记录选定的维度，在 reviewer prompt 中注入
+4. **Fallback**：若收敛对象不明确属于三类（如混合型文档+代码），取并集（如 Plan+代码 = Correctness+Completeness+Consistency+Maintainability）
+5. **扩展条件**：若 reviewer 连续 2 轮标 `rubric_gap: true`，说明维度库不够，向用户建议扩展维度并在 contract 中追加
+
+### 收敛后修订处理（对应职责 #14）
+
+当收敛完成后用户提供外部输入时：
+
+1. **判断实质性**：输入是否引入新维度、动摇核心判断、或修正遗漏事实？措辞微调不触发。
+2. **重新激活**：将 `done/<slug>/` 移回 `active/<slug>/`，在 `_orchestrator-state.md` 中记录修订触发。
+3. **修订执行**：Executor 根据外部输入修改产物，attempts.md 追加 entry 并标注 `source: user_external_input`。
+4. **独立审查**：Spawn fresh Reviewer 审查修订后的**完整产物**（不只看新增部分）。Reviewr prompt 中应包含：产物全文 + 之前的 round log + 用户的原始外部输入。
+5. **归档**：通过后更新 retrospective（追加 §11 收敛后修订记录），重新移至 `done/`。
+
+**关键原则**：用户外部输入的价值在于提供 Executor 和 Reviewer 都缺少的外部视角。不要试图将用户的输入"翻译"成 Reviewer 能理解的格式——将用户的原始输入直接传入 Reviewer prompt，让 Reviewer 独立判断。
