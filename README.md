@@ -53,5 +53,6 @@ converge/
     ├── executor-prompt.md         # Executor prompt template + anti-pattern defenses
     ├── rubrics.md                 # Scoring dimensions for subjective quality
     ├── state-schema.md            # Cross-round state persistence schema
-    └── testing-toolbox.md         # External verification tools (lint, tests, hooks)
+    ├── testing-toolbox.md         # External verification tools (lint, tests, hooks)
+    └── document-audit.md           # Document consistency audit (doc drift detection)
 ```
