@@ -1,6 +1,6 @@
 # 文档一致性审计
 
-> converge 的文档层验证模式。当 init-agent-docs 创建的文档体系随着时间漂移时，用 Reviewer→Executor 的对抗写回循环检测并**自动修复**文档偏差，而非仅报告。
+> converge 的文档层验证模式。当项目的文档体系（如 AGENTS.md、STRUCTURE.md、docs/ 层级）随着时间漂移时，用 Reviewer→Executor 的对抗写回循环检测并**自动修复**文档偏差，而非仅报告。
 
 ## 定位
 
