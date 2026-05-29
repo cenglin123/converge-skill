@@ -22,6 +22,14 @@ Round 0 **不计入** Round 计数预算（max_outer_loops），但 token 消耗
 2. Reviewer 挑战
    Orchestrator spawn Reviewer（独立 context），给出同一对象 + plan + Executor 的合同草案
    → Reviewer 逐条审查：断言是否充分？是否过弱？提出补充/加强建议
+   
+   **身份一致性审查（必做）**：
+   除断言审查外，Reviewer 必须验证：
+   - **身份声明**：合同中的产物名称和描述，与实际 plan/代码/文档是否一致？
+   - **边界诚实**：合同声称的适用范围是否被实际实现支持？是否存在虚假通用性？
+   - **数据纯度**：产物是否携带了项目特定的业务数据或环境硬编码？
+   
+   若不一致 → 标 `contract_amendment_required: true`，要求 Executor 在合同中修正身份声明和适用范围。
 
 3. 合同定稿
    Orchestrator 将 Reviewer 挑战反馈交给 Executor

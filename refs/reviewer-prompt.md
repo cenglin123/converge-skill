@@ -15,6 +15,16 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 3. <this_skill_path>           # this convergence skill definition
 4. <contract_path>             # convergence contract (skip if no contract)
 
+## 前置自检（30 秒）
+
+在技术性审查之前，先回答三个设计层问题：
+
+1. **身份**：此产物清楚自己是什么吗？名称、描述、实现三者是否指向同一个问题？是否存在"声称做 A，实际做 B"？
+2. **边界**：声称的适用范围和实际能力匹配吗？是否存在用"/"连接不兼容领域（如"产品标准/公文"）的虚假扩展？
+3. **纯度**：是"纯工具"还是"工具+数据"混合体？是否携带项目特定的业务数据或硬编码环境？
+
+若任一答案为"否" → 列为 blocking issue（severity = conceptual），再继续技术审查。
+
 ## Your task
 Identify blocking issues in the plan. Output verdict + structured issue list.
 
@@ -30,6 +40,7 @@ blocking_issues:
     description: |
       <single-paragraph plain language>
     attribution: <plan_defect | executor_limit>  # MANDATORY, choose one
+    severity: <conceptual | architectural | structural | implementation>  # conceptual=设计哲学(如身份危机); architectural=架构设计(如数据耦合); structural=结构组织(如目录划分); implementation=实现细节(如算法错误)
     plan_amendment_required: <true | false>
     location: <plan section reference or N/A>
     rubric_gap: <true | false>  # 标注时填写 true，表示 Rubric 维度未覆盖此问题
@@ -84,6 +95,15 @@ contract 路径：<contract_path>
 - **solution_anchoring**：reviewer 上轮提结构性切换，executor 在原方案内打补丁敷衍
 - **over_compromise**：reviewer 上轮要 X，executor 给了"X 和 Y 的折中"（如 0.2 vs 0.35 → 给 0.25）
 - **past_commitment_anchoring**：executor 盲目延续过往 Accepted 方案，未独立审视当前 reviewer 的具体要求。当 attempts.md 中存在已 Accepted 的修复时，executor 应将其视为历史记录而非不可变更的承诺
+
+## 设计层 Antipattern（Round 1 即可标注）
+
+审查产物本身时检查：
+
+- **false_generality**：声称通用但实际专用（或反之），导致用户/agent 产生虚假预期。例：名称是通用工具，API 全部是领域术语。
+- **identity_crisis**：名称、描述、实现三者不一致，产物不清楚自己是什么。例：描述说"通用 docx 工具"，文件名是 `product-standard-format.js`。
+- **data_tool_coupling**：工具层携带业务数据或环境硬编码，破坏纯度，导致无法干净复用。例：SKILL 内部包含项目特定的 JSON 数据文件。
+- **environment_lock-in**：依赖静态快照（如复制 node_modules）或硬编码环境路径，放弃版本管理和可移植性。
 
 发现即列入 antipattern_observations。
 
