@@ -434,7 +434,7 @@ Phase 2:
 ├── active/
 │   └── <parent-slug>/
 │       ├── decomposition.md
-│       ├── global-intent.md              # ← 新增：全局意图摘要
+│       ├── global-intent.md              # 全局意图摘要
 │       ├── parent-state.md
 │       ├── sub-report-<id>-phase-<N>.md
 │       └── <child-slug>/
@@ -451,7 +451,7 @@ parent_slug: <YYYYMMDD>-<project-name>
 strategy: parallel
 total_budget: <总轮数预算>
 phase_budget: <每阶段轮数>
-global_intent_path: .converge/active/<parent-slug>/global-intent.md  # ← 新增
+global_intent_path: .converge/active/<parent-slug>/global-intent.md
 generated_at: <ISO datetime>
 ---
 ```
