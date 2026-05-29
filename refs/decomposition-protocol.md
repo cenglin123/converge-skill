@@ -27,9 +27,9 @@ Planner 在以下条件**同时满足**时启用层级模式：
 | 角色 | 位置 | 职责 |
 |------|------|------|
 | **Planner** | 主控 agent | 分解任务、划定边界、分配预算、分阶段管控、整合结果 |
-| **Orchestrator** | 子收敛 subagent | 对单个 scope 跑完整 converge 循环（Reviewer ↔ Executor） |
+| **Orchestrator** | 子收敛 scope 的逻辑主控；可由 Planner 集中调度或 delegated subagent 承担 | 对单个 scope 跑完整 converge 循环（Reviewer ↔ Executor） |
 
-Planner **不兼任**任何子收敛的 Orchestrator。这是硬约束——Planner 持有全局意图，不应被拉入局部修复细节。
+Planner **不兼任**任何子收敛的语义判定者。这是硬约束——Planner 持有全局意图，不应被拉入局部修复细节。若平台不保证 subagent 可以继续 spawn 后代 agent，则采用集中调度：Planner 负责调度各 scope 的 Reviewer / Executor / Worker，但不替它们审查或修复。
 
 ---
 
@@ -37,7 +37,7 @@ Planner **不兼任**任何子收敛的 Orchestrator。这是硬约束——Plan
 
 ### 为什么不能 fire-and-forget
 
-subagent 运行期间**无法与 Planner 通信**，只能跑完后返回结果。如果一次给满预算：
+子收敛运行期间通常**无法与 Planner 实时通信**，只能在阶段结束后返回结果。如果一次给满预算：
 
 - 看不见：某个子收敛在第 4 轮挣扎，Planner 不知道
 - 控不住：预算耗尽需要续费，但 subagent 无法中途请示
@@ -53,9 +53,11 @@ Phase 1 → 同步点 → Phase 2 → 同步点 → ... → 整合
 
 ```
 1. Planner 读取 parent-state.md
-2. 对每个 status = in_progress 的子收敛，构造 subagent prompt
-3. 同时 spawn 所有 in_progress 的 subagent
-4. 等待全部返回
+2. 对每个 status = in_progress 的子收敛，构造阶段任务
+3. 同时调度所有 in_progress 的子收敛：
+   - centralized mode：Planner 直接 spawn 对应 scope 的 Reviewer / Executor / Worker
+   - delegated mode：spawn 一个子收敛 subagent，由它在确认能力后内部运行 converge
+4. 等待全部阶段任务返回
 5. 读取每个子收敛的阶段汇报
 6. 更新 parent-state.md
 7. 在同步点做决策：
@@ -269,10 +271,12 @@ Planner 在 Phase 1 只 spawn 子#1 和子#3；子#1 converged 后，Phase 2 spa
 
 ## 子收敛 Prompt 模板
 
-Planner spawn 子收敛 subagent 时，构造如下 prompt：
+Planner 在 delegated mode 下 spawn 子收敛 subagent 时，构造如下 prompt。若使用 centralized mode，则 Planner 将同样的 Global Intent、scope、boundary assertions 注入该 scope 的 Reviewer / Executor / Worker prompt，而不是要求一个子 agent 自己继续 spawn：
 
 ```text
 You are an Orchestrator running a converge cycle for a sub-task.
+
+Before spawning descendants, confirm your environment exposes Spawn / Continue. If not, report `delegated_spawn_unavailable` and stop after writing the phase report; the parent Planner will continue this scope in centralized mode.
 
 ## Global Intent (残差连接 — 直接来自顶层 Planner，不经过中间层)
 
@@ -329,6 +333,7 @@ Write all converge state to: .converge/active/<child-slug>/
 3. Do NOT reference or rely on files outside your scope unless explicitly provided
 4. When done (converged or budget exhausted), write report
 5. If your local scope decisions conflict with Global Intent, prefer Global Intent and report the conflict
+6. If you changed files, list changed paths and include a diff summary. Do not assume other subagents can see your workspace automatically.
 
 ## Output
 
@@ -455,11 +460,11 @@ generated_at: <ISO datetime>
 
 ## 设计约束
 
-1. **两层是默认值，不是上限**。Planner → Orchestrator 两层适用于绝大多数项目。深层（3+）需要 Planner 在分解声明中 justify：
+1. **两层是默认值，不是上限**。Planner → child scope 两层适用于绝大多数项目。深层（3+）需要 Planner 在分解声明中 justify：
    - scope 粒度分析：为什么当前项目天然需要更细粒度的分解
    - 并行收益估算：深层并行节省的墙钟时间 > 额外协调开销
    - 无 justify 则默认两层
-2. **Planner 不改文件**。Planner 只做分解、追踪、整合，不直接修改任何被收敛对象。
+2. **Planner 不改被收敛对象**。Planner 可以写 `.converge/` 元数据、分解文件和状态文件；代码/文档主体改动由 Executor/Worker 完成，或在集成阶段明确委派执行。
 3. **子收敛之间不通信**。子收敛只与 Planner 通信（通过阶段汇报）。子收敛之间通过 boundary_assertions 和 decomposition.md 的"已知依赖"间接协调。
-4. **子收敛内部运行标准 converge**。不引入任何新的收敛机制——同样的 Reviewer prompt、Executor prompt、state 管理、合同谈判。
+4. **子收敛内部保持标准 converge 语义**。不引入任何新的收敛机制——同样的 Reviewer prompt、Executor prompt、state 管理、合同谈判；实现上可由 Planner 集中调度，也可在确认能力后由 delegated subagent 执行。
 5. **全局意图摘要必须注入所有层级**。这是残差连接的核心——每个 agent 都直接拿到顶层意图，不依赖中间层转述。

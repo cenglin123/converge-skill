@@ -283,17 +283,17 @@ Planner（主控）
   ├── 分解任务为 N 个独立 scope
   ├── 划定边界（boundary assertions）
   ├── 分配预算
-  ├── 并行 spawn 子收敛 subagent
+  ├── 并行调度子收敛 scope（集中调度优先）
   └── 分阶段管控 + 整合结果
 
-子收敛 subagent（各自充当 Orchestrator）
+子收敛 scope（逻辑上各自有 Orchestrator）
   ├── 读取 global-intent.md（残差连接，直接拿到顶层意图）
   ├── 独立运行完整 converge 循环（Reviewer ↔ Executor）
   ├── 受 boundary assertions 约束
   └── 每阶段汇报收敛状态
 ```
 
-**两层是默认值**。深层（3+）需要 Planner justify（scope 粒度分析 + 并行收益估算）。详见 `refs/decomposition-protocol.md`。
+**两层是默认值**。默认采用 Planner 集中调度：主控直接 spawn 各 scope 的 Reviewer / Executor / Worker，并把子收敛视为逻辑 scope，而不是假设子 agent 一定能继续 spawn 后代 agent。只有确认子 agent 环境也暴露 Spawn / Continue 能力时，才启用 delegated hierarchical mode（子收敛 subagent 自己充当 Orchestrator）。深层（3+）需要 Planner justify（scope 粒度分析 + 并行收益估算）。详见 `refs/decomposition-protocol.md`。
 
 ### 启用条件
 
@@ -315,9 +315,9 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 
 ### 关键约束
 
-- **Planner 不改文件**——只做分解、追踪、整合
+- **Planner 不改被收敛对象**——Planner 可以写 `.converge/` 元数据、分解文件和状态文件；代码/文档主体改动由 Executor/Worker 完成，或在集成阶段明确委派执行
 - **子收敛之间不通信**——通过 boundary assertions 和阶段汇报间接协调
-- **子收敛内部运行标准 converge**——不引入新机制
+- **子收敛内部运行标准 converge 语义**——无论集中调度还是 delegated mode，都使用同样的 Reviewer prompt、Executor prompt、state 管理和合同谈判
 
 ---
 
@@ -371,13 +371,27 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 
 ### A.3 codex (OpenAI Codex CLI)
 
+优先按能力探测适配。若当前 Codex 环境暴露 `multi_agent_v1`，使用原生多 agent adapter：
+
 | 能力 | 实现 |
 |------|------|
-| **Spawn** | 使用 Codex 的 task / sub-agent 机制；具体取决于版本 |
-| **Continue** | 取决于是否暴露 sub-agent 续命 API；不支持时降级同 A.2 |
-| **Identify** | 取决于版本 |
+| **Spawn** | `multi_agent_v1.spawn_agent`；Reviewer 使用 fresh self-contained prompt，Executor/Worker 必须明确 write scope |
+| **Continue** | `multi_agent_v1.send_input(target=<agent_id>)` |
+| **Wait** | `multi_agent_v1.wait_agent(targets=[...])` |
+| **Close** | `multi_agent_v1.close_agent(target=<agent_id>)`；角色完成后关闭，避免悬挂 agent |
+| **Identify** | 主会话即 Orchestrator；子 agent id 来自 Spawn 返回值 |
 
-**`/goal` 加速（v0.128.0+）**：Codex 的 `/goal` 与 Claude Code 的同名命令语义等价，但生命周期管理更完整（`/goal pause` / `/goal resume` / `/goal clear`），且 Goal 是线程级持久状态而非一次性设置。在 converge 场景下的用法和限制与 A.1 中 Claude Code `/goal` 的说明完全一致：可用于 Executor inner loop 和层级模式子收敛加速，不能替代独立 Reviewer。
+**Codex adapter 约束：**
+
+1. **显式授权**：只有用户明确请求 converge / subagent / delegation，或当前 skill invocation 本身就是显式收敛工作流时，才 spawn agent。
+2. **不默认嵌套 spawn**：不要假设 subagent 内部也能继续 spawn 后代 agent。层级模式优先采用主 Orchestrator 集中调度；只有确认子 agent 能力后才启用 delegated hierarchical mode。
+3. **文件可见性保守处理**：不要假设一个 subagent 的文件修改会自动对另一个 subagent 可见。Executor/Worker 返回时必须列出 changed paths、diff 或摘要；Orchestrator 先审查并集成，再把必要 diff/产物路径传给 Reviewer 验收。
+4. **模型继承优先**：不要设置 model override，除非用户明确指定模型，或 scope 有清晰的任务级理由。
+5. **关闭已完成 agent**：Reviewer/Executor/Worker 完成角色后调用 Close；若关闭失败，在 state 中记录原因。
+
+若未暴露 `multi_agent_v1` 但存在其他 Codex task/sub-agent 机制，则按该机制映射 Spawn / Continue / Wait；若 Continue 不可用，inner loop 降级同 A.2。若完全不支持 Spawn，按 A.4 降级。
+
+**`/goal` 加速（可选）**：Codex 的 `/goal` 可作为 Executor inner loop 或子收敛执行的加速器，但不是基础依赖，且不能替代独立 Reviewer。使用 `/goal` 时仍需通过 Spawn 获得 fresh reviewer 做对抗式审查，并在 retrospective 中记录 goal-assisted execution。
 
 ### A.4 通用降级策略
 
