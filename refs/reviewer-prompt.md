@@ -19,11 +19,11 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 
 在技术性审查之前，先回答三个设计层问题：
 
-1. **身份**：此产物清楚自己是什么吗？名称、描述、实现三者是否指向同一个问题？是否存在"声称做 A，实际做 B"？
-2. **边界**：声称的适用范围和实际能力匹配吗？是否存在用"/"连接不兼容领域（如"产品标准/公文"）的虚假扩展？
-3. **纯度**：是"纯工具"还是"工具+数据"混合体？是否携带项目特定的业务数据或硬编码环境？
+1. **产物身份自洽**：此产物清楚自己是什么吗？名称、描述、实现三者是否指向同一个问题？是否存在"声称做 A，实际做 B"？（注意：此处检查产物内部一致性，与 Round 0 的合同身份对齐面向不同对象）
+2. **产物边界诚实**：声称的适用范围和实际能力匹配吗？是否存在用"/"连接不兼容领域（如"产品标准/公文"）的虚假扩展？
+3. **产物数据纯度**：是"纯工具"还是"工具+数据"混合体？是否携带项目特定的业务数据或硬编码环境？
 
-若任一答案为"否" → 列为 blocking issue（severity = conceptual），再继续技术审查。
+若任一答案为"否" → 列为 blocking issue（severity = conceptual），再继续技术审查。若 Executor 在后续轮次提供了令人信服的证据证明 Reviewer 的前置自检分类有误，Reviewer 应重新评估并可降级该 issue。Orchestrator 应将此类反转标记为 Type F（Flip），在 attempts.md 中记录反转理由。
 
 ## Your task
 Identify blocking issues in the plan. Output verdict + structured issue list.
@@ -152,6 +152,72 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 | `<plan_path>` | 目标产物的文件路径 | `docs/plans/active/my-plan.md` |
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
+
+---
+
+## 门控审查模式（L2 Gate Review）
+
+> 当 converge 作为 Dynamic Workflows 质量门控运行时，L2 关卡使用本模式。与标准审查的关键区别：输出 `gate_findings`（参谋团报告）而非 `blocking_issues`（阻断清单）。
+
+### Prompt 模板
+
+```text
+You are a gate reviewer in a Dynamic Workflows pipeline. This is a single-round advisory review — you are NOT an approver and your findings do NOT block execution.
+
+## Required reading
+1. Phase output: <phase_artifact_path>          # 当前阶段的中间产物
+2. Integrator summary: <integrator_summary>       # 收口模型的综合判断
+3. Gate protocol: <quality-gate.md path>          # 门控协议
+
+## Your role
+
+你是参谋团，不是审批者。你的任务是让 Pipeline Orchestrator 看到自己可能忽略的风险点、遗漏假设或矛盾信号。你的 findings 不会被直接执行——编排器根据自己的判断决定如何处理。
+
+## 审查维度
+
+1. **方向性**：收口模型的综合判断是否遗漏了关键方向？是否有其他可能的解读？
+2. **一致性**：当前阶段产物与之前的阶段输出是否存在矛盾或漂移？
+3. **边界**：是否有未覆盖的边缘情况或未验证的假设？
+4. **风险**：基于当前产物，后续阶段可能遇到什么风险？
+
+## Output format
+
+```yaml
+gate_findings:
+  - id: N
+    severity: critical_gap  # info | risk | critical_gap
+    finding: |
+      <发现的具体内容——不是"写得不好"，而是"这里有一个你没有考虑到的点">
+    evidence: "<引用 phase 产物中的具体内容>"
+    suggestion: "<建议的处理方向，非强制，编排器可选择如何处置>"
+```
+
+**severity 使用指南：**
+- `info`：值得注意但不影响安全性的观察。编排器记录即可。
+- `risk`：如果不处理可能影响后续阶段质量。编排器应向用户报警或调减后续阶段预算。
+- `critical_gap`：方向性、结构性或安全性方面的根本缺陷。编排器应触发完整的 converge 审查。
+
+**你是参谋团，不是审批者。你的价值不在于"判断对不对"，而在于"看到别人看不到的东西"。**
+```
+
+### 与标准审查的差异
+
+| | 标准审查 | 门控审查 |
+|---|---|---|
+| 输出格式 | `blocking_issues` | `gate_findings` |
+| 严重度体系 | conceptual/architectural/structural/implementation | info/risk/critical_gap |
+| 对流程的影响 | 阻断后续执行 | 标记给编排器参考（不阻断） |
+| Executor 修复循环 | 有（多轮修复） | 无（固定单轮） |
+| 启动方式 | 产物的每个 Round | 仅在 L1 warn 或手动触发时 |
+
+### gate_findings → 标准 converge handoff
+
+当 `severity = critical_gap` 触发完整 converge 审查时：
+
+1. 编排器将 gate_findings 原文作为标准 Round 1 Reviewer 的**附加必读材料**传入，而非替代物
+2. 标准 Reviewer **必须独立重新验证**每个 gate finding——不接受 gate Reviewer 的结论，只将其作为"值得检查的方向"
+3. 标准 Reviewer 用自己的 `blocking_issues` 格式重新输出——gate severity 和标准 severity 是两套独立体系，不做自动映射
+4. 若标准 Reviewer 独立确认了某个 gate finding → 正常 `blocking_issue`（severity = standard scale）。若标准 Reviewer 认为不成立 → 在 suggestion_issues 中标注 `gate_finding_dismissed` 并说明理由
 | `<contract_path>` | contract.md 路径（可选） | `.converge/active/20260520-my-plan/contract.md` |
 | `<rubric_dimensions>` | 评分维度（由 orchestrator 注入） | `Correctness,Completeness,Consistency` |
 | `<test_command>` | 测试命令（仅代码项目） | `npm test` / `pytest` |

@@ -185,6 +185,9 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 12. **Rubrics 维度选择** — 根据收敛对象类型从维度库中选取，写入 contract.md
 13. **contract_amendment_required** — 先回写 contract.md 本体，再让 executor 按新 contract 调整。contract 演进导致的矛盾不计入 Type O
 14. **收敛后修订评估** — 用户在收敛后提供外部输入时，判断输入是否构成实质性挑战。判断标准：是否引入新的分析维度、是否动摇已收敛的核心判断、是否修正了被遗漏的关键事实。微调措辞不触发修订。触发后在 retrospective 中记录修订来源和结论变化
+15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python l1_gate.py`），记录 pass/warn 结果
+16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
+17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
 
 ---
 
@@ -202,7 +205,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | "这个 issue 和上轮那个本质一样，我合并处理" | Type R 等价标注需要**记录理由**，不是 silently merge |
 | "用户没回复，我默认他同意继续" | b/c 类收敛和预算软停都需要**显式**用户确认 |
 | "降级了但不用告诉用户吧，反正是内部细节" | 降级模式下结论可信度降低，**用户有权知道**。必须告知用户当前处于降级模式及影响 |
-| "这次改动很简单，不用 spawn executor，我自己改就行" | Planner 亲自执行 = 破坏角色分离。简单任务也不是例外——边界一旦切开就会蔓延。**无论任务大小，Planner 不执行。** |
+| "这次改动很简单，不用 spawn executor，我自己改就行" | Planner 亲自执行 = 破坏角色分离。简单任务也不是例外——边界一旦切开就会蔓延。**无论任务大小，Planner 不执行。**例外：若 Spawn 完全不可用，按附录 A.4 降级为 orchestrator_self，但**必须**标注降级模式并告知用户。 |
 
 > 执行上述语义判定时，参考 `refs/orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
 
@@ -238,7 +241,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | `converge_dir` | `.converge/` | 收敛目录路径。可改为 `.meta/.converge/` 等自定义路径 |
 | `gate_l1_interval` | 1 | 门控 L1 每 N 个 phase 触发 |
 | `gate_l2_mode` | `signal` | 门控 L2 启动方式：`always` / `signal` / `adaptive` |
-| `gate_l2_signal_threshold` | `warn` | 信号触发条件 |
+| `gate_l2_signal_threshold` | `warn` | 信号触发条件（当前仅支持 `warn`；`info`/`critical` 级别预留给后续 L1 信号扩展） |
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 
 ---
