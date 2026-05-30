@@ -45,6 +45,8 @@ Oscillation detection:
 ```
 converge/
 ├── SKILL.md                  # Entry point: orchestrator workflow + abstract capability layer
+├── scripts/
+│   └── l1_gate.py            # L1 signal detection (non-LLM, ~50 lines)
 └── refs/
     ├── contract-negotiation.md    # Round 0: acceptance criteria negotiation
     ├── decomposition-protocol.md  # Breaking complex artifacts into reviewable units
