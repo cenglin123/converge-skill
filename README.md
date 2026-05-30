@@ -54,4 +54,4 @@ converge/
     ├── rubrics.md                 # Scoring dimensions for subjective quality
     ├── state-schema.md            # Cross-round state persistence schema
     ├── testing-toolbox.md         # External verification tools (lint, tests, hooks)
-```
+    └── quality-gate.md            # Quality gate protocol for Dynamic Workflows integration

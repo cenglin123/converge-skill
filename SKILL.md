@@ -26,7 +26,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 - **前置条件**：有可审查的产物（plan 文件 / 代码项目 / 文档等），且产物已完成初稿
 - **后继条件**：收敛达成后，产物可安全进入下一阶段（执行、提交、部署）
 - **不适合**：单次快速审查、日常代码 review、lint 级别的检查——这些用更轻量的 review 技能
-- **可组合**：如果存在完整的开发工作流型 SKILL（如 brainstorming → planning → execution 的链式工作流），converge 可以作为其中的质量门环节插入——接在 planning 之后、execution 之前，确保 plan 在被执行前经过独立交叉验证
+- **可组合**：如果存在完整的开发工作流型 SKILL（如 Dynamic Workflows 的 pipeline/parallel 编排），converge 可以作为其中的**质量门控**插入——在 phase 交接处插入独立的"方向性审视"，让指挥部的决策在行动前暴露盲点。门控分两级：L1 轻量信号检测（非 LLM 脚本，零 token 成本）和 L2 单轮对抗审查（按需启动）。详见 `refs/quality-gate.md`
 
 ---
 
@@ -235,6 +235,10 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
 | `plan_drift_check_interval` | 5 | plan 漂移检测间隔（轮） |
 | `converge_dir` | `.converge/` | 收敛目录路径。可改为 `.meta/.converge/` 等自定义路径 |
+| `gate_l1_interval` | 1 | 门控 L1 每 N 个 phase 触发 |
+| `gate_l2_mode` | `signal` | 门控 L2 启动方式：`always` / `signal` / `adaptive` |
+| `gate_l2_signal_threshold` | `warn` | 信号触发条件 |
+| `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 
 ---
 
@@ -335,6 +339,7 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | Rubrics 维度库、评分标准、与 verdict 的关系 | `refs/rubrics.md` |
 | 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `refs/decomposition-protocol.md` |
 | 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `refs/testing-toolbox.md` |
+| 在 Dynamic Workflows 中插入质量门控：两级门检协议 + 触发决策 + 预算统筹 | `refs/quality-gate.md` |
 
 ---
 
