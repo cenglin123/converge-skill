@@ -1,59 +1,60 @@
 # converge — 双 Agent 迭代收敛器
 
-Dual-agent iterative convergence for AI-generated artifacts. Instead of scripted workflows, converge uses **adversarial review cycles** between independent agents to drive quality through iteration — until zero blocking issues remain.
+双 Agent 迭代收敛，专为 AI 生成产物设计。不同于脚本化工作流，converge 使用独立 Agent 之间的**对抗式审查循环**，通过迭代驱动质量提升——直到零阻塞性问题残留。
 
-## Philosophy
+## 设计哲学
 
-**Don't tell the model how to walk. Tell it what "arrived" means, give it test tools, and let it find the path.**
+**不要告诉模型该怎么走。告诉它"到达"意味着什么，给它验证工具，让它自己找到路径。**
 
-Converge follows the Bitter Lesson: manually injected workflow structures (spec, scripts, hardcoded roles) decay as models improve. Instead, it defines **acceptance criteria** (contract), **verification tools** (lint, tests), and **adversarial feedback** (independent reviewer) — then lets the model explore until it passes.
+Converge 遵循"苦涩教训"（Bitter Lesson）：手动注入的工作流结构（规范、脚本、硬编码角色）会随着模型能力的提升而逐渐失效。取而代之的是，它定义**验收标准**（契约）、**验证工具**（lint、测试）和**对抗式反馈**（独立审查者）——然后让模型自主探索，直到通过。
 
-## How it works
+## 工作原理
 
 ```
-Round 0: Contract negotiation
-  Executor proposes acceptance criteria → Reviewer challenges → final contract
+第 0 轮：契约协商
+  执行者提出验收标准 → 审查者质疑 → 形成最终契约
 
-Round 1+: Adversarial convergence
-  Reviewer (fresh context) audits artifact → Executor fixes → repeat
+第 1 轮起：对抗收敛
+  审查者（全新上下文）审计产物 → 执行者修复 → 重复
 
-Oscillation detection:
-  Type O (overturn), Type R (repeat), Type F (flip), Type S (swing)
-  → hard stop or escalate to user after threshold
+振荡检测：
+  O 型（推翻）、R 型（重复）、F 型（翻转）、S 型（摆动）
+  → 达到阈值后强制停止或上报用户
 ```
 
-| Role | Actor | Constraint |
-|------|-------|------------|
-| **Orchestrator** | Host agent | Manages loop, detects oscillation, tracks state |
-| **Reviewer** | Fresh sub-agent each round | Independent context, adversarial stance |
-| **Executor** | Sub-agent | Fixes issues, records attempts in cross-round log |
+| 角色 | 执行者 | 约束 |
+|------|--------|------|
+| **编排者** | 宿主 Agent | 管理循环、检测振荡、跟踪状态 |
+| **审查者** | 每轮全新子 Agent | 独立上下文，对抗姿态 |
+| **执行者** | 子 Agent | 修复问题，在跨轮日志中记录尝试 |
 
-## When to use
+## 适用场景
 
-- Plans, specs, or code artifacts that need independent cross-validation before execution
-- Complex artifacts where a single review pass isn't sufficient
-- Quality-critical deliverables where you want **zero blocking issues**
+- 计划、规范或代码产物，在执行前需要独立交叉验证
+- 复杂产物，单次审查不足以保障质量
+- 质量关键型交付物，要求**零阻塞性问题**
 
-## Not for
+## 不适用场景
 
-- Single-pass quick reviews (use a lighter skill)
-- Lint-level checks (use actual lint tools)
-- Tasks simple enough to need no adversarial verification
+- 单次快速审查（使用更轻量的 skill）
+- Lint 级别的检查（使用实际的 lint 工具）
+- 足够简单、不需要对抗验证的任务
 
-## Structure
+## 目录结构
 
 ```
 converge/
-├── SKILL.md                  # Entry point: orchestrator workflow + abstract capability layer
+├── SKILL.md                  # 入口：编排者工作流 + 抽象能力层
 ├── scripts/
-│   └── l1_gate.py            # L1 signal detection (non-LLM, ~50 lines)
+│   └── l1_gate.py            # L1 信号检测（非 LLM，约 50 行）
 └── refs/
-    ├── contract-negotiation.md    # Round 0: acceptance criteria negotiation
-    ├── decomposition-protocol.md  # Breaking complex artifacts into reviewable units
-    ├── orchestrator-guide.md      # Loop management, oscillation detection, state tracking
-    ├── reviewer-prompt.md         # Reviewer prompt template + hard rules
-    ├── executor-prompt.md         # Executor prompt template + anti-pattern defenses
-    ├── rubrics.md                 # Scoring dimensions for subjective quality
-    ├── state-schema.md            # Cross-round state persistence schema
-    ├── testing-toolbox.md         # External verification tools (lint, tests, hooks)
-    └── quality-gate.md            # Quality gate protocol for Dynamic Workflows integration
+    ├── contract-negotiation.md    # 第 0 轮：验收标准协商
+    ├── decomposition-protocol.md  # 将复杂产物拆分为可审查单元
+    ├── orchestrator-guide.md      # 循环管理、振荡检测、状态跟踪
+    ├── reviewer-prompt.md         # 审查者提示模板 + 硬性规则
+    ├── executor-prompt.md         # 执行者提示模板 + 反模式防御
+    ├── rubrics.md                 # 主观质量评分维度
+    ├── state-schema.md            # 跨轮状态持久化 schema
+    ├── testing-toolbox.md         # 外部验证工具（lint、测试、hooks）
+    └── quality-gate.md            # 质量门控协议，用于 Dynamic Workflows 集成
+```
