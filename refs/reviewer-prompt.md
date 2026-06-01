@@ -46,9 +46,9 @@ blocking_issues:
     rubric_gap: <true | false>  # 标注时填写 true，表示 Rubric 维度未覆盖此问题
 suggestion_issues:  # non-blocking, will NOT block convergence
   - description: ...
-antipattern_observations:  # Round 1 时必填空列表 []; Round ≥ 2 时按实际发现填写
+antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
   - round_referenced: 3
-    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | false_generality | identity_crisis | data_tool_coupling | environment_lock-in>
+    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | orchestrator_self_review | silent_merge>
     evidence: |
       <quote from attempts.md>
 rubric_scores:              # 仅当 contract 中定义了维度时填写
@@ -152,6 +152,10 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
 | `<antipatterns_path>` | 反模式注册表路径 | `.agents/skills/converge/refs/antipatterns.md` |
+| `<contract_path>` | contract.md 路径（可选） | `.converge/active/20260520-my-plan/contract.md` |
+| `<rubric_dimensions>` | 评分维度（由 orchestrator 注入） | `Correctness,Completeness,Consistency` |
+| `<test_command>` | 测试命令（仅代码项目） | `npm test` / `pytest` |
+| `<lint_command>` | lint 命令（仅代码项目，可选） | `npm run lint` / 留空跳过 |
 
 ---
 
@@ -218,7 +222,3 @@ gate_findings:
 2. 标准 Reviewer **必须独立重新验证**每个 gate finding——不接受 gate Reviewer 的结论，只将其作为"值得检查的方向"
 3. 标准 Reviewer 用自己的 `blocking_issues` 格式重新输出——gate severity 和标准 severity 是两套独立体系，不做自动映射
 4. 若标准 Reviewer 独立确认了某个 gate finding → 正常 `blocking_issue`（severity = standard scale）。若标准 Reviewer 认为不成立 → 在 suggestion_issues 中标注 `gate_finding_dismissed` 并说明理由
-| `<contract_path>` | contract.md 路径（可选） | `.converge/active/20260520-my-plan/contract.md` |
-| `<rubric_dimensions>` | 评分维度（由 orchestrator 注入） | `Correctness,Completeness,Consistency` |
-| `<test_command>` | 测试命令（仅代码项目） | `npm test` / `pytest` |
-| `<lint_command>` | lint 命令（仅代码项目，可选） | `npm run lint` / 留空跳过 |

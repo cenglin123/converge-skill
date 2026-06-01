@@ -80,7 +80,7 @@ converge/
 **改动摘要**：
 - 新建 `refs/antipatterns.md`：10 个具名反模式（executor ×4、design ×4、orchestrator ×2），带 `status` / `layer` / `zero_streak` 字段，作为 compiled 产物
 - `SKILL.md`：Red Flags 重组为"宪法级约束"小节（7 条不可让渡底线 + 修宪门槛声明）；原 #1/#6 迁入 antipatterns.md
-- `refs/reviewer-prompt.md`：硬编码 antipattern 清单替换为 `{antipatterns_active}` 动态注入占位符
+- `refs/reviewer-prompt.md`：硬编码 antipattern 清单替换为 `{antipatterns_active_executor}` / `{antipatterns_active_design}` 动态注入占位符
 - `refs/state-schema.md`：retrospective §3 "类型"列加硬约束（必须用 antipatterns.md id 或 `new:` 前缀）
 - `refs/orchestrator-guide.md`：Spawn 前自检清单加 `<antipatterns_path>`
 
