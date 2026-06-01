@@ -9,7 +9,7 @@
 Spawn reviewer 或 executor 前，逐项确认：
 
 - [ ] **prompt 完全自足？** 一个没读过任何历史文件的人，拿到这份 prompt 能否理解任务？
-- [ ] **所有 `<placeholder>` 已替换为具体路径？** 检查 `<plan_path>`、`<attempts_md_path>`、`<round_N_reviewer_output_path>`、`<contract_path>` 等
+- [ ] **所有 `<placeholder>` 已替换为具体路径？** 检查 `<plan_path>`、`<attempts_md_path>`、`<antipatterns_path>`、`<round_N_reviewer_output_path>`、`<contract_path>` 等
 - [ ] **若存在 contract.md**：prompt 中已包含 contract 路径和 Rubrics 维度？
 - [ ] **未暗示期望结果？**
   - ❌ "请确认 plan 已经可以执行"

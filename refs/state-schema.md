@@ -142,6 +142,12 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 | Round | 类型 | 对象 | 触发结果 |
 |-------|------|------|---------|
 
+> **硬约束**：`类型` 列必须填 `refs/antipatterns.md` 中的 `id`（逐字一致）。
+> 若发现清单外的新反模式，填 `new:<一句话描述>`，提示人工评估是否新增条目。
+> 此约束确保 retrospective 可被 `distill_antipatterns.py` 可靠解析——
+> id 与 reviewer-prompt.md `antipattern_observations.type` 枚举、
+> antipatterns.md `id` 三处统一。
+
 ## 4. Executor 路径依赖评估
 （反折中 / 方案锚定 / 最小补丁 实际触发情况）
 

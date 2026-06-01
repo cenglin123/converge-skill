@@ -67,5 +67,24 @@ converge/
     ├── rubrics.md                 # 主观质量评分维度库
     ├── state-schema.md            # 跨轮状态持久化 schema
     ├── testing-toolbox.md         # 外部验证工具（lint、测试、hooks）
-    └── quality-gate.md            # 质量门控协议，用于 Dynamic Workflows 集成
+    ├── quality-gate.md            # 质量门控协议，用于 Dynamic Workflows 集成
+    └── antipatterns.md            # 反模式注册表（compiled 产物，status 由 distill 维护）
 ```
+
+## 最近变更
+
+### 2026-06-01 · 机制/宪法/反模式三层分离
+
+**宪法依据**：Bitter Lesson（元原则 III）——将"命中频率会变化的领域知识"（反模式）从"能随模型变强的机制"（三角色、对抗、契约）和"不可让渡的构成性约束"（宪法级）中物理分离。
+
+**改动摘要**：
+- 新建 `refs/antipatterns.md`：10 个具名反模式（executor ×4、design ×4、orchestrator ×2），带 `status` / `layer` / `zero_streak` 字段，作为 compiled 产物
+- `SKILL.md`：Red Flags 重组为"宪法级约束"小节（7 条不可让渡底线 + 修宪门槛声明）；原 #1/#6 迁入 antipatterns.md
+- `refs/reviewer-prompt.md`：硬编码 antipattern 清单替换为 `{antipatterns_active}` 动态注入占位符
+- `refs/state-schema.md`：retrospective §3 "类型"列加硬约束（必须用 antipatterns.md id 或 `new:` 前缀）
+- `refs/orchestrator-guide.md`：Spawn 前自检清单加 `<antipatterns_path>`
+
+**评议历史**：
+- v1 提案 + 三方对抗评议（提案作者 / 知识库宪法 agent / 提案作者自评）
+- v2 终版（本次执行的依据）
+- `scripts/distill_antipatterns.py` 延后至 retrospective ≥ 10 时实现

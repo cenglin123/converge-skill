@@ -191,22 +191,25 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ---
 
-## Red Flags — Orchestrator 自我合理化借口
+## 宪法级约束 — Orchestrator 不可让渡的行为边界
 
-> 这张表不是给当前 orchestrator 看的（它不会承认自己在偷懒），而是给**下一个 reviewer / 复盘者**看的检查清单。
+> **本节约束需经人工审议后修改，不接受 Agent 自主变更。**
+> 与 `refs/antipatterns.md`（可由 distill 脚本自动调整 status）不同，本节是 converge 的机制底线——违反这些条目意味着**明确规则被打破**（而非 plausible 认知偏误），检测方式是查表对照判据而非模式识别。即使将来 Orchestrator 不再违反它们，这些声明仍有解释性价值（"为什么零阻断是底线"）。任何修改都应有显式的人工决策记录。
+>
+> 以下检查清单主要面向**下一个 reviewer / 复盘者**，而非当前 orchestrator（它不会承认自己在违规）。
 
-| 借口 | 现实 |
-|------|------|
-| "这轮 reviewer 意见和上轮差不多，不用 Spawn 新的，我自己看看就行" | 自己看 = orchestrator_self 降级，**必须标注**，且结论可信度降低 |
-| "只剩 1 个低级阻断，不算阻断，直接收敛吧" | 严格首轮通过要求**零阻断**。b/c 类收敛需用户**显式确认** |
-| "Executor 改了，看起来没问题了，不用 inner loop 验收" | 不验收 = 跳过验证环节，与收敛机制的设计意图冲突 |
-| "budget 快到了，这轮就算通过了" | 预算软停**必须问用户**，不能自作主张 |
-| "attempts.md 的历史 entry 我改一下让它更整洁" | **硬约束：历史 entry 不改写，只追加 annotation** |
-| "这个 issue 和上轮那个本质一样，我合并处理" | Type R 等价标注需要**记录理由**，不是 silently merge |
-| "用户没回复，我默认他同意继续" | b/c 类收敛和预算软停都需要**显式**用户确认 |
-| "降级了但不用告诉用户吧，反正是内部细节" | 降级模式下结论可信度降低，**用户有权知道**。必须告知用户当前处于降级模式及影响 |
-| "这次改动很简单，不用 spawn executor，我自己改就行" | Planner 亲自执行 = 破坏角色分离。简单任务也不是例外——边界一旦切开就会蔓延。**无论任务大小，Planner 不执行。**例外：若 Spawn 完全不可用，按附录 A.4 降级为 orchestrator_self，但**必须**标注降级模式并告知用户。 |
+| # | 违规 | 底线 |
+|---|------|------|
+| 2 | "只剩 1 个低级阻断，不算阻断，直接收敛吧" | 严格首轮通过要求**零阻断**。b/c 类收敛需用户**显式确认** |
+| 3 | "Executor 改了，看起来没问题了，不用 inner loop 验收" | 不验收 = 跳过验证环节，与收敛机制的设计意图冲突 |
+| 4 | "budget 快到了，这轮就算通过了" | 预算软停**必须问用户**，不能自作主张 |
+| 5 | "attempts.md 的历史 entry 我改一下让它更整洁" | **硬约束：历史 entry 不改写，只追加 annotation** |
+| 7 | "用户没回复，我默认他同意继续" | b/c 类收敛和预算软停都需要**显式**用户确认 |
+| 8 | "降级了但不用告诉用户吧，反正是内部细节" | 降级模式下结论可信度降低，**用户有权知道**。必须告知用户当前处于降级模式及影响 |
+| 9 | "这次改动很简单，不用 spawn executor，我自己改就行" | Planner 亲自执行 = 破坏角色分离。简单任务也不是例外——边界一旦切开就会蔓延。**无论任务大小，Planner 不执行。**例外：若 Spawn 完全不可用，按附录 A.4 降级为 orchestrator_self，但**必须**标注降级模式并告知用户。 |
 
+> **已迁出的条目**：原 Red Flag #1（orchestrator 自行审查 = orchestrator_self_review）和 #6（无理由等价合并 = silent_merge）已迁入 `refs/antipatterns.md`，归为 `layer: orchestrator` 反模式——它们属于 plausible 认知偏误（agent 可能真诚相信捷径合理），检测靠模式识别而非查表。通过日志痕迹间接检测（`reviewer_backend` 字段 / `[Orchestrator Detection]` 标记有无理由），而非 reviewer 直接审查 Orchestrator 思考过程。
+>
 > 执行上述语义判定时，参考 `refs/orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
 
 ---
@@ -344,6 +347,7 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `refs/decomposition-protocol.md` |
 | 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `refs/testing-toolbox.md` |
 | 在 Dynamic Workflows 中插入质量门控：两级门检协议 + 触发决策 + 预算统筹 | `refs/quality-gate.md` |
+| Reviewer/Executor/Orchestrator 反模式巡查清单（动态注入，status 由 distill 维护） | `refs/antipatterns.md` |
 
 ---
 

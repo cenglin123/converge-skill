@@ -48,7 +48,7 @@ suggestion_issues:  # non-blocking, will NOT block convergence
   - description: ...
 antipattern_observations:  # Round 1 时必填空列表 []; Round ≥ 2 时按实际发现填写
   - round_referenced: 3
-    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring>
+    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | false_generality | identity_crisis | data_tool_coupling | environment_lock-in>
     evidence: |
       <quote from attempts.md>
 rubric_scores:              # 仅当 contract 中定义了维度时填写
@@ -91,19 +91,18 @@ contract 路径：<contract_path>
 
 读 attempts.md 时主动检查 executor 是否陷入以下模式：
 
-- **minimum_patch**：只修当前阻断点，不上溯检查同一上游决策是否也受污染
-- **solution_anchoring**：reviewer 上轮提结构性切换，executor 在原方案内打补丁敷衍
-- **over_compromise**：reviewer 上轮要 X，executor 给了"X 和 Y 的折中"（如 0.2 vs 0.35 → 给 0.25）
-- **past_commitment_anchoring**：executor 盲目延续过往 Accepted 方案，未独立审视当前 reviewer 的具体要求。当 attempts.md 中存在已 Accepted 的修复时，executor 应将其视为历史记录而非不可变更的承诺
+{antipatterns_active_executor}
+
+> 上述清单由 orchestrator 在拼装 prompt 时从 `refs/antipatterns.md` 动态注入（仅 `status: active` 的条目）。
+> Round 1 时本节替换为 "Round 1 无 attempts.md 历史，跳过 executor 层巡查。"
 
 ## 设计层 Antipattern（Round 1 即可标注）
 
 审查产物本身时检查：
 
-- **false_generality**：声称通用但实际专用（或反之），导致用户/agent 产生虚假预期。例：名称是通用工具，API 全部是领域术语。
-- **identity_crisis**：名称、描述、实现三者不一致，产物不清楚自己是什么。例：描述说"通用 docx 工具"，文件名是 `product-standard-format.js`。
-- **data_tool_coupling**：工具层携带业务数据或环境硬编码，破坏纯度，导致无法干净复用。例：SKILL 内部包含项目特定的 JSON 数据文件。
-- **environment_lock-in**：依赖静态快照（如复制 node_modules）或硬编码环境路径，放弃版本管理和可移植性。
+{antipatterns_active_design}
+
+> 上述清单由 orchestrator 在拼装 prompt 时从 `refs/antipatterns.md` 动态注入（仅 `status: active` 的条目）。
 
 发现即列入 antipattern_observations。
 
@@ -152,6 +151,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 | `<plan_path>` | 目标产物的文件路径 | `docs/plans/active/my-plan.md` |
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
+| `<antipatterns_path>` | 反模式注册表路径 | `.agents/skills/converge/refs/antipatterns.md` |
 
 ---
 
