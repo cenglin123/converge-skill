@@ -61,7 +61,8 @@ Round 1+：对抗收敛
 converge/
 ├── SKILL.md                  # 入口：Orchestrator 工作流 + 抽象能力层
 ├── scripts/
-│   └── l1_gate.py            # L1 信号检测（非 LLM，零 token 成本）
+│   ├── l1_gate.py                 # L1 信号检测（非 LLM，零 token 成本）
+│   └── distill_antipatterns.py    # 反模式蒸馏器（全量编译 retrospective → status）
 └── refs/
     ├── contract-negotiation.md    # Round 0：合同谈判流程 + contract.md 格式
     ├── decomposition-protocol.md  # 层级式并行收敛：分解协议、分阶段管控
@@ -91,4 +92,4 @@ converge/
 **评议历史**：
 - v1 提案 + 三方对抗评议（提案作者 / 知识库宪法 agent / 提案作者自评）
 - v2 终版（本次执行的依据）
-- `scripts/distill_antipatterns.py` 延后至 retrospective ≥ 10 时实现
+- `scripts/distill_antipatterns.py` 已就位（全量编译 retrospective §3 → antipatterns.md status）。当前 retrospective < 10，dry-run 为观测模式；`--write` 在数据积累到衰减窗口后启用。
