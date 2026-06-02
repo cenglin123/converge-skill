@@ -30,9 +30,11 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 ---
 
-## 设计原则
+## ⚠️ 宪法级设计原则
 
-本 SKILL 的自身演化受两条宪法级原则约束——它们不是运行时规则（运行时规则见「宪法级约束」节），而是**本 SKILL 该长什么样、该包含什么**的设计判据：
+> 以下两条是本 SKILL 的最高判据。任何对 SKILL.md 或 refs/ 的修改，必须先通过这两条的自检（详见 `refs/orchestrator-guide.md` §〇 宪法自检），否则不考虑执行。
+
+本 SKILL 的自身演化受两条宪法级原则约束——它们不是运行时规则，而是**本 SKILL 该长什么样、该包含什么**的设计判据：
 
 | 原则 | 判据 | 应用实例 |
 |------|------|---------|
