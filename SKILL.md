@@ -277,14 +277,17 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ```text
 .converge/
+├── tmp/                          # 中间产物（draft、临时脚本、调试输出等）。每轮结束后清理
 ├── active/<slug>/              # 进行中的收敛对象
 │   ├── contract.md             # Round 0 合同终稿（可选）
 │   ├── round-N.md              # 每轮 reviewer 输出 + orchestrator 处理记录
 │   ├── attempts.md             # 跨轮 attempt log（含 overturn 链）
 │   └── _orchestrator-state.md  # 抗 compact / 抗 session 切换
-└── done/<slug>/                # 已收敛/已停止
-    ├── ... (上述所有文件)
-    └── retrospective.md        # 复盘（必填）
+├── done/<slug>/                # 已收敛/已停止
+│   ├── ... (上述所有文件)
+│   └── retrospective.md        # 复盘（必填）
+└── gate/<slug>/                # 门控产物（与 active/ 隔离）
+    └── gate-findings.md         # L2 Reviewer gate_findings 汇总
 ```
 
 > 格式规范见 `refs/state-schema.md`。slug 命名：`<YYYYMMDD>-<对象简述>`。

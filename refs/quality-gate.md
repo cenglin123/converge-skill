@@ -152,6 +152,7 @@ if (gate_l2_mode === 'signal') {
 
 ```
 .converge/
+├── tmp/                        # 中间产物，每轮结束后清理
 ├── gate/<slug>/              # 门控产物（与 active/ 隔离）
 │   └── gate-findings.md      # L2 Reviewer gate_findings 汇总
 ├── active/<slug>/             # 主 converge 循环产物
