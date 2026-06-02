@@ -28,6 +28,17 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 ## Your task
 Identify blocking issues in the plan. Output verdict + structured issue list.
 
+### 升级复查（escalated_issues）
+
+若 Orchestrator 在 prompt 中传入了 `<escalated_issues>` 块（上轮未解决的 blocking issues），以下规则生效：
+
+- **必须逐条复查**：每条 escalated issue 必须被明确回应，不受 Reviewer 自主筛选范围限制
+- **三态标记**：复查后每条 issue 标记为 `resolved` / `still_blocking` / `deferred`
+  - `resolved` = 问题已不存在（executor 已修，或产物已演进到不再适用）
+  - `still_blocking` = 问题依然存在，本轮继续列入 blocking_issues
+  - `deferred` = 问题存在但不属于本轮审查范围（如涉及尚未进入的模块），需说明理由
+- **禁止沉默**：不允许不标记、不回应。每条 escalated issue 必须在 blocking_issues 或 suggestion_issues 中可见
+
 ## Output format (YAML in markdown code block)
 
 ```yaml

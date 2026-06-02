@@ -18,6 +18,7 @@ Spawn reviewer 或 executor 前，逐项确认：
   - ✅ 不附加任何评价性前缀
 - [ ] **必读文件路径有效？** 确认 `<plan_path>`、`<attempts_md_path>` 等所指文件确实存在
 - [ ] **若收敛对象是代码项目**：查阅 `testing-toolbox.md`，确定 `<test_command>` 和 `<lint_command>` 的注入值。优先使用项目声明的入口（Makefile / package.json scripts / CI 配置），其次按技术栈信号查速查表。检测不到测试框架时两个占位符都留空
+- [ ] **升级复查（Round ≥ 2）**：读上一轮 attempts.md，提取 verdict ≠ Accepted 的 blocking issues，汇编为 `<escalated_issues>` 块注入 Reviewer prompt（含原 issue id、原 reviewer 描述原文、当前状态）。参见 reviewer-prompt.md§升级复查
 - [ ] **instance_id 已记录？** Spawn 返回后立即写入 round-N.md frontmatter 和 `_orchestrator-state.md`
 
 ---
