@@ -73,6 +73,7 @@ converge/
     ├── state-schema.md            # 跨轮状态持久化 schema
     ├── testing-toolbox.md         # 外部验证工具（lint、测试、hooks）
     ├── quality-gate.md            # 质量门控协议，用于 Dynamic Workflows 集成
+    ├── design-review-prompt.md    # 收敛后设计审查：7 维骨架，单轮咨询式
     └── antipatterns.md            # 反模式注册表（compiled 产物，status 由 distill 维护）
 ```
 

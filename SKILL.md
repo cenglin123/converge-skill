@@ -363,6 +363,7 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | 层级式并行收敛：分解协议、分阶段管控、边界仲裁 | `refs/decomposition-protocol.md` |
 | 代码项目测试/lint 命令速查、发现流程、CI 信号源 | `refs/testing-toolbox.md` |
 | 在 Dynamic Workflows 中插入质量门控：两级门检协议 + 触发决策 + 预算统筹 | `refs/quality-gate.md` |
+| 收敛后设计审查：7 维骨架、单轮咨询式、不给阻断权重 | `refs/design-review-prompt.md` |
 | Reviewer/Executor/Orchestrator 反模式巡查清单（动态注入，status 由 distill 维护） | `refs/antipatterns.md` |
 
 ---

@@ -47,6 +47,15 @@
 | 配置文件 tweak | ✅ 有 schema/lint | 单文件 | 直接改 |
 | prose 类产物 | ❌ | 任意 | **converge** |
 
+### 收敛后设计审查
+
+converge 主循环收敛后，若产物满足以下任一条件，可选触发**设计审查**（`refs/design-review-prompt.md`，单轮咨询式，不给阻断权重）：
+
+- 产物涉及 ≥ 3 个独立模块/组件，或引入新目录结构/命名约定/跨组件接口，或定义了新工作区框架
+- 用户显式请求设计审查
+
+产出 `design-review.md`（写入 `.converge/done/<slug>/`），不进入 blocking→repair 管道。
+
 ---
 
 ## 一、每次 Spawn 前自检
