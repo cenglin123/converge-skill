@@ -119,6 +119,8 @@ D11=a 是默认目标。b/c 需用户显式确认。
 2. 事中再看规模——单 scope = 单层收敛，多独立 scope = 层级收敛
 3. 如果不确定，从单层开始——层级收敛只在明确需要时启用
 
+> **收敛后设计审查**（`refs/design-review-prompt.md`）：事后、不写回、咨询式——时态属于审计，但判断维度不同（7 维 vs P0-P3对齐率），是审计的一个可选子模式。在产物收敛完成后触发，产出 advisory findings 供用户决策。
+
 ---
 
 ## 执行流程
@@ -182,6 +184,12 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 **不计入 max_outer_loops 预算**：收敛后修订是对已完成产物的补充，不是原收敛的延续。但 retrospective 中必须记录修订的触发来源、新增轮次和结论变化。
 
+### 收敛后设计审查（可选）
+
+收敛完成后，Orchestrator 可选择触发一次**设计审查**（`refs/design-review-prompt.md`）：单轮、咨询式、不给阻断权重，产出 `design-review.md` 写入 `.converge/done/<slug>/`。
+
+**触发条件**：产物涉及 ≥ 3 个独立模块，或引入新目录结构/命名约定/跨组件接口，或定义新工作区框架，或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。建议在产品涉及系统级设计时启用——单模块修复可跳过。
+
 ---
 
 ## Orchestrator 责任清单
@@ -203,6 +211,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python scripts/l1_gate.py`），记录 pass/warn 结果
 16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
 17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
+18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件（≥3 模块/新约定/工作区/用户请求），满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
 
 ---
 
@@ -242,6 +251,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 - [ ] 若存在 contract.md：contract 中所有验收断言已被至少一轮 Reviewer 逐条验证
 - [ ] 不存在未处理的 `contract_amendment_required: true` 标记
 - [ ] 若触发了降级（orchestrator_self / inner_loop 降级）：用户已被告知降级模式及对结论可靠性的影响
+- [ ] 若触发了设计审查：`design-review.md` 已写入，highlights 已报告用户，用户决策已记录
 
 ---
 
@@ -287,7 +297,8 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 │   └── _orchestrator-state.md  # 抗 compact / 抗 session 切换
 ├── done/<slug>/                # 已收敛/已停止
 │   ├── ... (上述所有文件)
-│   └── retrospective.md        # 复盘（必填）
+│   ├── retrospective.md        # 复盘（必填）
+│   └── design-review.md         # 设计审查报告（可选，触发时生成）
 └── gate/<slug>/                # 门控产物（与 active/ 隔离）
     └── gate-findings.md         # L2 Reviewer gate_findings 汇总
 ```
