@@ -1,6 +1,8 @@
 # Reviewer Prompt 模板
 
 > 由 orchestrator 在每轮 Spawn reviewer 时拼装。Reviewer 看不到 orchestrator 对话历史，prompt 必须自足。
+>
+> **双受众说明**：本模板同时服务于两个受众——(a) Reviewer agent（运行时消费，执行审查指令）；(b) Orchestrator agent（拼装 prompt 时阅读，理解变量替换规则和处置逻辑）。Orchestrator 专属的上下文（如桥接提示、自举约束）保留在此模板中是刻意为之——确保 prompt 拼装逻辑与 prompt 内容在同一文件中维护，避免跨文件漂移。新增 Orchestrator 专属内容时，标注 `<!-- Orchestrator 专属 -->`。
 
 ---
 

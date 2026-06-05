@@ -173,4 +173,4 @@ antipatterns:
       [Orchestrator Detection] 理由；存在无理由的等价合并即命中。
 ```
 
-> **待蒸馏（Q4/Q5）**：前置自检新增的 Q4（职责边界自洽）和 Q5（命名一致性）当前通过 `blocking_issues`（severity=conceptual）进入修复管道，尚无对应 antipattern 条目。待 `distill_antipatterns.py` 积累足够实证命中数据后，应将 Q4 蒸馏为 `responsibility_mismatch`（声称/实际职责矛盾）和 Q5 蒸馏为 `naming_drift`（跨文件命名不一致）两个设计层 antipattern 条目。届时需将现有 Q1-Q3 条目的 `description` 中"前置自检第 N 问"的编号引用更新为 5 问体系。
+> **待蒸馏（Q4/Q5）**：前置自检新增的 Q4（职责边界自洽）和 Q5（命名一致性）当前通过 `blocking_issues`（severity=conceptual）进入修复管道，尚无对应 antipattern 条目。待 `distill_antipatterns.py` 积累足够实证命中数据后，应将 Q4 蒸馏为 `responsibility_mismatch`（声称/实际职责矛盾）和 Q5 蒸馏为 `naming_drift`（跨文件命名不一致）两个设计层 antipattern 条目。届时需将 `identity_crisis`（引用 Q1）和 `data_tool_coupling`（引用 Q3）的 `description` 中"前置自检第 N 问"编号更新为 5 问体系（`false_generality` 未引用 Q2 编号，无需更新）。

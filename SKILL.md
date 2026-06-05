@@ -223,7 +223,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python scripts/l1_gate.py`），记录 pass/warn 结果
 16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
 17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
-18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件（≥3 模块/新约定/工作区/用户请求），满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
+18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件：≥3 模块；或新约定/接口；或系统边界；或评议前置自检 Q4/Q5 触发过 blocking（职责边界和命名一致性问题往往暗示更深层架构问题）；或用户显式请求。满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
 
 ---
 
