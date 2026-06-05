@@ -269,7 +269,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `max_outer_loops` | 5 | 最大 outer loop 轮数（实证：所有收敛均在 2-3 轮完成，5 轮以上通常为振荡） |
+| `max_outer_loops` | 5 | 最大 outer loop 轮数（实证：收敛均在 2-3 轮完成；达到上限通常为振荡或 Reviewer 分歧，触发预算软停） |
 | `max_inner_loops` | 3 | 同轮 inner loop 最大 Continue 次数 |
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |

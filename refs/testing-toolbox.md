@@ -84,11 +84,16 @@ Orchestrator 按以下顺序确定要注入的命令（每一步给出具体的 
    动作：Read .github/workflows/ 或 .gitlab-ci.yml 等 CI 文件
    → 找到测试命令：使用 CI 中实际运行的命令
 
-4. 以上均未检测到
-   → <test_command> 和 <lint_command> 都留空，Reviewer 跳过确定性检查
+4. 检查可执行脚本（§六）
+   动作：审查对象是否包含 CLI 入口（argparse/click/cobra 等）、含 `__main__` 的 Python 脚本、或 `bin` 字段？
+   → 是：注入空 `<test_command>` + `cli_verify: true` 标记，Reviewer 按 §六 构造最小 happy-path 并实际运行
+   → 否：进入 step 5
+
+5. 以上均未检测到
+   → <test_command> 和 <lint_command> 都留空，Reviewer 跳过确定性检查（`deterministic_check: skipped`）
 ```
 
-**优先级**：项目入口 > 技术栈信号 > CI 配置 > 跳过
+**优先级**：项目入口 > 技术栈信号 > CI 配置 > 脚本验证（§六） > 跳过
 
 ---
 
