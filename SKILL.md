@@ -16,11 +16,11 @@ description: Use when a plan, code artifact, or other structured output needs it
 本 SKILL 在产物生命周期中的位置：
 
 ```
-产物草稿完成 → [Round 0 合同谈判] → Converge（多轮深度审查）→ 产物进入执行/落地
-                     ↑                      ↑
-               可选前置阶段           与单次审查的边界：
-               对齐"什么算完成"       单次 review = 快速表面检查
-               + 定义 Rubrics 维度    converge = 多轮独立交叉验证，直到零阻断
+产物草稿完成 → [Round 0 合同谈判] → 评议（默认入口）→ Converge（按需升级）→ 产物进入执行/落地
+                     ↑                  ↑               ↑
+               可选前置阶段         单轮主观 verdict  仅 conceptual/architectural
+               对齐"什么算完成"     一次写回           阻断时升级为多轮完整收敛
+               + 定义 Rubrics 维度
 ```
 
 - **前置条件**：有可审查的产物（plan 文件 / 代码项目 / 文档等），且产物已完成初稿
@@ -74,7 +74,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 | 方式 | 触发条件 | 产物要求 |
 |------|---------|---------|
 | **收敛** | fresh reviewer 首次审查 verdict = `可执行`（零阻断） | 写 retrospective.md，移 done/ |
-| **预算软停** | 达预算上限（默认 10 轮），用户决定不续费 | retrospective.md 注明"未收敛但用户接受" |
+| **预算软停** | 达预算上限（默认 5 轮），用户决定不续费 | retrospective.md 注明"未收敛但用户接受" |
 | **振荡硬停** | 触 Type O（推翻≥3）或 R（重复≥5） | retrospective.md 填病因 + 建议 |
 
 ---
@@ -113,11 +113,13 @@ D11=a 是默认目标。b/c 需用户显式确认。
 | **并行性** | 无 | 无（单线程迭代） | 有（多子收敛并行） | 无 |
 | **启用条件** | 产物有初稿、需快速对齐 | 产物有初稿、需深度验证 | 产物可分解为 ≥2 独立 scope | 产物已落地 |
 
+**默认入口**：**从评议开始。** 绝大部分审查需求在第一轮评议中就能得到有效反馈。仅当评议发现 conceptual 或 architectural 级别的阻断、且单轮修复后需要 independent verification 时，才升级为完整收敛。实证：6 次 converge 调用中 4 次是评议（单轮），完整收敛最多 3 轮从未超过。
+
 **判别原则：**
 
 1. 先看时态——事前 = 评议，事后 = 审计，事中 = 收敛
 2. 事中再看规模——单 scope = 单层收敛，多独立 scope = 层级收敛
-3. 如果不确定，从单层开始——层级收敛只在明确需要时启用
+3. 默认评议——仅在评议 verdict 含 conceptual/architectural 阻断时升级为完整收敛
 
 > **收敛后设计审查**（`refs/design-review-prompt.md`）：事后、不写回、咨询式——时态属于审计，但判断维度不同（7 维 vs P0-P3对齐率），是审计的一个可选子模式。在产物收敛完成后触发，产出 advisory findings 供用户决策。
 
@@ -125,7 +127,13 @@ D11=a 是默认目标。b/c 需用户显式确认。
 
 ## 执行流程
 
-**默认模式**：从评议开始（单轮审查 + 单轮验证）。若 R1 发现 conceptual 级别阻断，升级为完整多轮收敛。Pilot 数据（6 次 converge 调用中 4 次评议即收敛）表明多数问题在首轮就被发现和修复。
+**默认入口：评议。** 首次审查一律使用评议模式（单轮、主观 verdict、一次写回）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
+
+- verdict = 可执行 → 收敛完成，归档 done/
+- verdict = 需修订 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
+- verdict = 需修订 + 阻断为 conceptual/architectural → **升级为完整收敛**（下方主循环）
+
+完整收敛仅在有证据表明"评议的单轮深度不足以解决问题"时触发——不是默认路径。
 
 ### Round 0 · 合同谈判（可选前置）
 
@@ -190,7 +198,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 收敛完成后，Orchestrator 可选择触发一次**设计审查**（`refs/design-review-prompt.md`）：单轮、咨询式、不给阻断权重，产出 `design-review.md` 写入 `.converge/done/<slug>/`。
 
-**触发条件**：产物涉及 ≥ 3 个独立模块，或定义了新的**系统边界**（如 scheduler↔Orchestrator 的分工边界、SKILL.md↔refs 的分层边界、通用层↔框架层的解耦边界）——不只规模触发，复杂度也能触发。或引入新目录结构/命名约定/跨组件接口，或定义新工作区框架，或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。
+**触发条件**（满足任一即触发）：产物涉及 ≥ 3 个独立模块；或引入新目录结构/命名约定/跨组件接口；或定义了新的**系统边界**（如 scheduler↔Orchestrator 的职责划分、SKILL.md↔refs 的层次关系、两个子系统之间的协议边界）；或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。建议在产品涉及系统级设计时启用——单模块修复可跳过。
 
 ---
 
@@ -261,7 +269,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `max_outer_loops` | 5 | 最大 outer loop 轮数（pilot 表明 2-3 轮即收敛；≥5 轮通常为振荡，应触发 Type O/R 硬停） |
+| `max_outer_loops` | 5 | 最大 outer loop 轮数（实证：所有收敛均在 2-3 轮完成，5 轮以上通常为振荡） |
 | `max_inner_loops` | 3 | 同轮 inner loop 最大 Continue 次数 |
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
