@@ -133,6 +133,9 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
    - 有新增 lint 错误 → blocking issue（attribution: executor_limit）
    - 有新增 lint 警告 → suggestion
 
+3. **无测试套件时，构造最小 happy-path**（Reviewer 自行构造，无需 Orchestrator 注入命令）：若 `<test_command>` 和 `<lint_command>` 均为空，且审查对象包含可执行脚本（CLI、Python、Shell 等），Reviewer 应在语义审查之前**先构造一个最小的端到端场景并实际运行**——不是测试套件，只是验证基本行为是否符合文档描述。例：若审查 scheduler 脚本，运行 `python scheduler.py init → dispatch → complete → done` 整条链。pilot 经验显示，仅靠 RE 审查遗漏的 bug（pipe 优先级、budget 未执行、协议校验缺失）都是 CLI 可复现的。
+4. **无 shell 权限或无依赖时**：跳过 3，在输出中标注 `deterministic_check: skipped (reason: <具体原因>)`。
+
 确定性检查的结果是不可辩驳的——不需要语义判断，不需要归因讨论。通过确定性检查后再进入语义审查（架构、边界条件、逻辑正确性等），让模型的判断力用在只有模型能做的地方。
 
 > **双重测试说明**：Executor 也会运行测试（见 executor-prompt.md §代码项目修改），但 Reviewer 的测试运行是**独立验证**——不依赖 Executor 的测试结果或断言。两次运行的价值不同：Executor 的测试确认"修复后代码能通过"，Reviewer 的测试确认"在全新上下文中独立验证同样通过"。Orchestrator 不应优化掉其中任何一次。

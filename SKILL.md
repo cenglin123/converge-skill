@@ -125,6 +125,8 @@ D11=a 是默认目标。b/c 需用户显式确认。
 
 ## 执行流程
 
+**默认模式**：从评议开始（单轮审查 + 单轮验证）。若 R1 发现 conceptual 级别阻断，升级为完整多轮收敛。Pilot 数据（6 次 converge 调用中 4 次评议即收敛）表明多数问题在首轮就被发现和修复。
+
 ### Round 0 · 合同谈判（可选前置）
 
 > 详细流程和 contract.md 格式见 `refs/contract-negotiation.md`。Rubrics 维度选择见 `refs/rubrics.md`。
@@ -188,7 +190,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 收敛完成后，Orchestrator 可选择触发一次**设计审查**（`refs/design-review-prompt.md`）：单轮、咨询式、不给阻断权重，产出 `design-review.md` 写入 `.converge/done/<slug>/`。
 
-**触发条件**：产物涉及 ≥ 3 个独立模块，或引入新目录结构/命名约定/跨组件接口，或定义新工作区框架，或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。建议在产品涉及系统级设计时启用——单模块修复可跳过。
+**触发条件**：产物涉及 ≥ 3 个独立模块，或定义了新的**系统边界**（如 scheduler↔Orchestrator 的分工边界、SKILL.md↔refs 的分层边界、通用层↔框架层的解耦边界）——不只规模触发，复杂度也能触发。或引入新目录结构/命名约定/跨组件接口，或定义新工作区框架，或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。
 
 ---
 
@@ -259,7 +261,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `max_outer_loops` | 10 | 最大 outer loop 轮数 |
+| `max_outer_loops` | 5 | 最大 outer loop 轮数（pilot 表明 2-3 轮即收敛；≥5 轮通常为振荡，应触发 Type O/R 硬停） |
 | `max_inner_loops` | 3 | 同轮 inner loop 最大 Continue 次数 |
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
