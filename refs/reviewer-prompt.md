@@ -172,7 +172,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 |--------|------|------|
 | `{N}` | 当前轮次 | `3` |
 | `<plan_path>` | 目标产物的文件路径 | `docs/plans/active/my-plan.md` |
-| `<reference_materials_path>` | 原始背景材料路径（问题报告/需求文档/用户反馈，可选） | `.workflow/issue-report.md` |
+| `<reference_materials_path>` | 原始背景材料路径（问题报告/需求文档/用户反馈等，可选。具体路径由 Orchestrator 根据项目约定填写，不存在则跳过） | 由 Orchestrator 填写 |
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
 | `<antipatterns_path>` | 反模式注册表路径 | `.agents/skills/converge/refs/antipatterns.md` |
