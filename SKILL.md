@@ -146,7 +146,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问）
 - **完整收敛**：若评议 verdict = 可执行 → 跳过（评议已在扩域下审查完毕，完整收敛新增发现概率极低，只增成本）；若 verdict ≠ 可执行 → 标准流程（Round 0→多轮→收敛）
 - **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
 
-仅在用户显式使用 `ultraverge` 关键词时触发。适用场景：init-agent-docs 等基础工具的审查、安全关键配置变更。**不适用于** converge 自身的自举（见 design-review-prompt.md §自举边界——converge 自举的设计审查应由外部 Reviewer 执行）。
+仅在用户显式使用 `ultraverge` 关键词时触发。适用场景：converge 自身的自举审查（ultraverge 由用户显式触发，不存在 Orchestrator 自主跳过的风险）、init-agent-docs 等基础工具的审查、安全关键配置变更。
 
 ### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
