@@ -13,9 +13,10 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 
 ## Required reading (in order)
 1. <plan_path>                 # plan under review
-2. <attempts_md_path>          # cross-round attempt log (skip if Round 1)
-3. <this_skill_path>           # this convergence skill definition
-4. <contract_path>             # convergence contract (skip if no contract)
+2. <reference_materials_path>  # 原始背景材料（问题报告、需求文档、用户反馈等）——如存在必须读，确保 Reviewer 能追溯到"这个产物要解决什么问题"。不存在则跳过
+3. <attempts_md_path>          # cross-round attempt log (skip if Round 1)
+4. <this_skill_path>           # this convergence skill definition
+5. <contract_path>             # convergence contract (skip if no contract)
 
 ## 前置自检（快速扫描）
 
@@ -171,6 +172,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 |--------|------|------|
 | `{N}` | 当前轮次 | `3` |
 | `<plan_path>` | 目标产物的文件路径 | `docs/plans/active/my-plan.md` |
+| `<reference_materials_path>` | 原始背景材料路径（问题报告/需求文档/用户反馈，可选） | `.workflow/issue-report.md` |
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
 | `<antipatterns_path>` | 反模式注册表路径 | `.agents/skills/converge/refs/antipatterns.md` |
