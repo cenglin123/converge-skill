@@ -180,7 +180,7 @@ converge 主循环收敛后（verdict = `可执行`、产物已移入 `done/`）
 
 ### 自举边界
 
-当 converge 自身（SKILL.md、refs/、scripts/）完成自举收敛后，其复杂度满足设计审查的触发条件。常规路径下，不应由 Orchestrator **自主判定**触发——它有动机跳过（成本高）。但 ultraverge 路径不受此限制——ultraverge 由用户显式触发，不存在 Orchestrator 自我放过的问题。简记：常规路径的自举设计审查需要外部推手或用户手动触发；ultraverge 路径下 converge 自举与其他产物一视同仁。
+当 converge 自身（SKILL.md、refs/、scripts/）完成自举收敛后，设计审查**由用户显式触发**（如 `ultraverge` 关键词）是安全的——Orchestrator 不自主决定是否触发，消除了"偷懒跳过"的风险。用户的触发动作打破了自指循环中"审查者=被审查者=触发者"的闭环。如果用户未显式触发，Orchestrator 仍不应主动启动自举的设计审查。
 
 ### 维度种子声明
 
