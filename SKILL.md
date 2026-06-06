@@ -1,6 +1,6 @@
 ---
 name: converge
-description: Use when a plan, code artifact, or other structured output needs iterative convergence through independent review cycles. Trigger on "converge", "收敛", "迭代收敛", or when confidence in artifact quality is insufficient for execution. NOT for single-pass code review — use a lighter review skill for that.
+description: Use when a plan, code artifact, or other structured output needs iterative convergence through independent review cycles. Trigger on "converge", "收敛", "迭代收敛", or when confidence in artifact quality is insufficient for execution. trigger "ultraverge" for the full pipeline (评议+收敛+收敛后设计审查) on mission-critical artifacts. NOT for single-pass code review — use a lighter review skill for that.
 ---
 
 # Converge — 双 Agent 迭代收敛器
@@ -17,9 +17,9 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 ```
 产物草稿完成 → [Round 0 合同谈判] → 评议（默认入口）→ Converge（按需升级）→ 产物进入执行/落地
-                     ↑                  ↑               ↑
-               可选前置阶段         单轮主观 verdict  仅 conceptual/architectural
-               对齐"什么算完成"     一次写回           阻断时升级为多轮完整收敛
+                     ↑                  ↑               ↑                  ↑
+               可选前置阶段         单轮主观 verdict  仅 conceptual/arch   ultraverge: 全量
+               对齐"什么算完成"     一次写回           阻断时升级多轮收敛   强制评议→收敛→设计审查
                + 定义 Rubrics 维度
 ```
 
@@ -129,7 +129,24 @@ D11=a 是默认目标。b/c 需用户显式确认。
 
 ## 执行流程
 
-**默认入口：评议。** 首次审查一律使用评议模式（单轮、主观 verdict、一次写回）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
+### Ultraverge 路径（仅 `ultraverge` 关键词触发）
+
+对安全性或稳定性有极端要求的产物（核心 SKILL 定义、宪法文档、基础架构 plan），用户可使用 `ultraverge` 关键词触发全量流程：
+
+```
+ultraverge → 评议（范围扩至收敛后设计审查的 7 维 + 前置自检 5 问）
+          → 完整收敛（不论评议 verdict 的 severity 层级）
+          → 收敛后设计审查（强制触发，不满足常规触发条件也执行）
+```
+
+与默认路径的差异：
+- **评议**：Reviewer prompt 额外注入设计审查的 7 维骨架（DR1-DR7），不做"仅查方向性问题"的裁切。评议 verdict 仅作参考——不论结果如何，**强制进入完整收敛**
+- **完整收敛**：标准流程（Round 0→多轮→收敛），无变化
+- **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
+
+仅在用户显式使用 `ultraverge` 关键词时触发。适用场景：converge 自身的自举收敛、init-agent-docs 等基础工具的审查、安全关键配置变更。
+
+### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
 - verdict = 可执行 → 收敛完成，归档 done/
 - verdict = 需修订 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
