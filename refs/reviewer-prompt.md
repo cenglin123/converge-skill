@@ -13,10 +13,10 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 
 ## Required reading (in order)
 1. <plan_path>                 # plan under review
-2. <reference_materials_path>  # 原始背景材料（问题报告、需求文档、用户反馈等）——如存在必须读，确保 Reviewer 能追溯到"这个产物要解决什么问题"。不存在则跳过
-3. <attempts_md_path>          # cross-round attempt log (skip if Round 1)
-4. <this_skill_path>           # this convergence skill definition
-5. <contract_path>             # convergence contract (skip if no contract)
+2. <attempts_md_path>          # cross-round attempt log (skip if Round 1)
+3. <this_skill_path>           # this convergence skill definition
+4. <contract_path>             # convergence contract (skip if no contract)
+5. <reference_materials_path>  # 原始背景材料（问题报告、需求文档、用户反馈等）——如存在必须读。读完产物并形成独立判断后再读，避免被原始需求锚定，忽略产物的内部自洽性。不存在则跳过。一旦 Round 1 注入，所有后续轮次必须一致传同样的材料——更换或增减材料会改变审查基准，触发人为 Type R 振荡
 
 ## 前置自检（快速扫描）
 
@@ -29,6 +29,8 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 5. **命名一致性**：同一概念在产物内部的不同位置（正文、图表、代码、CLI 参数）是否使用相同名称？跨文件引用是否存在一词多义（同一词指不同概念）或多词一义（不同词指同一概念）？
 
 Q1-Q3 与设计审查（DR1/DR4/DR6）构成分层审查——前置自检做快速 binary check（"存在明显的声称/实际矛盾吗？"），设计审查做 dimensional assessment（"边界整体质量如何？"）。Q4 与 DR4 同域、Q5 与 DR1 同域。
+
+6. **产物 vs 原始需求一致**（仅当背景材料存在时检查）：产物的核心主张和背景材料中的原始需求之间是否存在方向性矛盾？若有 → 列为 suggestion（不列为 blocking——计划可能已合理缩小范围），同时注明 `background_mismatch: true` 供 Orchestrator 评估是否触发用户确认。
 
 若任一答案为"否" → 列为 blocking issue（severity = conceptual），再继续技术审查。若 Executor 在后续轮次提供了令人信服的证据证明 Reviewer 的前置自检分类有误，Reviewer 应重新评估并可降级该 issue。Orchestrator 应将此类反转标记为 Type F（Flip），在 attempts.md 中记录反转理由。
 
