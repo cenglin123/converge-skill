@@ -30,18 +30,8 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 ---
 
-## ⚠️ 宪法级设计原则
-
-> 以下两条是本 SKILL 的最高判据。任何对 SKILL.md 或 refs/ 的修改，必须先通过这两条的自检（详见 `refs/orchestrator-guide.md` §〇 宪法自检），否则不考虑执行。
-
-本 SKILL 的自身演化受两条宪法级原则约束——它们不是运行时规则，而是**本 SKILL 该长什么样、该包含什么**的设计判据：
-
-| 原则 | 判据 | 应用实例 |
-|------|------|---------|
-| **Bitter Lesson** | 这东西是通用机制还是针对当前模型的补丁？机制硬编码，补丁做成 compiled 产物 | 三角色/对抗循环硬编码；反模式清单挂在 retrospective 上、由 distill 脚本维护 status |
-| **Occam** | 这东西解决什么具体问题？不解决具体问题的实体删除，git log 是考古层 | 三层物理分离（不让会变化的知识腐化在不变的机制里）；章程瘦身（引用表替代重复副本）；宪法级约束表不含"已迁出"说明 |
-
-> 新增文件/规则/字段时，两条原则同时适用：先问 Bitter Lesson（硬编码还是 compiled？），再问 Occam（必要还是多余？）。
+> **宪法内容已迁出**：设计原则、Orchestrator 行为边界、治理文档清单、修改程序详见 `CONSTITUTION.md`。
+> CONSTITUTION.md 是本 SKILL 的最高治理文档。冲突时以本文件（SKILL.md）为准——运行时依赖优先于设计参考。
 
 ---
 
@@ -157,7 +147,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
 - **修改对象涉及宪法/治理文档 → 必须 ultraverge**（≥3 Reviewer + 收敛 + 设计审查）
 - **修改对象不涉及宪法/治理文档 → 标准评议**（verdict 驱动，单轮写回）
 
-> 宪法/治理文档的范围以 AGENTS.md 约束速查表「宪法文档体系」清单为权威源。边界情形（修改同时涉及治理和非治理文件）按最高强度处理。
+> **"治理文档"判据**：对 Agent 行为有规范性约束力的文件。项目治理文档由项目入口文档（AGENTS.md / CLAUDE.md 等）定义；本 SKILL 自身的治理文档清单见 `CONSTITUTION.md` 第三部。边界情形按最高强度处理。
 
 ### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
@@ -257,24 +247,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ---
 
-## 宪法级约束 — Orchestrator 不可让渡的行为边界
-
-> **本节约束需经人工审议后修改，不接受 Agent 自主变更。**
-> 与 `refs/antipatterns.md`（可由 distill 脚本自动调整 status）不同，本节是 converge 的机制底线——违反这些条目意味着**明确规则被打破**（而非 plausible 认知偏误），检测方式是查表对照判据而非模式识别。即使将来 Orchestrator 不再违反它们，这些声明仍有解释性价值（"为什么零阻断是底线"）。任何修改都应有显式的人工决策记录。
->
-> 以下检查清单主要面向**下一个 reviewer / 复盘者**，而非当前 orchestrator（它不会承认自己在违规）。
-
-| # | 违规 | 底线 |
-|---|------|------|
-| 1 | "只剩 1 个低级阻断，不算阻断，直接收敛吧" | 严格首轮通过要求**零阻断**。b/c 类收敛需用户**显式确认** |
-| 2 | "Executor 改了，看起来没问题了，不用 inner loop 验收" | 不验收 = 跳过验证环节，与收敛机制的设计意图冲突 |
-| 3 | "budget 快到了，这轮就算通过了" | 预算软停**必须问用户**，不能自作主张 |
-| 4 | "attempts.md 的历史 entry 我改一下让它更整洁" | **硬约束：历史 entry 不改写，只追加 annotation** |
-| 5 | "用户没回复，我默认他同意继续" | b/c 类收敛和预算软停都需要**显式**用户确认 |
-| 6 | "降级了但不用告诉用户吧，反正是内部细节" | 降级模式下结论可信度降低，**用户有权知道**。必须告知用户当前处于降级模式及影响 |
-| 7 | "这次改动很简单，不用 spawn executor，我自己改就行" | Planner 亲自执行 = 破坏角色分离。简单任务也不是例外——边界一旦切开就会蔓延。**无论任务大小，Planner 不执行。**例外：若 Spawn 完全不可用，按附录 A.4 降级为 orchestrator_self，但**必须**标注降级模式并告知用户。 |
-
-> 执行上述语义判定时，参考 `refs/orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
+> **宪法内容已迁出**：Orchestrator 不可让渡的行为边界详见 `CONSTITUTION.md` 第二部。
 
 ---
 
