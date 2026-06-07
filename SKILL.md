@@ -123,7 +123,7 @@ D11=a 是默认目标。b/c 需用户显式确认。
 2. 事中再看规模——单 scope = 单层收敛，多独立 scope = 层级收敛
 3. 默认评议——仅在评议 verdict 含 conceptual/architectural 阻断时升级为完整收敛
 
-> **Ultraverge**（表格外组合模式，仅 `ultraverge` 关键词触发）：评议（扩域至 DR 7 维 + 前置自检 5 问）→ 评议可执行则跳过收敛 → 强制设计审查。不是独立模式，是默认路径的"全量变体"。
+> **Ultraverge**（表格外组合模式，仅 `ultraverge` 关键词触发）：评议（扩域至 DR 7 维 + 前置自检 5 问，**≥`ultraverge_min_reviewers` 并行独立 Reviewer**）→ 评议可执行则跳过收敛 → 强制设计审查。不是独立模式，是默认路径的"全量变体"。
 
 > **收敛后设计审查**（`refs/design-review-prompt.md`）：事后、不写回、咨询式——时态属于审计，但判断维度不同（7 维 vs P0-P3对齐率），是审计的一个可选子模式。在产物收敛完成后触发，产出 advisory findings 供用户决策。
 
@@ -136,19 +136,25 @@ D11=a 是默认目标。b/c 需用户显式确认。
 对安全性或稳定性有极端要求的产物（核心 SKILL 定义、宪法文档、基础架构 plan），用户可使用 `ultraverge` 关键词触发全量流程：
 
 ```
-ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问）
+ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_min_reviewers 并行独立 Reviewer）
           → 评议 verdict = 可执行 → 跳过完整收敛 → 强制设计审查
           → 评议 verdict ≠ 可执行 → 完整收敛 → 强制设计审查
 ```
 
 与默认路径的差异：
-- **评议**：Reviewer prompt 额外注入设计审查的 7 维骨架（DR1-DR7），不做"仅查方向性问题"的裁切
+- **评议**：Reviewer prompt 额外注入设计审查的 7 维骨架（DR1-DR7），不做"仅查方向性问题"的裁切。**至少 Spawn `ultraverge_min_reviewers`（默认 3）个独立 Reviewer 并行审查**——这是 ultraverge 与普通评议的关键区分：普通评议允许单 Reviewer 快速对齐，ultraverge 要求多条独立视角以确保事实前提验证（如代码现状审计）和盲区覆盖（如 Bitter Lesson 冲突、跨治理域打包等问题往往只有少数 Reviewer 能捕获）。
+- **并行裁决规则**：`ultraverge_min_reviewers` 条 verdict 全部一致 → 采纳。存在分歧时：
+  - 多数方向 vs 少数方向 → Orchestrator 按多数方向推进，**但**：若少数派的阻断 issue severity 为 `conceptual` 或 `architectural`，Orchestrator **必须**升级为完整收敛（对应宪法约束 §1：不能以多数决跳过深层阻断）
+  - 裁决规则是 ultraverge 专属的并行评议收敛语义，与 `.meta/deliberations/README.md` 的 ≥3 评议摘要自动收敛互为补充（前者管 spawn 约束 + 并行收敛，后者管跨会话评议汇总），不冲突
+- **降级路径**：若因 token 预算、API 不可用、并发限制等原因无法 spawn 满 `ultraverge_min_reviewers` 个 Reviewer：
+  - 实际 spawn 数 ≥2 且 verdict 一致 → 降级为普通评议模式，Orchestrator 标注 `degraded_from: ultraverge` 并告知用户
+  - 实际 spawn 数 <2 或 verdict 不一致 → 中止，告知用户原因，由用户决定是否降级为普通评议或稍后重试
 - **完整收敛**：若评议 verdict = 可执行 → 跳过（评议已在扩域下审查完毕，完整收敛新增发现概率极低，只增成本）；若 verdict ≠ 可执行 → 标准流程（Round 0→多轮→收敛）
 - **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
 
 仅在用户显式使用 `ultraverge` 关键词时触发。适用场景：converge 自身的自举收敛（用户显式触发，不存在 Orchestrator 偷懒跳过的问题）、init-agent-docs 等基础工具的审查、安全关键配置变更。
 
-### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
+### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
 - verdict = 可执行 → 收敛完成，归档 done/
 - verdict = 需修订 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
@@ -300,6 +306,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | `gate_l2_mode` | `signal` | 门控 L2 启动方式：`always` / `signal` / `adaptive` |
 | `gate_l2_signal_threshold` | `warn` | 信号触发条件（当前仅支持 `warn`；`info`/`critical` 级别预留给后续 L1 信号扩展） |
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
+| `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
 
 ---
 
