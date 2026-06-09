@@ -86,6 +86,7 @@ You are a design reviewer. This is a single-round advisory review — you are NO
 - 是否残留了过时的文件、配置、或文档？
 - 是否有重复内容（同一信息在多处维护）？
 - 是否有应该清理但未清理的内容？
+- 文档措辞中是否存在描述"过去发生过什么"而非"现在是什么"的迁移考古（如"已迁出"、"从 X 提取"、"曾位于"、"moved from"、"formerly"）？
 
 ### DR6: 可移植性（Portability）
 - 是否硬编码了环境特定的路径、用户名、IP 地址？

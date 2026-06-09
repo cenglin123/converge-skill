@@ -156,6 +156,23 @@ antipatterns:
       Reviewer 检测方式：检查产物是否包含硬编码的绝对路径、本地环境变量依赖、
       或复制而非引用的第三方依赖。
 
+  - id: archaeology_leftover
+    layer: design
+    status: active
+    last_confirmed: ""
+    confirmed_count: 0
+    zero_streak: 0
+    resurrection_log: []
+    description: |
+      文档中包含描述"过去发生过什么"而非"现在是什么"的历史措辞。
+      典型表现："已迁出"、"从 X 提取"、"曾位于"、"迁移至"等——这些是
+      迁移考古，git log 是它们唯一的合法归宿。
+      Reviewer 检测方式：扫描产物中是否存在描述文档演化历史（而非当前状态）的措辞。
+      关键词如"已迁出"、"曾位于"、"原名为"、"从 X 提取"等迁移时态标记是线索——
+      但需判断整句是否在描述历史而非现状。描述当前状态的"已完成"、"已实现"等不算。
+      English equivalents: "moved from", "extracted from", "formerly located in",
+      "relocated to". CHANGELOG 文件不在此检测范围内——CHANGELOG 是迁移考古的合法归宿。
+
   # ── Orchestrator 层（间接检测，通过日志痕迹）─────────────────────────
 
   - id: orchestrator_self_review
