@@ -30,7 +30,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 ---
 
-> **宪法内容已迁出**：设计原则、Orchestrator 行为边界、治理文档清单、修改程序详见 `CONSTITUTION.md`。
+> 设计原则、Orchestrator 行为边界、治理文档清单、修改程序详见 `CONSTITUTION.md`。
 > CONSTITUTION.md 是本 SKILL 的最高治理文档。冲突时以本文件（SKILL.md）为准——运行时依赖优先于设计参考。
 
 ---
@@ -247,7 +247,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 ---
 
-> **宪法内容已迁出**：Orchestrator 不可让渡的行为边界详见 `CONSTITUTION.md` 第二部。
+> Orchestrator 不可让渡的行为边界详见 `CONSTITUTION.md` 第二部。
 
 ---
 
