@@ -94,4 +94,4 @@
 
 | 日期 | 变更 | 触发 |
 |------|------|------|
-| 2026-06-07 | 初始创建：从 SKILL.md 提取宪法内容，建立独立宪法文档 | ultraverge 收敛通过 (plan: 20260607-converge-skill-constitution) |
+| 2026-06-07 | 初始创建：定义 converge SKILL 的宪法级设计原则、Orchestrator 行为边界、治理文档清单与修改程序 | ultraverge 收敛通过 (plan: 20260607-converge-skill-constitution) |
