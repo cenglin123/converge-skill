@@ -66,9 +66,9 @@ def check(data: dict) -> list[str]:
         missing = expected - actual
         if missing:
             alerts.append("file_existence_mismatch")
-        # 补充证据：时间戳聚类（不独立触发 warn，仅附带在输出中）
+        # 补充证据：时间戳聚类（不独立触发 warn，仅当已有其他告警时附带）
         timestamp_span = fe.get("file_timestamp_span_seconds")
-        if timestamp_span is not None and timestamp_span == 0.0:
+        if alerts and timestamp_span is not None and timestamp_span == 0.0:
             alerts.append("timestamp_clustered")
 
     return alerts
