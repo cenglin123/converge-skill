@@ -52,6 +52,11 @@
     "phase_spent": 120000,
     "phase_expected": 100000,
     "total_spent_pct": 0.45
+  },
+  "file_existence": {
+    "expected_files": ["01.srt", "02.srt"],
+    "actual_files": {"01.srt": {"size_bytes": 1234}, "02.srt": {"size_bytes": 0}},
+    "file_timestamp_span_seconds": 0.2
   }
 }
 ```
@@ -63,8 +68,11 @@
 | Worker 分类重叠率 | < 0.6 → warn | Worker 之间对同一问题的分类分歧过大 |
 | 测试通过率下降 | ≥ 20% vs 上一阶段 → warn | 新改动大面积破坏了已有功能 |
 | Token 超出预算 | 阶段消耗超出预期 30% → warn | 本阶段复杂度或效率偏离计划 |
+| 文件存在性验证 | 期望产物清单中存在缺失文件或 0 字节文件 → warn | 子代理报告成功但文件系统无对应产物——"报告幻觉"的直接证据。实证：Batch 3 子代理报告 10/10 成功但 corrected/ 目录 0 文件 |
 
-**输出**：`pass` / `warn`。warn 时附带异常信号标签（如 `test_decline`、`budget_overrun`）。
+**输出**：`pass` / `warn`。warn 时附带异常信号标签（如 `test_decline`、`budget_overrun`、`file_existence_mismatch`）。
+
+**补充证据字段**：L1 输出可附带 `file_timestamp_span_seconds` 字段——当文件存在但所有产物修改时间跨度 = 0 时，将此信息附带在 warn 输出中（标注 `timestamp_clustered: true`），供 L2 Reviewer 在抽样检查时用作补充判断线索。此字段**不独立触发 warn**（实证确认 0s 时间跨度是批量写入的正常特征，Batch 5 同样 0s 但执行成功）。
 
 **触发**：硬性设定——每 N 个 phase（`gate_l1_interval`）强制运行。不跳过。
 

@@ -53,6 +53,24 @@ def check(data: dict) -> list[str]:
         if decline >= TEST_DECLINE_THRESHOLD:
             alerts.append("test_decline")
 
+    # 4. 文件存在性验证（需 DW 侧在 phase 收口时传入期望产物清单 + 文件系统扫描结果）
+    #    TODO: 若 DW 侧暂不支持传入 file_existence 数据，此检查静默跳过。
+    #    数据就绪后移除本 TODO。
+    fe = data.get("file_existence")
+    if fe:
+        expected = set(fe.get("expected_files", []))
+        actual = {
+            k for k, v in fe.get("actual_files", {}).items()
+            if v.get("size_bytes", 0) > 0
+        }
+        missing = expected - actual
+        if missing:
+            alerts.append("file_existence_mismatch")
+        # 补充证据：时间戳聚类（不独立触发 warn，仅附带在输出中）
+        timestamp_span = fe.get("file_timestamp_span_seconds")
+        if timestamp_span is not None and timestamp_span == 0.0:
+            alerts.append("timestamp_clustered")
+
     return alerts
 
 

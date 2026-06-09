@@ -89,6 +89,23 @@ antipatterns:
       Reviewer 检测方式：若当前 reviewer 要求的方向与过往 Accepted entry 方向冲突，
       检查 executor 是否因"上轮已接受"而拒绝执行本轮要求。
 
+  - id: report_hallucination
+    layer: executor
+    status: active
+    last_confirmed: ""
+    confirmed_count: 0
+    zero_streak: 0
+    resurrection_log: []
+    description: |
+      子代理生成看似合理的"成功报告"但未实际执行关键操作。两种典型表现：
+      (1) 报告声称已处理 N 个文件，但文件系统无对应产物（未调用 Write 工具）；
+      (2) 报告声称矫正完成，但矫正方向错误——将正确术语"矫正"为错误的已知值
+      （如 V4→V3），根因是子代理基于过时知识自信地执行了反向矫正。
+      Reviewer 检测方式：(a) 对比子代理声称的产物清单与文件系统实际存在的文件
+      ——缺失 > 0 或文件大小为 0 即命中；(b) 对比矫正前后的关键术语
+      ——若正确术语被改为错误术语即命中。若子代理响应中包含"成功/完成/已处理"
+      等声明但无具体文件路径+大小证据，标记为疑似。
+
   # ── 设计层（Reviewer Round 1 即可检测，前置自检用）───────────────────
 
   - id: false_generality
