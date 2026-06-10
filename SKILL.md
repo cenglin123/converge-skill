@@ -18,8 +18,8 @@ description: Use when a plan, code artifact, or other structured output needs it
 ```
 产物草稿完成 → [Round 0 合同谈判] → 评议（默认入口）→ Converge（按需升级）→ 产物进入执行/落地
                      ↑                  ↑               ↑                  ↑
-               可选前置阶段         单轮主观 verdict  仅 conceptual/arch   ultraverge: 全量
-               对齐"什么算完成"     一次写回           阻断时升级多轮收敛   强制评议→收敛→设计审查
+               可选前置阶段         单轮主观 verdict  仅 conceptual/arch   ultraverge:
+               对齐"什么算完成"     一次写回           阻断时升级多轮收敛   全量（见执行流程）
                + 定义 Rubrics 维度
 ```
 
@@ -31,7 +31,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 ---
 
 > 设计原则、Orchestrator 行为边界、治理文档清单、修改程序详见 `CONSTITUTION.md`。
-> CONSTITUTION.md 是本 SKILL 的最高治理文档。冲突时以本文件（SKILL.md）为准——运行时依赖优先于设计参考。
+> 优先级与冲突裁决规则详见 `CONSTITUTION.md` 开头段落。
 
 ---
 
@@ -59,25 +59,17 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 ---
 
-## 收敛方式
+## 终止状态与收敛判定（D11）
 
-| 方式 | 触发条件 | 产物要求 |
-|------|---------|---------|
-| **收敛** | fresh reviewer 首次审查 verdict = `可执行`（零阻断） | 写 retrospective.md，移 done/ |
-| **预算软停** | 达预算上限（默认 5 轮），用户决定不续费 | retrospective.md 注明"未收敛但用户接受" |
-| **振荡硬停** | 触 Type O（推翻≥3）或 R（重复≥5） | retrospective.md 填病因 + 建议 |
+| 终止类型 | 判据 | 用户确认 | 产物要求 |
+|----------|------|---------|---------|
+| **D11-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，移 done/ |
+| **D11-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 写 retrospective.md，移 done/ |
+| **D11-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 写 retrospective.md，移 done/ |
+| **预算软停**（无 D11 对应） | 达预算上限（默认 5 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
+| **振荡硬停**（无 D11 对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
 
----
-
-## 收敛判定（D11 三选一）
-
-| 类型 | 判据 |
-|------|------|
-| **a. 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 |
-| **b. 渐近** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项，用户确认后接受 |
-| **c. 主观接受** | 未达 a/b，但用户明确说"够了，就这样" |
-
-D11=a 是默认目标。b/c 需用户显式确认。
+D11=a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → D11-c。
 
 ---
 
@@ -113,7 +105,7 @@ D11=a 是默认目标。b/c 需用户显式确认。
 2. 事中再看规模——单 scope = 单层收敛，多独立 scope = 层级收敛
 3. 默认评议——仅在评议 verdict 含 conceptual/architectural 阻断时升级为完整收敛
 
-> **Ultraverge**（表格外组合模式，仅 `ultraverge` 关键词触发）：评议（扩域至 DR 7 维 + 前置自检 5 问，**≥`ultraverge_min_reviewers` 并行独立 Reviewer**）→ 评议可执行则跳过收敛 → 强制设计审查。不是独立模式，是默认路径的"全量变体"。
+> **Ultraverge**：评议的"全量变体"（扩域 + 多 Reviewer + 强制设计审查），详见执行流程专节。
 
 > **收敛后设计审查**（`refs/design-review-prompt.md`）：事后、不写回、咨询式——时态属于审计，但判断维度不同（7 维 vs P0-P3对齐率），是审计的一个可选子模式。在产物收敛完成后触发，产出 advisory findings 供用户决策。
 
@@ -149,7 +141,9 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
 
 > **"治理文档"判据**：对 Agent 行为有规范性约束力的文件。项目治理文档由项目入口文档（AGENTS.md / CLAUDE.md 等）定义；本 SKILL 自身的治理文档清单见 `CONSTITUTION.md` 第三部。边界情形按最高强度处理。
 
-### 默认入口：评议。 首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
+### 默认入口：评议
+
+首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
 - verdict = 可执行 → 收敛完成，归档 done/
 - verdict = 需修订 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
@@ -182,10 +176,10 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
    c. Orchestrator 处理：overturn 检测、等价标注、antipattern 关联
    d. 若 verdict = 可执行 → 收敛！执行完成前必检清单，写 retrospective.md，移 done/
    e. 若有 contract_amendment_required → 先回写 contract.md 再继续
-   f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
-   f. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
-   g. plan_amendment_required 时先回写 plan 本体再改下游
-   h. （可选）Continue 做 inner loop reviewer 验收
+    f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
+    g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
+    h. plan_amendment_required 时先回写 plan 本体再改下游
+    i. （可选）Continue 做 inner loop reviewer 验收
 4. 超 max_outer_loops → 预算软停，询问用户
 ```
 
@@ -220,29 +214,36 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 收敛完成后，Orchestrator 可选择触发一次**设计审查**（`refs/design-review-prompt.md`）：单轮、咨询式、不给阻断权重，产出 `design-review.md` 写入 `.converge/done/<slug>/`。
 
-**触发条件**（满足任一即触发）：产物涉及 ≥ 3 个独立模块；或引入新目录结构/命名约定/跨组件接口；或定义了新的**系统边界**（如 scheduler↔Orchestrator 的职责划分、SKILL.md↔refs 的层次关系、两个子系统之间的协议边界）；或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。建议在产品涉及系统级设计时启用——单模块修复可跳过。
+**触发条件**（满足任一即触发）：产物涉及 ≥ 3 个独立模块；或引入新目录结构/命名约定/跨组件接口；或定义了新的**系统边界**（如 scheduler↔Orchestrator 的职责划分、SKILL.md↔refs 的层次关系、两个子系统之间的协议边界）；或用户显式请求。**预算**：设计审查 Spawn 不计入 `max_outer_loops`，视为与收敛后修订同级的可选扩展操作。建议在产物涉及系统级设计时启用——单模块修复可跳过。
 
 ---
 
 ## Orchestrator 责任清单
 
+**每轮必做** ——
 1. **Spawn 真实性** — 失败时如实记 `orchestrator_self`，不掩盖
 2. **overturn 判定** — 比较本轮 issue 与 attempts.md 已 Accepted 修复
 3. **Type O 计数** — 同决策点推翻 ≥3 次 → 硬停
 4. **Type R/F 等价标注** — 同源标注（语义判断）
-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
-6. **plan 漂移检测** — 每 5 轮 / 触 Type O 时报告用户
-7. **预算追踪** — 触上限时问用户，不直接收敛
 8. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
 9. **_orchestrator-state.md 维护** — 每完成一个动作即更新
-10. **字段名映射** — reviewer 输出 `attribution` ↔ attempt log `Issue 归因`
-11. **合同谈判编排** — Round 0 中依次 spawn Executor（提议合同）→ Reviewer（挑战）→ Executor（定稿），将终稿写入 contract.md
-12. **Rubrics 维度选择** — 根据收敛对象类型从维度库中选取，写入 contract.md
+
+**条件触发** ——
+5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
+6. **plan 漂移检测** — 每 5 轮 / 触 Type O 时报告用户
+7. **预算追踪** — 逐轮递增计数由主循环结构保证；本条规范触上限时必须问用户的行为（呼应宪法第二部 #3）
+10. **字段名映射** — 写入 attempt log entry 时执行：reviewer 输出 `attribution` ↔ attempt log `Issue 归因`
 13. **contract_amendment_required** — 先回写 contract.md 本体，再让 executor 按新 contract 调整。contract 演进导致的矛盾不计入 Type O
 14. **收敛后修订评估** — 用户在收敛后提供外部输入时，判断输入是否构成实质性挑战。判断标准：是否引入新的分析维度、是否动摇已收敛的核心判断、是否修正了被遗漏的关键事实。微调措辞不触发修订。触发后在 retrospective 中记录修订来源和结论变化
 15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python scripts/l1_gate.py`），记录 pass/warn 结果
 16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
 17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
+
+**Round 0 前置** ——
+11. **合同谈判编排** — Round 0 中依次 spawn Executor（提议合同）→ Reviewer（挑战）→ Executor（定稿），将终稿写入 contract.md
+12. **Rubrics 维度选择** — 根据收敛对象类型从维度库中选取，写入 contract.md
+
+**收口必做**（含逐项执行"收敛完成前必检"）——
 18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件：≥3 模块；或新约定/接口；或系统边界；或评议前置自检 Q4/Q5 触发过 blocking（职责边界和命名一致性问题往往暗示更深层架构问题）；或用户显式请求。满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
 
 ---

@@ -1,10 +1,7 @@
 # Converge SKILL 宪法
 
-> 本文件是 converge SKILL 的最高治理文档——定义"SKILL 该长什么样、该包含什么"的宪法级判据。
-> 本文件的权威源于用户对 ultraverge 收敛结果的批准，而非内容的生成来源。
-> 机制描述以 SKILL.md 为准，宪法约束以本文件为准。
-> **冲突裁决**：SKILL.md 与本文件冲突时，SKILL.md 优先（运行时依赖 > 设计参考）。冲突通过修宪程序解决——修正本文件与 SKILL.md 对齐。
-> 修改本文件需经 ultraverge 流程 + 人工审议确认。
+> 本文件是 converge SKILL 的最高设计治理文档——定义"SKILL 该长什么样、该包含什么"的宪法级判据；机制描述以 SKILL.md 为准，宪法约束以本文件为准。本文件的权威源于用户对 ultraverge 收敛结果的批准，而非内容的生成来源。
+> 运行时机制冲突时以 SKILL.md 为准（运行时依赖优先于设计参考）；冲突本身即触发修宪程序，修正本文件与 SKILL.md 对齐。修改本文件需经 ultraverge 流程 + 人工审议确认。
 
 ---
 
@@ -95,3 +92,4 @@
 | 日期 | 变更 | 触发 |
 |------|------|------|
 | 2026-06-07 | 初始创建：定义 converge SKILL 的宪法级设计原则、Orchestrator 行为边界、治理文档清单与修改程序 | ultraverge 收敛通过 (plan: 20260607-converge-skill-constitution) |
+| 2026-06-10 | C5 落地：优先级表述澄清——本文件开头段改写为"最高设计治理文档"+冲突裁决合并表述；SKILL.md 侧镜像句改为指针引用（验收裁断：接受 Occam 上位方案偏差）。随减重计划 C1-C5 原子落地 | ultraverge 收敛通过 + 验收通过 (plan: 20260610-skill-slimming-and-corrections) |
