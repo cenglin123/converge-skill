@@ -1,6 +1,6 @@
 ---
 type: antipattern-registry
-last_distilled_at: ""                   # 由 distill 脚本首次运行后写入
+last_distilled_at: "2026-06-10T10:02:15Z"                   # 由 distill 脚本首次运行后写入
 dormant_threshold: 5                     # 连续 N 次收敛零命中 → active 降 dormant
 archive_threshold: 12                    # 连续 N 次收敛零命中 → dormant 降 archived
 new_prefix_window: 5                     # 统计 new: 前缀的滑动窗口大小（最近 N 次收敛）
@@ -43,7 +43,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       只修当前阻断点，不上溯检查同一上游决策是否也受污染。
@@ -55,7 +55,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       reviewer 上轮提结构性切换，executor 在原方案内打补丁敷衍。
@@ -67,7 +67,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       reviewer 上轮要 X，executor 给了"X 和 Y 的折中"（如 0.2 vs 0.35 → 给 0.25），
@@ -80,7 +80,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       executor 盲目延续过往 Accepted 方案，未独立审视当前 reviewer 的具体要求。
@@ -94,7 +94,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       子代理生成看似合理的"成功报告"但未实际执行关键操作。两种典型表现：
@@ -113,7 +113,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       声称通用但实际专用（或反之），导致用户/agent 产生虚假预期。
@@ -125,7 +125,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       名称、描述、实现三者不一致，产物不清楚自己是什么。
@@ -137,7 +137,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       工具层携带业务数据或环境硬编码，破坏纯度，导致无法干净复用。
@@ -149,7 +149,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       依赖静态快照（如复制 node_modules）或硬编码环境路径，放弃版本管理和可移植性。
@@ -161,7 +161,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     description: |
       文档中包含描述"过去发生过什么"而非"现在是什么"的历史措辞。
@@ -180,7 +180,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     detection_constraint: indirect
     description: |
@@ -196,7 +196,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 0
+    zero_streak: 3
     resurrection_log: []
     detection_constraint: indirect
     description: |
