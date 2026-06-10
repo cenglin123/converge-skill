@@ -57,6 +57,20 @@ description: Use when a plan, code artifact, or other structured output needs it
 | **Reviewer** | 每轮 Spawn 的独立 agent | **全新上下文**（看不到历史对话）；prompt 自足 |
 | **Executor** | 每轮 Spawn 的独立 agent | 全新上下文；prompt 自足 |
 
+### 模型分层
+
+Executor 可降档（模型档位下调）至该家族低档执行，**仅当同时满足以下三条件**：
+
+- (a) 执行合同已通过确定性检查——指令含逐字文本或等价的零歧义规格；
+- (b) 用户显式授权或计划明示——默认 inherit（继承主对话模型），**不静默降档**。本条**收紧并跨框架推广**附录 A.3 codex 约束 #4（模型继承优先）：Executor 模型档位选择场景中二者冲突时以本节为准，A.3 #4 继续管辖其余 model override 情形；
+- (c) 降档时验收**必须**包含确定性核对（diff / grep / 测试 / 计数），不得仅语义验收。
+
+**不降档角色**：Reviewer、Orchestrator、设计审查（判断力密集）。确定性核对类子任务（清点、diff/grep 核对、行数统计——判别准绳：任务存在客观判准、其结果可被机械复核）可用低档。未列出的角色（如层级模式的 Worker、仲裁 agent、L2 gate Reviewer）默认 inherit。
+
+档位经由各框架 Spawn 的模型选择参数实现（如 Claude Code Agent 工具的 `model` 参数）；框架不支持模型选择时视同 inherit。降档（模型档位下调）与本 SKILL 既有的"降级"（能力/流程降级，见附录 A.4）语义无关，互不触发对方的义务。档位取值与三条件核对结果须记入 attempt log。
+
+家族档位对照见 `refs/model-tiers.md`（数据层，随模型换代更新，无需修宪）。
+
 ---
 
 ## 终止状态与收敛判定（D11）
@@ -268,6 +282,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 - [ ] 不存在未处理的 `contract_amendment_required: true` 标记
 - [ ] 若触发了降级（orchestrator_self / inner_loop 降级）：用户已被告知降级模式及对结论可靠性的影响
 - [ ] 若触发了设计审查：`design-review.md` 已写入，highlights 已报告用户，用户决策已记录
+- [ ] 若本次收敛中 Executor 使用了降档（low）：验收已包含确定性核对，档位取值与三条件核对结果已记入 attempt log
 
 ---
 
@@ -286,6 +301,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | `gate_l2_signal_threshold` | `warn` | 信号触发条件（当前仅支持 `warn`；`info`/`critical` 级别预留给后续 L1 信号扩展） |
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 | `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
+| `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
 
 ---
 
@@ -393,6 +409,7 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | 在 Dynamic Workflows 中插入质量门控：两级门检协议 + 触发决策 + 预算统筹 | `refs/quality-gate.md` |
 | 收敛后设计审查：7 维骨架、单轮咨询式、不给阻断权重 | `refs/design-review-prompt.md` |
 | Reviewer/Executor/Orchestrator 反模式巡查清单（动态注入，status 由 distill 维护） | `refs/antipatterns.md` |
+| Executor 降档时选择各家族低档 | `refs/model-tiers.md` |
 
 ---
 
