@@ -1,5 +1,6 @@
 #!/bin/sh
 echo "[post-merge] checking for stale active/ items..."
 python_exe="${PYTHON:-python}"
-top="$(git rev-parse --show-toplevel)"
+top="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -n "$top" ] || exit 0
 "$python_exe" "$top/scripts/hooks/stale-check.py"
