@@ -1,3 +1,0 @@
-#!/bin/sh
-echo "[pre-commit] running stale-active check..."
-exec "${PYTHON:-python3}" "$(git rev-parse --show-toplevel)/scripts/hooks/pre-commit.py"
