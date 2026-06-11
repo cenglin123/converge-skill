@@ -106,9 +106,9 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 
 ## 状态
 
-- [ ] 计划写入（本文件）— 2026-06-10
-- [ ] ultraverge：≥3 并行 Reviewer 评议
-- [ ] （若评议有阻断）完整收敛
-- [ ] 强制设计审查
-- [ ] 执行（低成本 agent）+ 验收（Orchestrator）
-- [ ] 人工确认提交
+- [x] 计划写入（本文件）— 2026-06-10
+- [x] ultraverge：≥3 并行 Reviewer 评议（R1=6 联合阻断）
+- [x] 完整收敛（R2 fresh reviewer 可执行零阻断，字节级核验）
+- [x] 强制设计审查（3 highlights，见 .converge/done/20260610-model-tiering-amendment/design-review.md）
+- [x] 执行 + 验收（执行由用户于 22:12 自行提交 b76b156；R2 转事后字节级验收通过——时序倒置如实记录于 retrospective §1）
+- [x] 人工确认提交（commit b76b156/b82a227，作者 CL）
