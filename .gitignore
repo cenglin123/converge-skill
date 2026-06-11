@@ -1,1 +1,3 @@
-.converge/
+.converge/tmp/
+.converge/active/
+.converge/gate/
