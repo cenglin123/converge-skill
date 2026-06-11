@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "[pre-commit] running stale-active check..."
+exec python scripts/hooks/pre-commit.py
