@@ -10,10 +10,22 @@ Exit 0 otherwise.
 
 import os
 import re
+import subprocess
 import sys
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SKIP_ENV = "CONVERGE_SKIP_ARCHIVE_CHECK"
+
+
+def _repo_root():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+REPO_ROOT = _repo_root()
 
 stale_items = []
 warn_items = []
@@ -21,7 +33,8 @@ info_items = []
 
 
 def _slug_of(fname):
-    return os.path.splitext(fname)[0]
+    base = os.path.splitext(fname)[0]
+    return re.sub(r"^\d{8}-", "", base)
 
 
 # ── Check .converge/active/<slug>/ ──────────────────────────────────────
@@ -48,7 +61,8 @@ if os.path.isdir(converge_active):
         state_file = os.path.join(slug_dir, "_orchestrator-state.md")
         if os.path.isfile(state_file):
             try:
-                text = open(state_file, encoding="utf-8").read()
+                with open(state_file, encoding="utf-8") as f:
+                    text = f.read()
             except OSError:
                 text = ""
             if re.search(r"^current_phase:\s*completed", text, re.MULTILINE):
@@ -84,10 +98,8 @@ if os.path.isdir(plans_active):
 
         slug = _slug_of(fname)
 
-        # Rule 1: same slug exists in done/ (with or without date prefix)
-        in_done = any(
-            slug in _slug_of(d) or d == fname for d in done_plans
-        )
+        # Rule 1: same slug exists in done/ (date-stripped exact match)
+        in_done = any(_slug_of(d) == slug for d in done_plans)
         if in_done:
             stale_items.append(
                 f"  docs/plans/active/{fname} — matching plan in done/, remove active copy"
