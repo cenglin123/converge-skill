@@ -108,6 +108,7 @@ contract 路径：<contract_path>
    orchestrator 会先回写 plan 本体再让 executor 改下游。
 6. 阅读 attempts.md 时遇到 `**[Orchestrator Detection]**` 前缀的判定，
    可挑战其正确性（在 antipattern_observations 中报告）。
+7. **Orchestrator 边界审计**：审查 attempts.md 时检查是否存在 `source: orchestrator_self` 条目（Orchestrator 直接修改产物而非通过独立 Executor）。若存在：在 suggestion_issues 中标注降级影响——此类条目的修改未经独立 Executor 路径隔离，可信度低于正常条目。若该条目关联的修改涉及 escalated_issues 中的复查项 → 该复查项不能标记为 `resolved`，必须标记为 `still_blocking` 并说明"修复来源为 orchestrator_self，未经独立 Executor 验证"。
 
 ## Antipattern 巡查（Round ≥ 2）
 

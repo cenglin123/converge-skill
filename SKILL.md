@@ -191,6 +191,11 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
    a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）
    b. 输出写入 round-N.md（格式见 refs/state-schema.md），记录 instance_id
    c. Orchestrator 处理：overturn 检测、等价标注、antipattern 关联
+   c+1. **角色边界自检**（详见责任清单 #3）：
+        - 本轮动作是否仅限于循环管理 + 语义判定？
+        - 若即将对产物做任何直接修改 → 停止，跳至步骤 f（Spawn Executor）
+        - 将自检结果记录到 _orchestrator-state.md（boundary_check: pass | violated）
+        - 若 violated 且已执行修改（guard step 被跳过时的补救路径）→ 在 attempts.md 以 [Orchestrator Detection] annotation 标注 source: orchestrator_self，告知用户降级影响
    d. 若 verdict = 可执行 → 收敛！执行完成前必检清单，写 retrospective.md，移 done/
    e. 若有 contract_amendment_required → 先回写 contract.md 再继续
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
@@ -240,10 +245,11 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 **每轮必做** ——
 1. **Spawn 真实性** — 失败时如实记 `orchestrator_self`，不掩盖
 2. **overturn 判定** — 比较本轮 issue 与 attempts.md 已 Accepted 修复
-3. **Type O 计数** — 同决策点推翻 ≥3 次 → 硬停
-4. **Type R/F 等价标注** — 同源标注（语义判断）
-8. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
-9. **_orchestrator-state.md 维护** — 每完成一个动作即更新
+3. **角色边界自检** — 每轮处理完 reviewer 输出后、执行任何修复动作前，确认：本次动作范围是否为"循环管理 + 语义判定"？若涉及产物修改且尚未 spawn Executor → 必须先 spawn Executor。违反时必须在 _orchestrator-state.md 记录 boundary_check: violated，在 attempts.md 以 [Orchestrator Detection] annotation 标注 source: orchestrator_self，告知用户降级模式及对结论可靠性的影响。Round 0 和 inner loop 中存在同构的边界违反窗口，当前 guard step 覆盖主循环（最频发场景），其余窗口依靠本责任清单条目提醒
+4. **Type O 计数** — 同决策点推翻 ≥3 次 → 硬停
+5. **Type R/F 等价标注** — 同源标注（语义判断）
+9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
+10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
 
 **条件触发** ——
 5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
@@ -276,6 +282,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 - [ ] 最后一个 fresh reviewer verdict = `可执行`（或用户已显式接受 b/c）
 - [ ] attempts.md 中所有 Accepted entry 无未解决的 Overturn 标注
 - [ ] _orchestrator-state.md 的 current_phase 已标记为 completed
+- [ ] 每轮 boundary_check 均为 pass，或违反已记录并告知用户
 - [ ] **若收敛对象是代码**：所有测试通过（全绿）
 - [ ] 所有 suggestion items 已处置（采纳/拒绝/延后，记录在 retrospective 中）
 - [ ] retrospective.md 已写入 `.converge/done/<slug>/`

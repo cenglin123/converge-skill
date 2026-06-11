@@ -83,6 +83,8 @@ last_updated_at: <ISO datetime>
 - last_completed_action: <一句话描述>
 - next_pending_action: <一句话描述>
 - progress_summary: <人类可读进度摘要，如 "R2: 1/3 blocking fixed, 2 remaining (B2=反面论证, B3=偏差分析)">
+- boundary_check: <pass | violated>（每轮角色边界自检结果，Orchestrator 是否仅执行循环管理+语义判定而未直接修改产物）
+- boundary_violation_detail: <可选，描述违反情况>
 
 ## Round 0 State
 
