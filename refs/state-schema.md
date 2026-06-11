@@ -198,4 +198,4 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 - **Reviewer 验证**：<fresh reviewer verdict>
 ```
 
-> 若为层级收敛（启用 decomposition-protocol.md），在 §10 之后追加 **§11. 层级收敛评估**，格式见 `decomposition-protocol.md` §Retrospective 扩展。
+> 若为层级收敛（启用 decomposition-protocol.md），在 §10 之后追加 **§12. 层级收敛评估**（§11 预留给收敛后修订记录；两节均可缺省，编号固定不顺延——保证 distill 类脚本按节标题定位的稳定性），格式见 `decomposition-protocol.md` §Retrospective 扩展。

@@ -70,7 +70,7 @@ suggestion_issues:  # non-blocking, will NOT block convergence
   - description: ...
 antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
   - round_referenced: 3
-    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | orchestrator_self_review | silent_merge>
+    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）
     evidence: |
       <quote from attempts.md>
 rubric_scores:              # 仅当 contract 中定义了维度时填写
@@ -134,7 +134,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 
 ### 确定性检查（优先实际运行）
 
-**前提**：你需要有 shell/bash 执行权限，且环境已安装项目依赖。如果无法执行命令（权限不足、环境缺失、命令不存在），跳过本节并在输出中标注 `deterministic_check: skipped (reason: <具体原因>)`，然后直接进入语义审查。
+**前提**：你需要有 shell/bash 执行权限，且环境已安装项目依赖。如果无法执行命令（权限不足、环境缺失、命令不存在），跳过本节并在输出中标注 `deterministic_check: skipped` 并在 `deterministic_check_skip_reason` 填写具体原因，然后直接进入语义审查。
 
 1. **运行测试套件**：执行 `<test_command>`（由 orchestrator 在 prompt 中注入），检查 exit code。
    - exit code ≠ 0 → 直接列为 blocking issue（attribution: executor_limit），无需进一步审查测试覆盖的代码
@@ -145,7 +145,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
    - 有新增 lint 警告 → suggestion
 
 3. **无测试套件时，构造最小 happy-path**（Reviewer 自行构造，无需 Orchestrator 注入命令）：若 `<test_command>` 和 `<lint_command>` 均为空，且审查对象包含可执行脚本（CLI、Python、Shell 等），Reviewer 应在语义审查之前**先构造一个最小的端到端场景并实际运行**——不是测试套件，只是验证基本行为是否符合文档描述。例：若审查 scheduler 脚本，运行 `python scheduler.py init → dispatch → complete → done` 整条链。pilot 经验显示，仅靠 RE 审查遗漏的 bug（pipe 优先级、budget 未执行、协议校验缺失）都是 CLI 可复现的。
-4. **无 shell 权限或无依赖时**：跳过 3，在输出中标注 `deterministic_check: skipped (reason: <具体原因>)`。
+4. **无 shell 权限或无依赖时**：跳过 3，在输出中标注 `deterministic_check: skipped` 并在 `deterministic_check_skip_reason` 填写具体原因。
 
 确定性检查的结果是不可辩驳的——不需要语义判断，不需要归因讨论。通过确定性检查后再进入语义审查（架构、边界条件、逻辑正确性等），让模型的判断力用在只有模型能做的地方。
 
@@ -153,7 +153,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 
 ### 语义审查（确定性检查通过后，或确定性检查跳过时）
 
-- 若确定性检查被跳过：测试状态只能通过语义推断，在 blocking issue 中标注 `deterministic_check: skipped`，结论可信度降低
+- 若确定性检查被跳过：测试状态只能通过语义推断，在输出中标注 `deterministic_check: skipped` 并在 `deterministic_check_skip_reason` 填写具体原因，结论可信度降低
 - 是否遵循 TDD 红绿循环？跳过红灯直接写实现 → 列为 suggestion
 - 测试是否覆盖了 Executor 修改的路径？未覆盖的修改路径 → 列为 suggestion
 - 是否有确定性工具无法捕获的逻辑问题（边界条件、竞态、类型安全等）？→ 按 blocking/suggestion 标准判定

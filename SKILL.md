@@ -18,9 +18,11 @@ description: Use when a plan, code artifact, or other structured output needs it
 ```
 产物草稿完成 → [Round 0 合同谈判] → 评议（默认入口）→ Converge（按需升级）→ 产物进入执行/落地
                      ↑                  ↑               ↑                  ↑
-               可选前置阶段         单轮主观 verdict  仅 conceptual/arch   ultraverge:
-               对齐"什么算完成"     一次写回           阻断时升级多轮收敛   全量（见执行流程）
-               + 定义 Rubrics 维度
+                可选前置阶段         单轮主观 verdict  仅 conceptual/arch   ultraverge:
+                对齐"什么算完成"     一次写回           阻断时升级多轮收敛   全量（见执行流程）
+                + 定义 Rubrics 维度
+                                    ↖─────────────────────────────────────────────╳
+                                      需重新设计 → 用户决定：重写/缩小范围/主观接受
 ```
 
 - **前置条件**：有可审查的产物（plan 文件 / 代码项目 / 文档等），且产物已完成初稿
@@ -73,17 +75,17 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 
 ---
 
-## 终止状态与收敛判定（D11）
+## 终止状态与收敛判定
 
 | 终止类型 | 判据 | 用户确认 | 产物要求 |
 |----------|------|---------|---------|
-| **D11-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，移 done/ |
-| **D11-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 写 retrospective.md，移 done/ |
-| **D11-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 写 retrospective.md，移 done/ |
-| **预算软停**（无 D11 对应） | 达预算上限（默认 5 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
-| **振荡硬停**（无 D11 对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
+| **终止-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，移 done/ |
+| **终止-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 写 retrospective.md，移 done/ |
+| **终止-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 写 retrospective.md，移 done/ |
+| **预算软停**（无终止类型对应） | 达预算上限（默认 5 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
+| **振荡硬停**（无终止类型对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
 
-D11=a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → D11-c。
+终止-a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → 终止-c。
 
 ---
 
@@ -141,7 +143,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
 - **评议**：Reviewer prompt 额外注入设计审查的 7 维骨架（DR1-DR7），不做"仅查方向性问题"的裁切。**至少 Spawn `ultraverge_min_reviewers`（默认 3）个独立 Reviewer 并行审查**——这是 ultraverge 与普通评议的关键区分：普通评议允许单 Reviewer 快速对齐，ultraverge 要求多条独立视角以确保事实前提验证（如代码现状审计）和盲区覆盖（如 Bitter Lesson 冲突、跨治理域打包等问题往往只有少数 Reviewer 能捕获）。
 - **并行裁决规则**：`ultraverge_min_reviewers` 条 verdict 全部一致 → 采纳。存在分歧时：
   - 多数方向 vs 少数方向 → Orchestrator 按多数方向推进，**但**：若少数派的阻断 issue severity 为 `conceptual` 或 `architectural`，Orchestrator **必须**升级为完整收敛（对应宪法约束 §1：不能以多数决跳过深层阻断）
-  - 裁决规则是 ultraverge 专属的并行评议收敛语义，与 `.meta/deliberations/README.md` 的 ≥3 评议摘要自动收敛互为补充（前者管 spawn 约束 + 并行收敛，后者管跨会话评议汇总），不冲突
+  - 裁决规则仅管辖 ultraverge 的 spawn 约束 + 并行收敛语义，不约束宿主项目自有的评议汇总机制
 - **降级路径**：若因 token 预算、API 不可用、并发限制等原因无法 spawn 满 `ultraverge_min_reviewers` 个 Reviewer：
   - 实际 spawn 数 ≥2 且 verdict 一致 → 降级为普通评议模式，Orchestrator 标注 `degraded_from: ultraverge` 并告知用户
   - 实际 spawn 数 <2 或 verdict 不一致 → 中止，告知用户原因，由用户决定是否降级为普通评议或稍后重试
@@ -160,8 +162,9 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
 首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：
 
 - verdict = 可执行 → 收敛完成，归档 done/
-- verdict = 需修订 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
-- verdict = 需修订 + 阻断为 conceptual/architectural → **升级为完整收敛**（下方主循环）
+- verdict = 阻断需修复 + 阻断为 implementation/structural → Executor 修复，评议模式再走一轮
+- verdict = 阻断需修复 + 阻断为 conceptual/architectural → **升级为完整收敛**（下方主循环）
+- verdict = 需重新设计 → 不进入修复循环。向用户报告产物存在方向性缺陷，由用户决定：重写产物后重新评议、缩小范围后重新评议、或走主观接受程序
 
 完整收敛仅在有证据表明"评议的单轮深度不足以解决问题"时触发——不是默认路径。
 
@@ -193,7 +196,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
     g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
     h. plan_amendment_required 时先回写 plan 本体再改下游
-    i. （可选）Continue 做 inner loop reviewer 验收
+    i. Continue 做 inner loop reviewer 验收（宪法第二部 #2：不可跳过；Continue 不可用时按附录 A.2/A.4 降级为 orchestrator 逐条验收并标注）
 4. 超 max_outer_loops → 预算软停，询问用户
 ```
 

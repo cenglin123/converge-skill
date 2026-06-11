@@ -234,7 +234,7 @@ Planner 在同步点看两个指标：
 
 **停滞判定**：连续 2 个 phase 阻断数未下降 → 标记为停滞，Planner 决定是否：
 - 调整 scope（拆更细）
-- 降级处理（接受 D11=b 渐近收敛）
+- 降级处理（接受终止-b 渐近收敛）
 - ask user
 
 ### 边界冲突仲裁
@@ -348,7 +348,7 @@ Report format: see decomposition-protocol.md §子收敛阶段汇报
 层级收敛的 retrospective 在标准格式基础上增加：
 
 ```markdown
-## 11. 层级收敛评估
+## 12. 层级收敛评估
 
 | 维度 | 评估 |
 |------|------|
