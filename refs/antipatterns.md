@@ -171,7 +171,8 @@ antipatterns:
       关键词如"已迁出"、"曾位于"、"原名为"、"从 X 提取"等迁移时态标记是线索——
       但需判断整句是否在描述历史而非现状。描述当前状态的"已完成"、"已实现"等不算。
       English equivalents: "moved from", "extracted from", "formerly located in",
-      "relocated to". CHANGELOG 文件不在此检测范围内——CHANGELOG 是迁移考古的合法归宿。
+      "relocated to". CHANGELOG 文件不在此检测范围内——CHANGELOG 是专用变更日志，
+      其内容本身就是在记录变更历史，属于有意设计而非考古残留。
 
   # ── Orchestrator 层（间接检测，通过日志痕迹）─────────────────────────
 
