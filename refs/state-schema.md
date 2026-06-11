@@ -179,6 +179,21 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 | 未使用/总高分的维度 | 是否有维度从未触发低分（→ 考虑移除） |
 | rubric_gap 触发次数 | N 次（Reviewer 认为 Rubric 未覆盖的问题） |
 | 跨轮分数趋势 | 各维度分数在轮次间的变化 |
+
+## 成本数据（可缺省）
+
+| 阶段 | tokens | 时间 | agent 数 | 关键产出 |
+|------|--------|------|----------|---------|
+| R0 合同谈判 | — / ~K | — / ~min | — | — |
+| R{N} Reviewer | ~K | ~min | 1 | — |
+| R{N} Executor | ~K | ~min | 1 | — |
+| 设计审查 | ~K | ~min | 1 | — |
+| **总计** | **~K** | **~min** | **N** | — |
+
+> token 和时间供后续收敛校准预算参数（max_outer_loops、gate_max_token_share 等）。
+> 框架无法提供精确 token 计数时填估算值并标注 ≈。
+> 阶段行按实际收敛流程增减（R0 无则删、inner loop 可合并到对应 outer round、设计审查未触发则删）。
+> 跨 ≥3 次收敛积累后，按 totals 行估算单轮/单 agent 平均消耗，据此调整预算参数。
 ```
 
 ## 11. 收敛后修订记录（如有）
@@ -198,4 +213,4 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 - **Reviewer 验证**：<fresh reviewer verdict>
 ```
 
-> 若为层级收敛（启用 decomposition-protocol.md），在 §10 之后追加 **§12. 层级收敛评估**（§11 预留给收敛后修订记录；两节均可缺省，编号固定不顺延——保证 distill 类脚本按节标题定位的稳定性），格式见 `decomposition-protocol.md` §Retrospective 扩展。
+> 若为层级收敛（启用 decomposition-protocol.md），在成本数据节之后追加 **§12. 层级收敛评估**（§11 预留给收敛后修订记录；两节均可缺省，编号固定不顺延——保证 distill 类脚本按节标题定位的稳定性），格式见 `decomposition-protocol.md` §Retrospective 扩展。
