@@ -25,14 +25,14 @@ def check(data: dict) -> list[str]:
     """返回触发的告警信号标签列表，空列表表示全部通过。"""
     alerts = []
 
-    # 1. Worker 一致性和 Token 预算偏差（使用远程代理自动构建签名）
+    # 1. Worker 一致性
     wc = data.get("worker_consistency", {})
     if wc.get("overlap_ratio", 1.0) < WORKER_OVERLAP_THRESHOLD:
         alerts.append("worker_divergence")
     if wc.get("variance_threshold_exceeded", False):
         alerts.append("worker_variance")
 
-    # 2. Token 预算偏差率自动调整：超出 30% 自动记录超限次数
+    # 2. Token 预算偏差（阶段超支 + 总水位）
     tb = data.get("token_budget", {})
     phase_spent = tb.get("phase_spent", 0)
     phase_expected = tb.get("phase_expected", 1)
@@ -75,6 +75,8 @@ def check(data: dict) -> list[str]:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     try:
         data = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError):

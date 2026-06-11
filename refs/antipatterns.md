@@ -1,8 +1,8 @@
 ---
 type: antipattern-registry
-last_distilled_at: "2026-06-10T10:02:15Z"                   # 由 distill 脚本首次运行后写入
-dormant_threshold: 5                     # 连续 N 次收敛零命中 → active 降 dormant
-archive_threshold: 12                    # 连续 N 次收敛零命中 → dormant 降 archived
+last_distilled_at: "2026-06-11T09:48:59Z"                   # 由 distill 脚本首次运行后写入
+dormant_threshold: 8                     # 连续 N 次收敛零命中 → active 降 dormant（前期观察窗口，积累实证数据）
+archive_threshold: 20                    # 连续 N 次收敛零命中 → dormant 降 archived（保守阈值，避免过早丢失未验证的反模式）
 new_prefix_window: 5                     # 统计 new: 前缀的滑动窗口大小（最近 N 次收敛）
 new_prefix_promote_threshold: 3          # 窗口内出现 ≥ N 次 → 提示人工固化
 ---
@@ -43,7 +43,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       只修当前阻断点，不上溯检查同一上游决策是否也受污染。
@@ -55,7 +55,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       reviewer 上轮提结构性切换，executor 在原方案内打补丁敷衍。
@@ -67,7 +67,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       reviewer 上轮要 X，executor 给了"X 和 Y 的折中"（如 0.2 vs 0.35 → 给 0.25），
@@ -80,7 +80,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       executor 盲目延续过往 Accepted 方案，未独立审视当前 reviewer 的具体要求。
@@ -94,7 +94,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       子代理生成看似合理的"成功报告"但未实际执行关键操作。两种典型表现：
@@ -111,9 +111,9 @@ antipatterns:
   - id: false_generality
     layer: design
     status: active
-    last_confirmed: ""
-    confirmed_count: 0
-    zero_streak: 3
+    last_confirmed: "20260610-model-tiering-amendment"
+    confirmed_count: 1
+    zero_streak: 2
     resurrection_log: []
     description: |
       声称通用但实际专用（或反之），导致用户/agent 产生虚假预期。
@@ -125,7 +125,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       名称、描述、实现三者不一致，产物不清楚自己是什么。
@@ -137,7 +137,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       工具层携带业务数据或环境硬编码，破坏纯度，导致无法干净复用。
@@ -149,7 +149,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       依赖静态快照（如复制 node_modules）或硬编码环境路径，放弃版本管理和可移植性。
@@ -161,7 +161,7 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     description: |
       文档中包含描述"过去发生过什么"而非"现在是什么"的历史措辞。
@@ -180,13 +180,12 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     detection_constraint: indirect
     description: |
       "reviewer 意见和上轮差不多，不用 Spawn 新的，我自己看看就行"——
       orchestrator 版 minimum_patch。
-      对应 Red Flag #1。
       检测方式（间接）：下一轮 Reviewer 或复盘者通过 round-N.md 的 reviewer_backend
       字段检测——若出现 orchestrator_self 而非真实 spawn 后端，即命中。
       Reviewer 不直接审查 Orchestrator 的思考过程（看不到），只通过日志痕迹间接检测。
@@ -196,13 +195,12 @@ antipatterns:
     status: active
     last_confirmed: ""
     confirmed_count: 0
-    zero_streak: 3
+    zero_streak: 4
     resurrection_log: []
     detection_constraint: indirect
     description: |
       "这个 issue 和上轮那个本质一样，我合并处理"——
       Type R 等价标注的滥用（未记录理由的 silently merge）。
-      对应 Red Flag #6。
       检测方式（间接）：复盘者检查 attempts.md 中 Type R 标注是否都附带
       [Orchestrator Detection] 理由；存在无理由的等价合并即命中。
 ```

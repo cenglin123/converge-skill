@@ -337,12 +337,14 @@ def print_report(convs, changes, new_entries, new_candidates, wrote: bool):
             print(f"  [{n}×] {desc}")
         print("  ↑ 需人工评估是否新增为正式条目（脚本不自动创建）")
     else:
-        print("  无（无 new: 达阈值，或四份样本中 new: 从未出现）")
+        print(f"  无（无 new: 达阈值，或 {n_conv} 份样本中 new: 从未出现）")
     print("=" * 64)
 
 
 # ========================================================================
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description="蒸馏 antipattern 命中频率 → 更新 registry status")
     ap.add_argument("--done", default=DEFAULT_DONE_DIR, help="done/ 目录")
     ap.add_argument("--registry", default=DEFAULT_REGISTRY, help="antipatterns.md 路径")
