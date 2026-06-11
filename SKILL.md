@@ -196,6 +196,12 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
         - 若即将对产物做任何直接修改 → 停止，跳至步骤 f（Spawn Executor）
         - 将自检结果记录到 _orchestrator-state.md（boundary_check: pass | violated）
         - 若 violated 且已执行修改（guard step 被跳过时的补救路径）→ 在 attempts.md 以 [Orchestrator Detection] annotation 标注 source: orchestrator_self，告知用户降级影响
+   c+2. **意图漂移条件注入**（详见责任清单 #19）：
+        - 若存在 escalated_issues 或 contract_amendment_required 反复出现（≥2 次）→ 从 _orchestrator-state.md 提取 progress_summary 摘要，在下一轮 reviewer prompt 中注入 <drift_context> 块
+        - 处理 reviewer 输出时检测 drift_detected: true 标记，若有 → 记录到 rule_frequency
+   c+3. **规则触发记录**（详见责任清单 #19）：
+        - 在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态
+        - gate_l1 / design_review_trigger 在对应事件发生时更新
    d. 若 verdict = 可执行 → 收敛！执行完成前必检清单，写 retrospective.md，移 done/
    e. 若有 contract_amendment_required → 先回写 contract.md 再继续
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
@@ -268,6 +274,9 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 **收口必做**（含逐项执行"收敛完成前必检"）——
 18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件：≥3 模块；或新约定/接口；或系统边界；或评议前置自检 Q4/Q5 触发过 blocking（职责边界和命名一致性问题往往暗示更深层架构问题）；或用户显式请求。满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
+
+**条件触发** ——
+19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 escalated_issues 存在或 contract_amendment_required 反复出现（≥2 次）时，从 _orchestrator-state.md 提取 progress_summary 摘要注入下一轮 reviewer prompt 的 `<drift_context>` 块；reviewer 通过 drift_detected: true 标记反馈漂移。与 #6 的关系：#6 是 Orchestrator 第一方循环内检测（plan 内容偏移，每 5 轮/触 Type O），本条是 Reviewer 独立第三方产物-合同对齐检测（条件注入），互补而非重叠。(b) 规则触发记录：在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态；gate_l1 / design_review_trigger 在对应事件发生时更新。rule_frequency 字段格式和规则 key 注册表见 `refs/state-schema.md`。不新增独立循环步骤。retrospective 中必须包含对追踪机制执行成本的评估（约 1 句话）；当被追踪规则总数降至 2 条以下时，必须显式评估追踪机制是否仍有必要
 
 ---
 

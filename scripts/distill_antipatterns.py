@@ -53,6 +53,18 @@ SECTION_HEADER = "## 3. Antipattern 巡查"      # 精确匹配
 EXPECTED_COLS = ["Round", "类型", "对象", "触发结果"]
 NEW_PREFIX = "new:"                             # 未知反模式占位（state-schema 定义；暂无真实样本）
 
+# -- Rule Activity 蒸馏常量 -------------------------------------------------
+RULE_SECTION_HEADER = "## Rule Activity"
+RULE_EXPECTED_COLS = ["rule", "triggered", "zero_streak", "status"]
+
+KNOWN_RULES = {
+    "boundary_guard": "guard",
+    "reviewer_boundary_audit": "guard",
+    "intent_drift_check": "guard",
+    "gate_l1": "guard",
+    "design_review_trigger": "guard",
+}
+
 
 # ========================================================================
 # raw source 解析
@@ -138,6 +150,209 @@ def collect_convergences(done_dir: Path) -> list[dict]:
         convs.append({"slug": slug, "task_hits": task_hits,
                       "round_hits": round_hits, "new_descs": new_descs})
     return convs
+
+
+# ========================================================================
+# Rule Activity 解析 & 聚合
+# ========================================================================
+def parse_rule_activity_section(md_text: str, slug: str) -> list[dict]:
+    """解析单份 retrospective 的 Rule Activity 表。
+
+    返回 [{rule, triggered, zero_streak, status}, ...]。
+    解析失败抛 ValueError，由调用方 skip + warning。
+    """
+    lines = md_text.splitlines()
+
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip() == RULE_SECTION_HEADER:
+            start = i
+            break
+    if start is None:
+        raise ValueError(f"未找到节标题 '{RULE_SECTION_HEADER}'")
+
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    section = lines[start + 1:end]
+
+    table_rows = []
+    for ln in section:
+        s = ln.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if cells[:len(RULE_EXPECTED_COLS)] == RULE_EXPECTED_COLS:
+            continue
+        if all(set(c) <= set("-: ") for c in cells if c):
+            continue
+        table_rows.append(cells)
+
+    rows = []
+    for idx, cells in enumerate(table_rows):
+        try:
+            if len(cells) < 4:
+                print(f"warning: {slug} Rule Activity 第 {idx+1} 行列数不足（{len(cells)}），跳过",
+                      file=sys.stderr)
+                continue
+            rule = cells[0].strip()
+            triggered_raw = cells[1].strip().lower()
+            zero_streak_raw = cells[2].strip()
+            status = cells[3].strip()
+            if triggered_raw in ("true", "yes", "1"):
+                triggered = True
+            elif triggered_raw in ("false", "no", "0"):
+                triggered = False
+            else:
+                print(f"warning: {slug} Rule Activity 规则 '{rule}' triggered 值无法识别 "
+                      f"'{cells[1].strip()}'，跳过", file=sys.stderr)
+                continue
+            zero_streak = int(zero_streak_raw)
+            rows.append({
+                "rule": rule,
+                "triggered": triggered,
+                "zero_streak": zero_streak,
+                "status": status,
+            })
+        except (ValueError, IndexError) as e:
+            print(f"warning: {slug} Rule Activity 第 {idx+1} 行解析失败（{e}），跳过",
+                  file=sys.stderr)
+            continue
+    return rows
+
+
+def collect_rule_activities(done_dir: Path) -> list[dict]:
+    """扫描 done/ 下每份 retrospective 的 Rule Activity 节。
+
+    每个元素：{slug, rules: [{rule, triggered, zero_streak, status}, ...]}。
+    单份解析失败 → 打 warning 并跳过（defensive parsing）。
+    """
+    convs = []
+    retro_paths = sorted(done_dir.glob("*/retrospective.md"))
+    if not retro_paths:
+        print(f"warning: {done_dir} 下未找到任何 retrospective.md", file=sys.stderr)
+    for p in retro_paths:
+        slug = p.parent.name
+        try:
+            rules = parse_rule_activity_section(p.read_text(encoding="utf-8"), slug)
+        except (ValueError, OSError) as e:
+            print(f"warning: 跳过 {slug}（Rule Activity 解析失败：{e}）", file=sys.stderr)
+            continue
+        convs.append({"slug": slug, "rules": rules})
+    return convs
+
+
+def aggregate_rules(rule_convs: list[dict]) -> dict[str, dict]:
+    """跨收敛聚合每条 rule 的统计。
+
+    返回 {rule_key: {
+        max_zero_streak, triggered_count, total_convergences,
+        classification, advisory_status, per_convergence: [{slug, triggered, zero_streak, status}, ...]
+    }}
+    """
+    total = len(rule_convs)
+    agg: dict[str, dict] = {}
+
+    for conv in rule_convs:
+        slug = conv["slug"]
+        for r in conv["rules"]:
+            key = r["rule"]
+            if key not in agg:
+                agg[key] = {
+                    "max_zero_streak": 0,
+                    "triggered_count": 0,
+                    "total_convergences": total,
+                    "classification": KNOWN_RULES.get(key, "unknown"),
+                    "advisory_status": "",
+                    "per_convergence": [],
+                }
+            agg[key]["per_convergence"].append({
+                "slug": slug,
+                "triggered": r["triggered"],
+                "zero_streak": r["zero_streak"],
+                "status": r["status"],
+            })
+            if r["zero_streak"] > agg[key]["max_zero_streak"]:
+                agg[key]["max_zero_streak"] = r["zero_streak"]
+            if r["triggered"]:
+                agg[key]["triggered_count"] += 1
+
+    return agg
+
+
+def classify_rule_status(agg: dict[str, dict],
+                         guard_dormant_th: int, guard_archive_th: int,
+                         core_dormant_th: int, core_archive_th: int) -> None:
+    """根据分类和阈值，原地更新每条 rule 的 advisory_status。"""
+    for key, info in agg.items():
+        cls = info["classification"]
+        streak = info["max_zero_streak"]
+        if cls == "guard":
+            if streak >= guard_archive_th:
+                info["advisory_status"] = "archived"
+            elif streak >= guard_dormant_th:
+                info["advisory_status"] = "dormant"
+            else:
+                info["advisory_status"] = "active"
+        elif cls == "core":
+            if streak >= core_archive_th:
+                info["advisory_status"] = "archived"
+            elif streak >= core_dormant_th:
+                info["advisory_status"] = "dormant"
+            else:
+                info["advisory_status"] = "active"
+        else:
+            info["advisory_status"] = "active"
+
+
+def print_rule_report(rule_convs: list[dict], agg: dict[str, dict]) -> None:
+    """打印 Rule Activity 蒸馏报告（仅报告，不写文件）。"""
+    n_conv = len(rule_convs)
+    print("=" * 64)
+    print("Rule Activity 蒸馏报告（advisory，不自动修改任何文件）")
+    print("=" * 64)
+    print(f"扫描收敛数（成功解析 Rule Activity 节）: {n_conv}")
+    print()
+
+    print("── 跨收敛汇总 ──")
+    print(f"  {'rule':30s} {'class':8s} {'max_streak':>10s} {'triggered':>9s} {'total':>5s}  {'advisory':9s}")
+    for key in sorted(agg.keys()):
+        info = agg[key]
+        print(f"  {key:30s} {info['classification']:8s} {info['max_zero_streak']:>10d} "
+              f"{info['triggered_count']:>9d} {info['total_convergences']:>5d}  "
+              f"{info['advisory_status']:9s}")
+    print()
+
+    print("── 逐收敛明细 ──")
+    for conv in rule_convs:
+        print(f"  [{conv['slug']}]")
+        for r in conv["rules"]:
+            trig = "✓" if r["triggered"] else "✗"
+            print(f"    {r['rule']:30s} triggered={trig}  zero_streak={r['zero_streak']:>3d}  "
+                  f"status={r['status']}")
+    print()
+
+    dormant_or_archived = {k: v for k, v in agg.items()
+                           if v["advisory_status"] in ("dormant", "archived")}
+    print("── 建议操作 ──")
+    if dormant_or_archived:
+        for key in sorted(dormant_or_archived.keys()):
+            info = dormant_or_archived[key]
+            status = info["advisory_status"]
+            if status == "archived":
+                print(f"  {key}: 建议归档（{info['classification']} 类，"
+                      f"max_zero_streak={info['max_zero_streak']}，"
+                      f"命中 {info['triggered_count']}/{info['total_convergences']} 次）")
+            else:
+                print(f"  {key}: 建议休眠（{info['classification']} 类，"
+                      f"max_zero_streak={info['max_zero_streak']}，"
+                      f"命中 {info['triggered_count']}/{info['total_convergences']} 次）")
+        print("  ↑ 以上为建议，需人工确认后再操作")
+    else:
+        print("  所有规则状态良好，无需降级")
+    print("=" * 64)
 
 
 # ========================================================================
@@ -349,31 +564,57 @@ def main():
     ap.add_argument("--done", default=DEFAULT_DONE_DIR, help="done/ 目录")
     ap.add_argument("--registry", default=DEFAULT_REGISTRY, help="antipatterns.md 路径")
     ap.add_argument("--write", action="store_true", help="回写 registry（默认 dry-run）")
+    ap.add_argument("--rules", action="store_true",
+                    help="同时（或单独）运行 Rule Activity 蒸馏报告")
+    ap.add_argument("--guard-dormant-threshold", type=int, default=5,
+                    help="guard 类规则休眠阈值（默认 5）")
+    ap.add_argument("--guard-archive-threshold", type=int, default=10,
+                    help="guard 类规则归档阈值（默认 10）")
+    ap.add_argument("--core-dormant-threshold", type=int, default=20,
+                    help="core 类规则休眠阈值（默认 20）")
+    ap.add_argument("--core-archive-threshold", type=int, default=40,
+                    help="core 类规则归档阈值（默认 40）")
     args = ap.parse_args()
 
-    registry_path = Path(args.registry)
-    try:
-        text = registry_path.read_text(encoding="utf-8")
-        _, fm, _, yaml_block = split_registry(text)
-        entries = parse_entries(yaml_block)
-    except (ValueError, OSError) as e:
-        print(f"error: registry 解析失败：{e}", file=sys.stderr)
-        sys.exit(1)
+    run_antipattern = not args.rules or args.write
+    run_rules = args.rules
 
-    dormant_th = int(fm.get("dormant_threshold", 5))
-    archive_th = int(fm.get("archive_threshold", 12))
-    window = int(fm.get("new_prefix_window", 5))
-    promote_th = int(fm.get("new_prefix_promote_threshold", 3))
+    # -- antipattern 蒸馏（默认行为，或 --write 时始终运行）--
+    if run_antipattern:
+        registry_path = Path(args.registry)
+        try:
+            text = registry_path.read_text(encoding="utf-8")
+            _, fm, _, yaml_block = split_registry(text)
+            entries = parse_entries(yaml_block)
+        except (ValueError, OSError) as e:
+            print(f"error: registry 解析失败：{e}", file=sys.stderr)
+            sys.exit(1)
 
-    convs = collect_convergences(Path(args.done))
-    new_entries, changes = distill(entries, convs, dormant_th, archive_th)
-    new_candidates = tally_new_prefix(convs, window, promote_th)
+        dormant_th = int(fm.get("dormant_threshold", 5))
+        archive_th = int(fm.get("archive_threshold", 12))
+        window = int(fm.get("new_prefix_window", 5))
+        promote_th = int(fm.get("new_prefix_promote_threshold", 3))
 
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if args.write:
-        write_registry(registry_path, new_entries, now_iso)
+        convs = collect_convergences(Path(args.done))
+        new_entries, changes = distill(entries, convs, dormant_th, archive_th)
+        new_candidates = tally_new_prefix(convs, window, promote_th)
 
-    print_report(convs, changes, new_entries, new_candidates, wrote=args.write)
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if args.write:
+            write_registry(registry_path, new_entries, now_iso)
+
+        print_report(convs, changes, new_entries, new_candidates, wrote=args.write)
+
+    # -- Rule Activity 蒸馏（仅 --rules 时运行）--
+    if run_rules:
+        rule_convs = collect_rule_activities(Path(args.done))
+        agg = aggregate_rules(rule_convs)
+        classify_rule_status(agg,
+                             args.guard_dormant_threshold,
+                             args.guard_archive_threshold,
+                             args.core_dormant_threshold,
+                             args.core_archive_threshold)
+        print_rule_report(rule_convs, agg)
 
 
 if __name__ == "__main__":

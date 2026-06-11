@@ -50,6 +50,17 @@ Identify blocking issues in the plan. Output verdict + structured issue list.
   - `deferred` = 问题存在但不属于本轮审查范围（如涉及尚未进入的模块），需说明理由
 - **禁止沉默**：不允许不标记、不回应。每条 escalated issue 必须在 blocking_issues 或 suggestion_issues 中可见
 
+### 意图漂移检查（条件激活，由 Orchestrator 注入触发）
+
+若 Orchestrator 在 prompt 中传入了 `<drift_context>` 块（见下方说明），则在输出前检查：
+
+1. 阅读 contract.md（若存在），对比当前产物的核心方向是否与 Round 0 合同一致
+2. 结合 Orchestrator 注入的 drift_context（包含 progress_summary 摘要），检查当前产物是否存在超出合同定义的 scope creep
+3. 若发现方向性漂移 → 列为 suggestion issue（severity: conceptual），标注 `drift_detected: true`
+
+此检查仅在 Orchestrator 注入 drift_context 时激活——单轮快速评议不触发。
+（注：`source: orchestrator_self` 的降级影响标注已由硬纪律 #7 覆盖，本段不重复。）
+
 ## Output format (YAML in markdown code block)
 
 ```yaml
@@ -68,6 +79,7 @@ blocking_issues:
     rubric_gap: <true | false>  # 标注时填写 true，表示 Rubric 维度未覆盖此问题
 suggestion_issues:  # non-blocking, will NOT block convergence
   - description: ...
+    drift_detected: <true | false>  # 可选，仅当意图漂移检查激活且发现漂移时标注
 antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
   - round_referenced: 3
     type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）

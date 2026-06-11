@@ -85,6 +85,24 @@ last_updated_at: <ISO datetime>
 - progress_summary: <人类可读进度摘要，如 "R2: 1/3 blocking fixed, 2 remaining (B2=反面论证, B3=偏差分析)">
 - boundary_check: <pass | violated>（每轮角色边界自检结果，Orchestrator 是否仅执行循环管理+语义判定而未直接修改产物）
 - boundary_violation_detail: <可选，描述违反情况>
+- rule_frequency:
+    boundary_guard: {triggered: <true|false>, zero_streak: <int>}
+    reviewer_boundary_audit: {triggered: <true|false>, zero_streak: <int>}
+    intent_drift_check: {triggered: <true|false>, zero_streak: <int>}
+    gate_l1: {triggered: <true|false>, zero_streak: <int>}
+    design_review_trigger: {triggered: <true|false>, zero_streak: <int>}
+
+**规则 key 注册表**（权威来源，与 `refs/antipatterns.md` 的 id 机制同构）：
+
+| 规则 key | 对应机制 | 触发检测方式 | 分类 |
+|----------|----------|-------------|------|
+| `boundary_guard` | 主循环 c+1 guard step | `boundary_check: violated` in state | guard |
+| `reviewer_boundary_audit` | Reviewer 硬纪律 #7 | `source: orchestrator_self` in attempts.md | guard |
+| `intent_drift_check` | 意图漂移检查 | `drift_detected: true` in reviewer output | guard |
+| `gate_l1` | 门控 L1 信号检测 | L1 gate 脚本执行记录 in state | guard |
+| `design_review_trigger` | 设计审查触发判断 | 设计审查 spawn 事件 in state | guard |
+
+新增 guard mechanism 时，在注册表追加条目并指定触发检测方式。未在注册表中的规则不被追踪。触发检测在各轮执行时实时记录（非 retrospective 时回溯），避免 context compaction 导致的触发遗忘。`zero_streak` 由 `distill_antipatterns.py` 跨收敛对象计算。
 
 ## Round 0 State
 
@@ -214,5 +232,17 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 - **结论变化**：<原结论> → <修订后结论>
 - **Reviewer 验证**：<fresh reviewer verdict>
 ```
+
+## Rule Activity
+
+| rule | triggered | zero_streak | status |
+|------|-----------|-------------|--------|
+| boundary_guard | <true/false> | <int> | active |
+| reviewer_boundary_audit | <true/false> | <int> | active |
+| intent_drift_check | <true/false> | <int> | active |
+| gate_l1 | <true/false> | <int> | active |
+| design_review_trigger | <true/false> | <int> | active |
+
+status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard: 5/10, core: 20/40）。格式固定——脚本从表格解析。
 
 > 若为层级收敛（启用 decomposition-protocol.md），在成本数据节之后追加 **§12. 层级收敛评估**（§11 预留给收敛后修订记录；两节均可缺省，编号固定不顺延——保证 distill 类脚本按节标题定位的稳定性），格式见 `decomposition-protocol.md` §Retrospective 扩展。
