@@ -49,6 +49,7 @@ Identify blocking issues in the plan. Output verdict + structured issue list.
   - `still_blocking` = 问题依然存在，本轮继续列入 blocking_issues
   - `deferred` = 问题存在但不属于本轮审查范围（如涉及尚未进入的模块），需说明理由
 - **禁止沉默**：不允许不标记、不回应。每条 escalated issue 必须在 blocking_issues 或 suggestion_issues 中可见
+- **盲审来源 pending 归因落定**：若 escalated issue 标注了 `attribution: pending`（来源为盲审复核，id 前缀 `BR-`），三态标记之外**必须同时落定二元归因**（plan_defect / executor_limit）。"回应"不等于"补归因"——pending 状态必须在本轮终结，不得跨轮存活
 
 ### 意图漂移检查（条件激活，由 Orchestrator 注入触发）
 
@@ -261,3 +262,96 @@ gate_findings:
 2. 标准 Reviewer **必须独立重新验证**每个 gate finding——不接受 gate Reviewer 的结论，只将其作为"值得检查的方向"
 3. 标准 Reviewer 用自己的 `blocking_issues` 格式重新输出——gate severity 和标准 severity 是两套独立体系，不做自动映射
 4. 若标准 Reviewer 独立确认了某个 gate finding → 正常 `blocking_issue`（severity = standard scale）。若标准 Reviewer 认为不成立 → 在 suggestion_issues 中标注 `gate_finding_dismissed` 并说明理由
+
+---
+
+## 盲审复核变体（Blank-Slate Recertification）
+
+> 当收敛经历 ≥2 轮后签发"可执行"时，Orchestrator Spawn 一个使用此变体 prompt 的 fresh Reviewer 做最终复核。盲审 Reviewer 不读 attempts.md，以空白视角审查产物。
+
+### 变体差异（相对于标准模板）
+
+| 标准模板节 | 盲审变体操作 | 说明 |
+|-----------|------------|------|
+| Required reading | **替换** | 移除 attempts.md（#2）；保留 plan_path（#1）、this_skill_path（#3）、contract_path（#4）、reference_materials_path（#5） |
+| 前置自检 Q1-Q6 | **保留** | 盲审仍需检查产物身份/边界/纯度等 |
+| Your task | **保留** | 审查任务不变 |
+| 升级复查（escalated_issues） | **保留** | 盲审可能接收主循环注入的 escalated_issues（来自上一轮盲审失败的 findings，BR- 前缀） |
+| 意图漂移检查 | **删除** | drift_context 依赖 attempts.md 历史，盲审无此输入 |
+| Output format · attribution | **替换** | 移除 `attribution: <plan_defect \| executor_limit>` 字段要求，替换为 `attribution: pending`（固定值） |
+| 硬纪律 #2 | **替换** | 改为：`attribution: pending`（固定，不要求归因判断）。理由：盲审无历史，结构上无法做归因 |
+| 硬纪律 #6 | **删除** | 依赖 attempts.md 中 `[Orchestrator Detection]` 标记，盲审不读 attempts.md |
+| 硬纪律 #7 | **删除** | 依赖 attempts.md 中 `source: orchestrator_self` 条目，盲审不读 attempts.md |
+| Antipattern 巡查（Round ≥ 2，executor 层） | **删除** | executor 层反模式依赖 attempts.md 修复历史，盲审无此输入 |
+| 设计层 Antipattern | **保留** | 产物本身的设计缺陷仍需检测 |
+| 代码项目审查 | **保留**（条件激活） | 若收敛对象是代码项目，确定性检查和语义审查仍适用 |
+| Contract / Rubrics | **保留** | 传 amended contract 和 rubrics |
+
+### 附加指令
+
+**A1 — 散落正文的修复痕迹 → 举报，不忽略。** "本条应 R2 Reviewer 要求调整"类行内注释、产物内对轮次/retrospective 的引用，本身是 `archaeology_leftover` 反模式（已在 antipatterns 枚举），收敛完成的产物不该残留。盲审作为"产物无考古层"纪律的最后执法者，看到即列为 finding。空白视角恰是检测考古层的最佳视角。
+
+**A2 — 合法结构化历史段 → 审一致性，但禁推理偏移。** 指令原文：
+
+> 产物中若存在评议/执行记录类章节，将其作为产物内容审查（一致性、与正文的矛盾）；但"产物已经过 N 轮审查/修复"这一事实**不得作为降低审查强度或提高通过倾向的依据**。
+
+### Prompt 模板
+
+```text
+You are a blind recheck reviewer — an independent reviewer who has NOT read the convergence attempt history (attempts.md / round logs / retrospective). You review the artifact with completely fresh eyes.
+
+## Required reading (in order)
+1. <plan_path>                 # artifact under review
+2. <this_skill_path>           # this convergence skill definition
+3. <contract_path>             # convergence contract (skip if no contract)
+4. <reference_materials_path>  # 原始背景材料（skip if不存在）
+
+## 前置自检（快速扫描）
+
+[与标准模板相同 — Q1-Q6]
+
+## Your task
+Identify blocking issues in the artifact. Output verdict + structured issue list.
+You are doing a BLIND review — you have no access to the repair history.
+
+### 升级复查（escalated_issues）
+
+[与标准模板相同，但若存在 BR- 前缀的 escalated issues，按标准三态协议回应]
+
+## Output format (YAML in markdown code block)
+
+```yaml
+round: blind-recheck
+verdict: <可执行 | 阻断需修复>
+blocking_issues:
+  - id: 1
+    description: |
+      <single-paragraph plain language>
+    attribution: pending
+    severity: <conceptual | architectural | structural | implementation>
+    plan_amendment_required: <true | false>
+    location: <artifact section reference or N/A>
+suggestion_issues:
+  - description: ...
+antipattern_observations:
+  - type: <archaeology_leftover | ...>
+    evidence: |
+      <quote from artifact>
+```
+
+## 硬纪律
+
+1. 只有 verdict = 可执行 时才能确认收敛。
+2. attribution 固定为 pending —— 你无修复历史，无法做归因判断。归因义务由主循环 Reviewer 承担。
+3. 不要委婉。
+4. 不要因为产物"看起来经过了多轮审查"就降低审查强度。
+5. 若发现 A1 类修复痕迹（行内注释引用轮次/retrospective），必须列为 finding。
+```
+
+### 盲审 findings → 下游映射
+
+盲审 Reviewer 的 blocking_issues 作为 findings 传递给主循环：
+
+- **attempts.md**：每个 finding 创建一个 entry，source: blind_recheck, Issue 归因: pending
+- **escalated_issues**：以 BR- 前缀独立注入块传入下一主循环 Reviewer（格式见 `refs/state-schema.md`）
+- **pending 过期**：主循环 Reviewer 必须在回应时落定归因，pending 不跨轮存活

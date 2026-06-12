@@ -37,10 +37,10 @@ generated_at: <ISO datetime>
 
 ```markdown
 ## Round N attempt · issue {issue_id}
-- source: <converge_loop | user_external_input>   # 收敛后修订时填 user_external_input
+- source: <converge_loop | user_external_input | blind_recheck>   # 收敛后修订时填 user_external_input；盲审复核 findings 填 blind_recheck
 - reviewer_backend: <实际 Spawn 后端>
 - Issue: <reviewer 原话引用，保留措辞强度>
-- Issue 归因（reviewer 判定）: plan_defect | executor_limit
+- Issue 归因（reviewer 判定）: plan_defect | executor_limit | pending   # pending 仅限 source: blind_recheck
 - plan_amendment_required: true | false
 - Approach: <executor 一句话修复思路>
 - Diff: <commit hash | inline 段落变更>
@@ -56,7 +56,7 @@ generated_at: <ISO datetime>
 
 1. 历史 entry **不改写**，只**追加 annotation**（保留诚实历史）
 2. `reviewer_backend` 字段**必填**，如实记录实际后端（Spawn 失败降级时填 `orchestrator_self`）
-3. `Issue 归因` 字段**必填**，二元归因（plan_defect / executor_limit），不允许"warning / 不重要"
+3. `Issue 归因` 字段**必填**，归因为 plan_defect / executor_limit / pending（仅限 source: blind_recheck），不允许"warning / 不重要"。pending 适用条件：仅当 issue 来源为盲审复核（source: blind_recheck）时可用，且不得跨过下一主循环轮存活。**Consumer 契约**：pending 值仅对 source: blind_recheck 条目合法，且在该条目对应的下一主循环轮结束时必须已落定为 plan_defect 或 executor_limit。Consumer 在做归因统计时应排除 pending 值或将其标记为 attribution_incomplete
 4. 所有语义判定以 `**[Orchestrator Detection]**` 前缀标记
 5. Reviewer comment 必须**原话引用**，不允许摘要转述
 
@@ -91,6 +91,7 @@ last_updated_at: <ISO datetime>
     intent_drift_check: {triggered: <true|false>, zero_streak: <int>}
     gate_l1: {triggered: <true|false>, zero_streak: <int>}
     design_review_trigger: {triggered: <true|false>, zero_streak: <int>}
+    blind_recheck: {triggered: <true|false>, zero_streak: <int>}
 
 **规则 key 注册表**（权威来源，与 `refs/antipatterns.md` 的 id 机制同构）：
 
@@ -101,6 +102,7 @@ last_updated_at: <ISO datetime>
 | `intent_drift_check` | 意图漂移检查 | `drift_detected: true` in reviewer output | guard |
 | `gate_l1` | 门控 L1 信号检测 | L1 gate 脚本执行记录 in state | guard |
 | `design_review_trigger` | 设计审查触发判断 | 设计审查 spawn 事件 in state | guard |
+| `blind_recheck` | 盲审复核 | `blind_recheck` 字段出现在 retrospective 中即 triggered（`waived` 不计入命中率，算 zero_streak 递增） | guard |
 
 新增 guard mechanism 时，在注册表追加条目并指定触发检测方式。未在注册表中的规则不被追踪。触发检测在各轮执行时实时记录（非 retrospective 时回溯），避免 context compaction 导致的触发遗忘。`zero_streak` 由 `distill_antipatterns.py` 跨收敛对象计算。
 
@@ -233,6 +235,21 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 - **Reviewer 验证**：<fresh reviewer verdict>
 ```
 
+## 盲审复核（条件，仅当收敛经历 ≥2 轮时）
+
+```yaml
+blind_recheck:
+  status: <pass | fail | waived>
+  traces_reported: <int>      # A1 类修复痕迹举报数
+  rounds_used: <int>          # 盲审轮次消耗（含重试）
+  findings_count: <int>       # 盲审发现的阻断 issue 数
+  escalated_to_main_loop: <bool>  # findings 是否注入主循环
+```
+
+- `waived`：仅终止-c（主观接受）+ 用户确认跳过盲审修复时使用。声称口径为"用户在已知盲审发现后主动接受"
+- `waived` 不计入 rule_frequency 命中率（算 zero_streak 递增）
+- 永不升格终止类型：终止-b + blind_recheck: pass 不重标为终止-a
+
 ## Rule Activity
 
 | rule | triggered | zero_streak | status |
@@ -242,6 +259,7 @@ R1={n} → R2={m} → ... → R{k}=0，单调/非单调
 | intent_drift_check | <true/false> | <int> | active |
 | gate_l1 | <true/false> | <int> | active |
 | design_review_trigger | <true/false> | <int> | active |
+| blind_recheck | <true/false> | <int> | active |
 
 status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard: 5/10, core: 20/40）。格式固定——脚本从表格解析。
 
