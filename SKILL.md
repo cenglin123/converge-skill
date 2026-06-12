@@ -7,7 +7,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 
 > Orchestrator（主对话）管理循环，每轮 Spawn 全新 Reviewer 审查产物，Executor 修复问题，直至 Reviewer 给出"可执行"verdict 或触发停止条件。
 >
-> **框架无关**：Reviewer / Executor 的启动和续命通过抽象能力层实现（附录 A），不绑定特定框架 API。
+> **框架无关**：Reviewer / Executor 的启动和续命通过抽象能力层实现（见 refs/framework-adapters.md），不绑定特定框架 API。
 
 ---
 
@@ -47,7 +47,7 @@ description: Use when a plan, code artifact, or other structured output needs it
 | **Continue** | 向**已有** agent 发跟进消息，保有上下文 | instance_id + 消息 | agent 回复 |
 | **Identify** | 返回当前 agent 实例标识 | — | instance_id |
 
-> 附录 A：Claude Code / opencode / codex 的具体实现。
+> Claude Code / opencode / codex 的具体实现见 `refs/framework-adapters.md`。
 
 ---
 
@@ -64,12 +64,12 @@ description: Use when a plan, code artifact, or other structured output needs it
 Executor 可降档（模型档位下调）至该家族低档执行，**仅当同时满足以下三条件**：
 
 - (a) 执行合同已通过确定性检查——指令含逐字文本或等价的零歧义规格；
-- (b) 用户显式授权或计划明示——默认 inherit（继承主对话模型），**不静默降档**。本条**收紧并跨框架推广**附录 A.3 codex 约束 #4（模型继承优先）：Executor 模型档位选择场景中二者冲突时以本节为准，A.3 #4 继续管辖其余 model override 情形；
+- (b) 用户显式授权或计划明示——默认 inherit（继承主对话模型），**不静默降档**。本条**收紧并跨框架推广**refs/framework-adapters.md §A.3 codex 约束 #4（模型继承优先）：Executor 模型档位选择场景中二者冲突时以本节为准，A.3 #4 继续管辖其余 model override 情形；
 - (c) 降档时验收**必须**包含确定性核对（diff / grep / 测试 / 计数），不得仅语义验收。
 
 **不降档角色**：Reviewer、Orchestrator、设计审查（判断力密集）。确定性核对类子任务（清点、diff/grep 核对、行数统计——判别准绳：任务存在客观判准、其结果可被机械复核）可用低档。未列出的角色（如层级模式的 Worker、仲裁 agent、L2 gate Reviewer）默认 inherit。
 
-档位经由各框架 Spawn 的模型选择参数实现（如 Claude Code Agent 工具的 `model` 参数）；框架不支持模型选择时视同 inherit。降档（模型档位下调）与本 SKILL 既有的"降级"（能力/流程降级，见附录 A.4）语义无关，互不触发对方的义务。档位取值与三条件核对结果须记入 attempt log。
+档位经由各框架 Spawn 的模型选择参数实现（如 Claude Code Agent 工具的 `model` 参数）；框架不支持模型选择时视同 inherit。降档（模型档位下调）与本 SKILL 既有的"降级"（能力/流程降级，见 refs/framework-adapters.md §A.4）语义无关，互不触发对方的义务。档位取值与三条件核对结果须记入 attempt log。
 
 家族档位对照见 `refs/model-tiers.md`（数据层，随模型换代更新，无需修宪）。
 
@@ -211,7 +211,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
     g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
     h. plan_amendment_required 时先回写 plan 本体再改下游
-    i. Continue 做 inner loop reviewer 验收（宪法第二部 #2：不可跳过；Continue 不可用时按附录 A.2/A.4 降级为 orchestrator 逐条验收并标注）
+    i. Continue 做 inner loop reviewer 验收（宪法第二部 #2：不可跳过；Continue 不可用时按 refs/framework-adapters.md §A.2/A.4 降级为 orchestrator 逐条验收并标注）
 4. 超 max_outer_loops → 预算软停，询问用户
 ```
 
@@ -404,49 +404,16 @@ verdict=可执行 且 ≥2 轮 →
 
 > 当项目规模超出单次收敛的合理范围时，可启用层级式并行收敛。详细协议见 `refs/decomposition-protocol.md`。
 
-### 架构
-
-```
-Planner（主控）
-  ├── 写 global-intent.md（全局意图摘要，30-50 行）
-  ├── 分解任务为 N 个独立 scope
-  ├── 划定边界（boundary assertions）
-  ├── 分配预算
-  ├── 并行调度子收敛 scope（集中调度优先）
-  └── 分阶段管控 + 整合结果
-
-子收敛 scope（逻辑上各自有 Orchestrator）
-  ├── 读取 global-intent.md（残差连接，直接拿到顶层意图）
-  ├── 独立运行完整 converge 循环（Reviewer ↔ Executor）
-  ├── 受 boundary assertions 约束
-  └── 每阶段汇报收敛状态
-```
-
-**两层是默认值**。默认采用 Planner 集中调度：主控直接 spawn 各 scope 的 Reviewer / Executor / Worker，并把子收敛视为逻辑 scope，而不是假设子 agent 一定能继续 spawn 后代 agent。只有确认子 agent 环境也暴露 Spawn / Continue 能力时，才启用 delegated hierarchical mode（子收敛 subagent 自己充当 Orchestrator）。深层（3+）需要 Planner justify（scope 粒度分析 + 并行收益估算）。详见 `refs/decomposition-protocol.md`。
-
-### 启用条件
-
-三个条件同时满足时启用：
+**启用条件**（三个同时满足）：
 
 1. 任务可分解为 ≥2 个互不干扰的独立 scope
 2. 子任务间无实时数据依赖
 3. 并行效率收益 > 分解 + 整合的开销
 
-### 执行模型
-
-分阶段（Phased）并行——不 fire-and-forget，每阶段结束有同步点：
-
-```
-Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 整合
-```
-
-同步点 Planner 做：看全局状态、调整预算、处理边界冲突、决定继续/ask user。
-
-### 关键约束
-
-- **Planner 不改被收敛对象**——Planner 可以写 `.converge/` 元数据、分解文件和状态文件；代码/文档主体改动由 Executor/Worker 完成，或在集成阶段明确委派执行
-- **子收敛之间不通信**——通过 boundary assertions 和阶段汇报间接协调
-- **子收敛内部运行标准 converge 语义**——无论集中调度还是 delegated mode，都使用同样的 Reviewer prompt、Executor prompt、state 管理和合同谈判
+**关键约束**：
+- **Planner 不改被收敛对象**
+- **子收敛之间不通信**
+- **子收敛内部运行标准 converge 语义**
 
 ---
 
@@ -468,77 +435,8 @@ Phase 1（3 轮/子收敛）→ 同步点 → Phase 2 → 同步点 → ... → 
 | 收敛后设计审查：7 维骨架、单轮咨询式、不给阻断权重 | `refs/design-review-prompt.md` |
 | Reviewer/Executor/Orchestrator 反模式巡查清单（动态注入，status 由 distill 维护） | `refs/antipatterns.md` |
 | Executor 降档时选择各家族低档 | `refs/model-tiers.md` |
+| 框架适配：Spawn/Continue/Identify 的具体实现 | `refs/framework-adapters.md` |
 
 ---
 
-## 附录 A · 框架适配
-
-### A.1 Claude Code
-
-| 能力 | 实现 |
-|------|------|
-| **Spawn** | `Agent` 工具（`subagent_type: general-purpose`），记录返回的 `agentID` |
-| **Continue** | `SendMessage` 工具，`to` 参数为 `agentID` |
-| **Identify** | 主对话即 orchestrator，无需自标识 |
-
-**`/goal` 加速（v2.1.139+）**：Claude Code 的 `/goal` 命令可让单 agent 跨 turn 持续工作，直到用户定义的条件满足。在 converge 场景下：
-
-- **可用场景**：Executor 在 inner loop 中持续修复直到 Reviewer 验收通过。设 `/goal attempts.md 中本轮所有 issue verdict = Accepted` 即可让 Executor 自动循环修复，无需 Orchestrator 手动每轮 prompt。
-- **不可用场景**：不能替代独立 Reviewer。`/goal` 的评估器是小模型自检，不是独立全新上下文的对抗式审查。converge 的核心价值（独立交叉验证）必须通过 Spawn 实现。
-- **层级模式**：子收敛 subagent 可用 `/goal "收敛完成，verdict=可执行"` 自动跑完整个 converge 循环，加速分阶段执行。
-
-### A.2 opencode
-
-| 能力 | 实现 |
-|------|------|
-| **Spawn** | 调用 `task` 工具，设置 `subagent_type: "general"`，prompt 参数传入自足的 reviewer/executor prompt |
-| **Continue** | 通过 `task` 工具的 `task_id` 参数恢复同一个 subagent 会话 |
-| **Identify** | 当前 agent 无标准 Identify，orchestrator 即主对话 |
-
-**降级**：若版本不支持 Continue，inner loop 由 orchestrator 自身逐条验收（标注 `inner_loop: orchestrator_self`）。
-
-**`/goal` 替代方案（截至当前版本）**：opencode 暂无内置 `/goal` 命令。若后续版本新增，用法与 A.1 中 Claude Code `/goal` 的说明一致。当前版本的替代路径：
-
-1. **Orchestrator 手动驱动**（默认）：Orchestrator 在主循环中逐轮 Spawn Reviewer / Executor，这是 converge 的标准执行方式，无功能损失。
-2. **Prompt 内嵌循环**：给 `task` subagent 的 prompt 中直接写入循环指令（如"重复以下步骤直到条件满足：先检查 X，若未满足则修改 Y，再检查 X"），让 subagent 在单次调用内自主迭代。适用于 inner loop 加速，但 subagent 内部无法 Spawn 独立 Reviewer（缺乏对抗式保证），retrospective 中需标注 `inner_loop: prompt_embedded`。
-
-### A.3 codex (OpenAI Codex CLI)
-
-优先按能力探测适配。若当前 Codex 环境暴露 `multi_agent_v1`，使用原生多 agent adapter：
-
-| 能力 | 实现 |
-|------|------|
-| **Spawn** | `multi_agent_v1.spawn_agent`；Reviewer 使用 fresh self-contained prompt，Executor/Worker 必须明确 write scope |
-| **Continue** | `multi_agent_v1.send_input(target=<agent_id>)` |
-| **Wait** | `multi_agent_v1.wait_agent(targets=[...])` |
-| **Close** | `multi_agent_v1.close_agent(target=<agent_id>)`；角色完成后关闭，避免悬挂 agent |
-| **Identify** | 主会话即 Orchestrator；子 agent id 来自 Spawn 返回值 |
-
-**Codex adapter 约束：**
-
-1. **显式授权**：只有用户明确请求 converge / subagent / delegation，或当前 skill invocation 本身就是显式收敛工作流时，才 spawn agent。
-2. **不默认嵌套 spawn**：不要假设 subagent 内部也能继续 spawn 后代 agent。层级模式优先采用主 Orchestrator 集中调度；只有确认子 agent 能力后才启用 delegated hierarchical mode。
-3. **文件可见性保守处理**：不要假设一个 subagent 的文件修改会自动对另一个 subagent 可见。Executor/Worker 返回时必须列出 changed paths、diff 或摘要；Orchestrator 先审查并集成，再把必要 diff/产物路径传给 Reviewer 验收。
-4. **模型继承优先**：不要设置 model override，除非用户明确指定模型，或 scope 有清晰的任务级理由。
-5. **关闭已完成 agent**：Reviewer/Executor/Worker 完成角色后调用 Close；若关闭失败，在 state 中记录原因。
-
-若未暴露 `multi_agent_v1` 但存在其他 Codex task/sub-agent 机制，则按该机制映射 Spawn / Continue / Wait；若 Continue 不可用，inner loop 降级同 A.2。若完全不支持 Spawn，按 A.4 降级。
-
-**`/goal` 加速（可选）**：Codex 的 `/goal` 可作为 Executor inner loop 或子收敛执行的加速器，但不是基础依赖，且不能替代独立 Reviewer。使用 `/goal` 时仍需通过 Spawn 获得 fresh reviewer 做对抗式审查，并在 retrospective 中记录 goal-assisted execution。
-
-### A.4 通用降级策略
-
-框架**完全不支持** Spawn 时：
-
-1. **Reviewer 降级**：Orchestrator 自身模拟 reviewer → 标注 `reviewer_backend: orchestrator_self`，retrospective 中分析自审偏差
-2. **Executor 降级**：Orchestrator 自身执行修改，自觉遵守路径依赖防护
-3. **Inner loop 降级**：Orchestrator 自身对照 reviewer 输出逐条验收
-
-> ⚠️ 降级模式下结论可信度显著降低。Retrospective 必须讨论降级影响。
-
-### A.5 适配新框架
-
-三个问题完成适配：
-1. 如何启动带全新上下文和自足 prompt 的 agent？（→ Spawn）
-2. 能否向它发跟进消息且保有上下文？（→ Continue）
-3. 如何引用该 agent 实例？（→ instance_id）
+> 框架适配实现见 `refs/framework-adapters.md`（Claude Code / opencode / codex / 通用降级 / 适配新框架）。
