@@ -202,14 +202,41 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
    c+3. **规则触发记录**（详见责任清单 #19）：
         - 在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态
         - gate_l1 / design_review_trigger 在对应事件发生时更新
-   d. 若 verdict = 可执行 → 收敛！执行完成前必检清单，写 retrospective.md，移 done/
-   e. 若有 contract_amendment_required → 先回写 contract.md 再继续
+   d. 若 verdict = 可执行 →
+        d1. 若本次收敛经历 ≥2 轮 outer loop → 进入盲审复核（见下方"盲审复核"小节）
+        d2. 若本次收敛经历 = 1 轮 → 直接收敛
+         收敛！执行完成前必检清单，写 retrospective.md，移 done/
+         d3. 若用户后续要求落地执行（将方案改动清单写入目标文件）→ Orchestrator 按 `refs/orchestrator-guide.md` §落地执行编排 流程 spawn executor，使用 `refs/executor-prompt.md` Plan-Execution 模板
+    e. 若有 contract_amendment_required → 先回写 contract.md 再继续
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
     g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
     h. plan_amendment_required 时先回写 plan 本体再改下游
     i. Continue 做 inner loop reviewer 验收（宪法第二部 #2：不可跳过；Continue 不可用时按附录 A.2/A.4 降级为 orchestrator 逐条验收并标注）
 4. 超 max_outer_loops → 预算软停，询问用户
 ```
+
+### 盲审复核（Blank-Slate Recertification）
+
+当收敛经历 ≥2 轮 outer loop 后签发"可执行"，在 retrospective 写入前增加盲审复核 gate：
+
+```
+verdict=可执行 且 ≥2 轮 →
+  spawn 盲审 Reviewer（不读 attempts.md，prompt 变体见 refs/reviewer-prompt.md §盲审复核变体）
+  ├ 零阻断 → 真正收敛，retrospective 记 blind_recheck: pass
+  └ 有阻断 → findings 作为 escalated_issues（BR- 前缀独立注入块）注入主循环
+             → Executor 修复 → 下一 outer loop Spawn fresh Reviewer 验收 → 再次可执行 → 再次盲审
+             → 超 max_blind_rechecks → 预算软停，问用户
+  若终止-c（主观接受）+ 盲审失败 → 提示用户，用户可确认跳过（retrospective 记 blind_recheck: waived）
+```
+
+**关键约束**：
+- 盲审在 `active/` 内进行，不触发 done/→active/ 回流
+- 盲审 Reviewer prompt 变体定义见 `refs/reviewer-prompt.md`
+- 盲审 findings → attempts.md 字段映射和 → escalated_issues 传递格式见 `refs/state-schema.md`
+- 归因协议：盲审只发现（attribution: pending），主循环 Reviewer 补归因（plan_defect / executor_limit）
+- pending 归因不得跨过下一主循环轮存活
+- 标注口径：`blind_recheck: pass | fail | waived`，永不升格终止类型
+- 盲审失败后的修复轮次**共享原 max_outer_loops**，不自动扩
 
 ### Inner Loop
 
@@ -277,6 +304,8 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 
 **条件触发** ——
 19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 escalated_issues 存在或 contract_amendment_required 反复出现（≥2 次）时，从 _orchestrator-state.md 提取 progress_summary 摘要注入下一轮 reviewer prompt 的 `<drift_context>` 块；reviewer 通过 drift_detected: true 标记反馈漂移。与 #6 的关系：#6 是 Orchestrator 第一方循环内检测（plan 内容偏移，每 5 轮/触 Type O），本条是 Reviewer 独立第三方产物-合同对齐检测（条件注入），互补而非重叠。(b) 规则触发记录：在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态；gate_l1 / design_review_trigger 在对应事件发生时更新。rule_frequency 字段格式和规则 key 注册表见 `refs/state-schema.md`。不新增独立循环步骤。retrospective 中必须包含对追踪机制执行成本的评估（约 1 句话）；当被追踪规则总数降至 2 条以下时，必须显式评估追踪机制是否仍有必要
+  20. **盲审复核编排** — 当收敛经历 ≥2 轮 outer loop 且 verdict=可执行时：(a) 判断是否满足盲审触发条件（≥2 轮）；(b) Spawn 盲审 Reviewer（使用 refs/reviewer-prompt.md 盲审变体 prompt）；(c) 若盲审有阻断，将 findings 以 BR- 前缀独立注入块格式转为 escalated_issues，注入下一主循环轮；(d) 在 attempts.md 中为盲审 findings 创建 entry（source: blind_recheck, attribution: pending）；(e) 检查 pending 归因是否在下一主循环轮落定（硬过期）；(f) 维护 retrospective 的 blind_recheck 标注（pass / fail / waived）。操作指引见 `refs/orchestrator-guide.md`
+  21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) Spawn executor（使用 refs/executor-prompt.md Plan-Execution 模板，fresh-context spawn）；(b) **不得直接编辑文件**（宪法硬约束 #7 在落地阶段同样适用）；(c) 记录 executor instance_id 到 retrospective 或落地日志条目（客观证据）；(d) 核对改动清单项数与 executor 报告的已修改文件数一致。操作指引见 `refs/orchestrator-guide.md` §落地执行编排
 
 ---
 
@@ -302,6 +331,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 - [ ] 若触发了降级（orchestrator_self / inner_loop 降级）：用户已被告知降级模式及对结论可靠性的影响
 - [ ] 若触发了设计审查：`design-review.md` 已写入，highlights 已报告用户，用户决策已记录
 - [ ] 若本次收敛中 Executor 使用了降档（low）：验收已包含确定性核对，档位取值与三条件核对结果已记入 attempt log
+- [ ] 若本次收敛经历 ≥2 轮：盲审复核已完成（verdict=可执行 或 blind_recheck: waived），retrospective 中已记录 blind_recheck 字段
 
 ---
 
@@ -321,6 +351,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 | `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
+| `max_blind_rechecks` | 2 | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
 
 ---
 

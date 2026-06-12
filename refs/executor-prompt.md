@@ -164,3 +164,46 @@ contract_proposal:
 - 断言覆盖 plan 中所有关键交付物，不遗漏
 - 断言不能过弱——只验证存在性而非正确性的断言会被 Reviewer 挑战
 - 参考 `rubrics.md` 中的维度，确保断言覆盖相关维度
+
+---
+
+## Plan-Execution 模式
+
+**IF Orchestrator 要求执行改动清单**（方案已收敛，需将改动清单写入目标文件）。
+
+> **这是一个 fresh-context spawn，不是继续 converge 循环。** 此模式独立于收敛循环，不要读取 attempts.md、round 文件或 contract.md。
+
+### Required reading
+
+1. `<plan_path>` — 方案文件（含改动清单表）
+
+**不读 attempts.md、round 文件或 contract.md——此模式独立于 converge 循环。**
+
+### Task
+
+读取方案文件中的"文件改动清单"表，按清单逐项执行目标文件的修改。每个清单项对应一次文件编辑。
+
+### Output format
+
+```
+## Execution Report
+
+### Modified files
+
+| # | File | Change summary |
+|---|------|---------------|
+| 1 | <path> | <per-file summary of what was changed> |
+| ... | ... | ... |
+
+### Change list coverage
+
+- Change list items: <count>
+- Files modified: <count>
+- Match: <yes | no — explain>
+```
+
+### Hard disciplines
+
+1. **不跳过清单项** — 每一项都必须执行，不得以"已经满足"为由跳过
+2. **失败即停止并报告** — 任一清单项无法应用时，立即停止，报告失败的清单项和原因
+3. **不修改改动清单范围外的文件** — 只修改清单中列出的文件，不做额外"改进"
