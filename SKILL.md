@@ -353,6 +353,14 @@ verdict=可执行 且 ≥2 轮 →
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
 | `max_blind_rechecks` | 2 | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
 
+### pre-push hook 环境变量（`scripts/hooks/`）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CONVERGE_STRICT` | (未设) | 设为 `1` 时，pre-push hook 对 CRITICAL 级 stale 项阻断 push（exit 1）；未设时仅提示（exit 0） |
+| `CONVERGE_STALE_AGE_DAYS` | 7 | WARNING 级年龄阈值（天）。超过此天数的 active/ 项标记为 likely abandoned |
+| `plan_status_critical` | `done, landed` | plan frontmatter `status` 触发 CRITICAL 的值（当前硬编码于 stale-check.py，尚未可配置） |
+
 ---
 
 ## Pilot 经验速查

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""post-merge hook: check for stale content in active/ directories.
+"""pre-push hook: check for stale content in active/ directories.
 
 Scans .converge/active/ and docs/plans/active/ for items that appear
 completed or abandoned but were not archived to done/.
 
 Three tiers:
-  CRITICAL — structural staleness (slug in done/, state=completed, all [x])
+  CRITICAL — structural staleness (slug in done/, state=completed,
+             all [x] checked, or frontmatter status=done|landed)
   WARNING  — age-based staleness (mtime > STALE_AGE_DAYS, default 7)
   NOTE     — in-progress items, informational
 
-Informational only — post-merge hooks cannot block the merge.
+Default: informational (exit 0). Set CONVERGE_STRICT=1 to block push
+on CRITICAL items (exit 1).
 """
 
 import os
@@ -19,6 +21,11 @@ import sys
 import time
 
 _AGE_UNKNOWN = float("inf")
+_CRITICAL_STATUSES = frozenset({"done", "landed"})
+
+
+def _is_strict():
+    return os.environ.get("CONVERGE_STRICT", "").strip() in ("1", "true", "yes")
 
 
 def _safe_stale_days():
@@ -45,6 +52,11 @@ def _repo_root():
 def _slug_of(fname):
     base = os.path.splitext(fname)[0]
     return re.sub(r"^\d{8}-", "", base)
+
+
+def _frontmatter_status(text):
+    m = re.search(r"^status:\s*(\S+)", text, re.MULTILINE)
+    return m.group(1).lower() if m else None
 
 
 def _age_days(path):
@@ -197,6 +209,13 @@ def _scan_plans(repo_root):
             )
             continue
 
+        fm_status = _frontmatter_status(text)
+        if fm_status in _CRITICAL_STATUSES:
+            critical.append(
+                f"  docs/plans/active/{fname} — frontmatter status: {fm_status}, archive to done/"
+            )
+            continue
+
         age = _age_days(fpath)
         if age == _AGE_UNKNOWN or age > STALE_AGE_DAYS:
             warning.append(
@@ -253,10 +272,13 @@ def main():
 
     print("=" * 60)
 
+    if critical_items and _is_strict():
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
         print(f"[stale-check] unexpected error: {exc}")
-        sys.exit(0)
+        sys.exit(1 if _is_strict() else 0)
