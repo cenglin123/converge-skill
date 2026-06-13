@@ -1,0 +1,39 @@
+#!/bin/sh
+# converge SKILL pre-commit hook
+# 检测治理文档变更，提醒走 ultraverge 流程
+#
+# 治理文档定义见 CONSTITUTION.md 第三部
+
+GOV_FILES="CONSTITUTION.md|SKILL.md|refs/reviewer-prompt.md|refs/executor-prompt.md|refs/state-schema.md|refs/orchestrator-guide.md|refs/contract-negotiation.md|refs/decomposition-protocol.md|refs/design-review-prompt.md"
+
+STAGED_FILES=$(git diff --cached --name-only)
+
+GOV_CHANGED=0
+for f in $STAGED_FILES; do
+    case "$f" in
+        CONSTITUTION.md|SKILL.md|\
+        refs/reviewer-prompt.md|refs/executor-prompt.md|refs/state-schema.md|\
+        refs/orchestrator-guide.md|refs/contract-negotiation.md|\
+        refs/decomposition-protocol.md|refs/design-review-prompt.md)
+            GOV_CHANGED=1
+            break
+            ;;
+    esac
+done
+
+if [ "$GOV_CHANGED" -eq 1 ]; then
+    echo "============================================================"
+    echo "  检测到 converge SKILL 治理文档变更"
+    echo "============================================================"
+    echo ""
+    echo "治理文档（CONSTITUTION.md / SKILL.md / refs/*-prompt.md /"
+    echo "refs/*-protocol.md / refs/*-guide.md / refs/state-schema.md）"
+    echo "已变更。按 CONSTITUTION.md 第四部要求，治理文档改动必须走"
+    echo "ultraverge 流程（>=3 Reviewer 评议 + 收敛 + 设计审查）。"
+    echo ""
+    echo "本次提交不会被拒绝，但请确认已执行 ultraverge 流程。"
+    echo "============================================================"
+    echo ""
+fi
+
+exit 0
