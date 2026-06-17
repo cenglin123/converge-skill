@@ -312,3 +312,65 @@ executor 完成后报告已修改文件列表，Orchestrator 交叉核对：
 2. 统计 executor 报告的已修改文件数（M）
 3. N ≠ M → 向用户报告不一致，列出差异项
 4. N = M → 确认，报告用户落地完成
+
+---
+
+## 九、信息源核对与申诉仲裁
+
+当 Orchestrator 在步骤 c 逐条过 reviewer blocking 时，对每条执行信息源核对。**本机制不新增循环节点——嵌入现有步骤 c，与 overturn 检测/等价标注并列但操作对象不同：overturn 对照 attempts.md（内部记录），信息源核对对照原始材料（系统外部——用户原话 / reference_materials / contract.md）。**
+
+### 核对规则
+
+对每条 blocking issue，检查：
+
+> 这个 blocking 的事实前提是否与原始材料矛盾？
+
+**"原始材料"的精确范围**：本轮 Reviewer 收到的 reference_materials（路径记录在 round-N.md frontmatter）、contract.md（若存在）、以及本次收敛的原始触发背景（用户原话/需求文档——从 Orchestrator 上下文直接获取，不依赖文件）。
+
+核对只覆盖**可机械核验的事实矛盾**——"Reviewer 声称 X 但原文说 Y"——不覆盖语义层的"我觉得推理不对"或笼统的"我不服"。
+
+### 发现矛盾时的处置：自裁 vs 用户仲裁
+
+发现 blocking 的事实前提与原始材料矛盾后，**按"可机械核验性"分流**——能机械判定的 agent 自裁，不必打扰用户；需要价值/模糊判断的才上交用户。
+
+```
+Orchestrator 发现 blocking #N 的事实前提与原始材料矛盾
+  → 判定该矛盾是否"可机械核验"（对照原始材料原文即可判定，无需价值/模糊判断）：
+      ├ 可机械核验（例：reviewer 称"用户没说 X"，但用户原话白纸黑字说了 X）
+      │     → agent 自裁：该 blocking 从本轮清单剔除
+      │       attempts.md 记 source: factual_self_adjudication，状态 rejected: factual_error
+      │       retrospective 记自裁理由（矛盾点引用）
+      │       不上交用户，继续其余 blocking 的修复流程
+      └ 不可机械核验（需价值/模糊判断才能定）
+            → 暂停收敛，向用户申诉：
+                【同意的 blocking】#A, #B, … — 接受 reviewer 判定
+                【异议的 blocking】#N — 矛盾点：[引用原始材料原文] vs [引用 reviewer 原文]
+                申请仲裁：用户裁定 blocking #N 是否成立
+            → 用户裁定：
+                ├ 驳回申诉（blocking 成立）→ Orchestrator 接受，继续流程，不得就同一 blocking 二次申诉
+                └ 支持申诉（blocking 不成立）→ 该 blocking 剔除，继续其余 blocking 的修复流程
+```
+
+**分流判据**："可机械核验"= 存在一段原始材料原文，直接对照即可判定 blocking 的事实前提真假（如本次②：用户原话"基于知识库内容"vs reviewer 称"用户没说触发词"）。若判定本身需要权衡、解释或价值判断（如"这个推理是否合理"），不算可机械核验，走用户层。
+
+### 申诉记录
+
+仲裁结果写入 retrospective。以下为仲裁记录格式模板（权威源——本地适配层如 `convergence-logs/README.md` 可基于此延伸，但本模板为格式定义源）：
+
+```markdown
+## arbitration
+
+### 申诉 {N}
+- **轮次**：R{X}
+- **异议 blocking**：#{Y}
+- **矛盾点**：<引用原始材料原文> vs <引用 reviewer 原文>
+- **用户裁决**：<成立 | 不成立>
+- **裁决后处置**：<剔除 blocking | 接受 reviewer 判定，继续修复>
+- **裁决时间**：<ISO datetime>
+```
+
+若同一收敛过程中有多次申诉，追加多条 `### 申诉 {N}`。被驳回的 blocking 在 attempts.md 以 `source: user_arbitration` 记录，状态填 `rejected: factual_error`。
+
+### 局限
+
+本机制不能保证 Orchestrator 主动发现 Reviewer 的信息源不忠实——Orchestrator 与 Reviewer 同模型同架构，共享盲区概率不低。其价值在于：(a) 给异议一个合法出口（从无出口的软约束升级为有机制位置的软约束）；(b) 用户介入时有机制背书的位置表达。仲裁阈值（必须指出具体矛盾、可机械核验）防的是启动后变成笼统不服——出口存在 + 出口有闸。

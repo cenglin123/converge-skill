@@ -37,14 +37,14 @@ generated_at: <ISO datetime>
 
 ```markdown
 ## Round N attempt · issue {issue_id}
-- source: <converge_loop | user_external_input | blind_recheck>   # 收敛后修订时填 user_external_input；盲审复核 findings 填 blind_recheck
+- source: <converge_loop | user_external_input | blind_recheck | factual_self_adjudication | user_arbitration>   # 收敛后修订 user_external_input；盲审 blind_recheck；agent 事实自裁剔除填 factual_self_adjudication；用户仲裁被驳回填 user_arbitration
 - reviewer_backend: <实际 Spawn 后端>
 - Issue: <reviewer 原话引用，保留措辞强度>
-- Issue 归因（reviewer 判定）: plan_defect | executor_limit | pending   # pending 仅限 source: blind_recheck
+- Issue 归因（reviewer 判定）: plan_defect | executor_limit | pending | reviewer_factual_error   # pending 仅限 source: blind_recheck；reviewer_factual_error 仅限 source ∈ {factual_self_adjudication, user_arbitration}（reviewer 事实误读导致的剔除）
 - plan_amendment_required: true | false
 - Approach: <executor 一句话修复思路>
 - Diff: <commit hash | inline 段落变更>
-- R{N} verdict: Accepted | Rejected
+- R{N} verdict: Accepted | Rejected   # source ∈ {factual_self_adjudication, user_arbitration} 且为事实矛盾剔除时，verdict 取 Rejected，并在下一行追加 `- Rejection reason: factual_error`
 - **[Orchestrator Detection at R{M}]** Status changed to: Overturned   # 仅当后续轮次推翻时追加
   - Overturned by: R{M}
   - R{M} 原话（引用）: "..."
@@ -56,7 +56,7 @@ generated_at: <ISO datetime>
 
 1. 历史 entry **不改写**，只**追加 annotation**（保留诚实历史）
 2. `reviewer_backend` 字段**必填**，如实记录实际后端（Spawn 失败降级时填 `orchestrator_self`）
-3. `Issue 归因` 字段**必填**，归因为 plan_defect / executor_limit / pending（仅限 source: blind_recheck），不允许"warning / 不重要"。pending 适用条件：仅当 issue 来源为盲审复核（source: blind_recheck）时可用，且不得跨过下一主循环轮存活。**Consumer 契约**：pending 值仅对 source: blind_recheck 条目合法，且在该条目对应的下一主循环轮结束时必须已落定为 plan_defect 或 executor_limit。Consumer 在做归因统计时应排除 pending 值或将其标记为 attribution_incomplete
+3. `Issue 归因` 字段**必填**，归因为 plan_defect / executor_limit / pending（仅限 source: blind_recheck）/ reviewer_factual_error（仅限 source ∈ {factual_self_adjudication, user_arbitration}），不允许"warning / 不重要"。pending 适用条件：仅当 issue 来源为盲审复核（source: blind_recheck）时可用，且不得跨过下一主循环轮存活。reviewer_factual_error 适用条件：仅当 blocking 因 reviewer 事实误读被自裁或用户仲裁剔除时。**Consumer 契约**：pending 值仅对 source: blind_recheck 条目合法，且在该条目对应的下一主循环轮结束时必须已落定为 plan_defect 或 executor_limit；reviewer_factual_error 值在归因统计时归入"reviewer 过失"类，不计入 plan/executor 归因分布。Consumer 在做归因统计时应排除 pending 值或将其标记为 attribution_incomplete
 4. 所有语义判定以 `**[Orchestrator Detection]**` 前缀标记
 5. Reviewer comment 必须**原话引用**，不允许摘要转述
 

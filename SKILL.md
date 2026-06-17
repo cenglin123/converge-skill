@@ -276,36 +276,37 @@ verdict=可执行 且 ≥2 轮 →
 ## Orchestrator 责任清单
 
 **每轮必做** ——
-1. **Spawn 真实性** — 失败时如实记 `orchestrator_self`，不掩盖
-2. **overturn 判定** — 比较本轮 issue 与 attempts.md 已 Accepted 修复
-3. **角色边界自检** — 每轮处理完 reviewer 输出后、执行任何修复动作前，确认：本次动作范围是否为"循环管理 + 语义判定"？若涉及产物修改且尚未 spawn Executor → 必须先 spawn Executor。违反时必须在 _orchestrator-state.md 记录 boundary_check: violated，在 attempts.md 以 [Orchestrator Detection] annotation 标注 source: orchestrator_self，告知用户降级模式及对结论可靠性的影响。Round 0 和 inner loop 中存在同构的边界违反窗口，当前 guard step 覆盖主循环（最频发场景），其余窗口依靠本责任清单条目提醒
-4. **Type O 计数** — 同决策点推翻 ≥3 次 → 硬停
-5. **Type R/F 等价标注** — 同源标注（语义判断）
-9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
-10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
+M-1. **Spawn 真实性** — 失败时如实记 `orchestrator_self`，不掩盖
+M-2. **overturn 判定** — 比较本轮 issue 与 attempts.md 已 Accepted 修复
+M-3. **角色边界自检** — 每轮处理完 reviewer 输出后、执行任何修复动作前，确认：本次动作范围是否为"循环管理 + 语义判定"？若涉及产物修改且尚未 spawn Executor → 必须先 spawn Executor。违反时必须在 _orchestrator-state.md 记录 boundary_check: violated，在 attempts.md 以 [Orchestrator Detection] annotation 标注 source: orchestrator_self，告知用户降级模式及对结论可靠性的影响。Round 0 和 inner loop 中存在同构的边界违反窗口，当前 guard step 覆盖主循环（最频发场景），其余窗口依靠本责任清单条目提醒
+M-4. **Type O 计数** — 同决策点推翻 ≥3 次 → 硬停
+M-5. **Type R/F 等价标注** — 同源标注（语义判断）
+M-6. **信息源核对** — 逐条过 reviewer blocking 时，检查每条的事实前提是否与原始材料（用户原话 / reference_materials / contract.md）矛盾。若发现矛盾（信息源不忠实），按可机械核验性分流：**可机械核验的 agent 自裁**（对照原始材料驳回，记 `factual_self_adjudication`），**不可机械核验的才向用户申请仲裁**（用户驳回记 `user_arbitration`；具体操作见 `refs/orchestrator-guide.md` §九）。仅覆盖"可机械核验的事实矛盾"一类——非笼统不服、非语义层推理争议
+M-9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
+M-10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
 
 **条件触发** ——
-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
-6. **plan 漂移检测** — 每 5 轮 / 触 Type O 时报告用户
-7. **预算追踪** — 逐轮递增计数由主循环结构保证；本条规范触上限时必须问用户的行为（呼应宪法第二部 #3）
-10. **字段名映射** — 写入 attempt log entry 时执行：reviewer 输出 `attribution` ↔ attempt log `Issue 归因`
-13. **contract_amendment_required** — 先回写 contract.md 本体，再让 executor 按新 contract 调整。contract 演进导致的矛盾不计入 Type O
-14. **收敛后修订评估** — 用户在收敛后提供外部输入时，判断输入是否构成实质性挑战。判断标准：是否引入新的分析维度、是否动摇已收敛的核心判断、是否修正了被遗漏的关键事实。微调措辞不触发修订。触发后在 retrospective 中记录修订来源和结论变化
-15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python scripts/l1_gate.py`），记录 pass/warn 结果
-16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
-17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
+C-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
+C-6. **plan 漂移检测** — 每 5 轮 / 触 Type O 时报告用户
+C-7. **预算追踪** — 逐轮递增计数由主循环结构保证；本条规范触上限时必须问用户的行为（呼应宪法第二部 #3）
+C-10. **字段名映射** — 写入 attempt log entry 时执行：reviewer 输出 `attribution` ↔ attempt log `Issue 归因`
+C-13. **contract_amendment_required** — 先回写 contract.md 本体，再让 executor 按新 contract 调整。contract 演进导致的矛盾不计入 Type O
+C-14. **收敛后修订评估** — 用户在收敛后提供外部输入时，判断输入是否构成实质性挑战。判断标准：是否引入新的分析维度、是否动摇已收敛的核心判断、是否修正了被遗漏的关键事实。微调措辞不触发修订。触发后在 retrospective 中记录修订来源和结论变化
+C-15. **门控 L1 执行** — 在 Dynamic Workflows pipeline 的 phase 收口时，调用 L1 信号检测（`python scripts/l1_gate.py`），记录 pass/warn 结果
+C-16. **门控 L2 触发决策** — 根据 `gate_l2_mode` 和 L1 结果决定是否 spawn L2 gate Reviewer
+C-17. **门控发现处置** — 读取 gate_findings，按 severity 决策（info → 记录；risk → 记录 + 报警；critical_gap → 触发完整 converge），所有决策记录到 state 文件
 
 **Round 0 前置** ——
-11. **合同谈判编排** — Round 0 中依次 spawn Executor（提议合同）→ Reviewer（挑战）→ Executor（定稿），将终稿写入 contract.md
-12. **Rubrics 维度选择** — 根据收敛对象类型从维度库中选取，写入 contract.md
+R-11. **合同谈判编排** — Round 0 中依次 spawn Executor（提议合同）→ Reviewer（挑战）→ Executor（定稿），将终稿写入 contract.md
+R-12. **Rubrics 维度选择** — 根据收敛对象类型从维度库中选取，写入 contract.md
 
 **收口必做**（含逐项执行"收敛完成前必检"）——
-18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件：≥3 模块；或新约定/接口；或系统边界；或评议前置自检 Q4/Q5 触发过 blocking（职责边界和命名一致性问题往往暗示更深层架构问题）；或用户显式请求。满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
+E-18. **设计审查触发与报告** — 收敛后判断是否满足设计审查触发条件：≥3 模块；或新约定/接口；或系统边界；或评议前置自检 Q4/Q5 触发过 blocking（职责边界和命名一致性问题往往暗示更深层架构问题）；或用户显式请求。满足则 Spawn reviewer 产出 design-review.md，提取 highlights 报告给用户
 
 **条件触发** ——
-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 escalated_issues 存在或 contract_amendment_required 反复出现（≥2 次）时，从 _orchestrator-state.md 提取 progress_summary 摘要注入下一轮 reviewer prompt 的 `<drift_context>` 块；reviewer 通过 drift_detected: true 标记反馈漂移。与 #6 的关系：#6 是 Orchestrator 第一方循环内检测（plan 内容偏移，每 5 轮/触 Type O），本条是 Reviewer 独立第三方产物-合同对齐检测（条件注入），互补而非重叠。(b) 规则触发记录：在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态；gate_l1 / design_review_trigger 在对应事件发生时更新。rule_frequency 字段格式和规则 key 注册表见 `refs/state-schema.md`。不新增独立循环步骤。retrospective 中必须包含对追踪机制执行成本的评估（约 1 句话）；当被追踪规则总数降至 2 条以下时，必须显式评估追踪机制是否仍有必要
-  20. **盲审复核编排** — 当收敛经历 ≥2 轮 outer loop 且 verdict=可执行时：(a) 判断是否满足盲审触发条件（≥2 轮）；(b) Spawn 盲审 Reviewer（使用 refs/reviewer-prompt.md 盲审变体 prompt）；(c) 若盲审有阻断，将 findings 以 BR- 前缀独立注入块格式转为 escalated_issues，注入下一主循环轮；(d) 在 attempts.md 中为盲审 findings 创建 entry（source: blind_recheck, attribution: pending）；(e) 检查 pending 归因是否在下一主循环轮落定（硬过期）；(f) 维护 retrospective 的 blind_recheck 标注（pass / fail / waived）。操作指引见 `refs/orchestrator-guide.md`
-  21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) Spawn executor（使用 refs/executor-prompt.md Plan-Execution 模板，fresh-context spawn）；(b) **不得直接编辑文件**（宪法硬约束 #7 在落地阶段同样适用）；(c) 记录 executor instance_id 到 retrospective 或落地日志条目（客观证据）；(d) 核对改动清单项数与 executor 报告的已修改文件数一致。操作指引见 `refs/orchestrator-guide.md` §落地执行编排
+C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 escalated_issues 存在或 contract_amendment_required 反复出现（≥2 次）时，从 _orchestrator-state.md 提取 progress_summary 摘要注入下一轮 reviewer prompt 的 `<drift_context>` 块；reviewer 通过 drift_detected: true 标记反馈漂移。与 C-6 的关系：C-6 是 Orchestrator 第一方循环内检测（plan 内容偏移，每 5 轮/触 Type O），本条是 Reviewer 独立第三方产物-合同对齐检测（条件注入），互补而非重叠。(b) 规则触发记录：在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态；gate_l1 / design_review_trigger 在对应事件发生时更新。rule_frequency 字段格式和规则 key 注册表见 `refs/state-schema.md`。不新增独立循环步骤。retrospective 中必须包含对追踪机制执行成本的评估（约 1 句话）；当被追踪规则总数降至 2 条以下时，必须显式评估追踪机制是否仍有必要
+  C-20. **盲审复核编排** — 当收敛经历 ≥2 轮 outer loop 且 verdict=可执行时：(a) 判断是否满足盲审触发条件（≥2 轮）；(b) Spawn 盲审 Reviewer（使用 refs/reviewer-prompt.md 盲审变体 prompt）；(c) 若盲审有阻断，将 findings 以 BR- 前缀独立注入块格式转为 escalated_issues，注入下一主循环轮；(d) 在 attempts.md 中为盲审 findings 创建 entry（source: blind_recheck, attribution: pending）；(e) 检查 pending 归因是否在下一主循环轮落定（硬过期）；(f) 维护 retrospective 的 blind_recheck 标注（pass / fail / waived）。操作指引见 `refs/orchestrator-guide.md`
+  C-21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) Spawn executor（使用 refs/executor-prompt.md Plan-Execution 模板，fresh-context spawn）；(b) **不得直接编辑文件**（宪法硬约束 #7 在落地阶段同样适用）；(c) 记录 executor instance_id 到 retrospective 或落地日志条目（客观证据）；(d) 核对改动清单项数与 executor 报告的已修改文件数一致。操作指引见 `refs/orchestrator-guide.md` §落地执行编排
 
 ---
 
