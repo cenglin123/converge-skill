@@ -260,7 +260,75 @@ blind_recheck:
 | gate_l1 | <true/false> | <int> | active |
 | design_review_trigger | <true/false> | <int> | active |
 | blind_recheck | <true/false> | <int> | active |
+| budget_gate | <true/false> | <int> | active |
 
 status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard: 5/10, core: 20/40）。格式固定——脚本从表格解析。
 
 > 若为层级收敛（启用 decomposition-protocol.md），在成本数据节之后追加 **§12. 层级收敛评估**（§11 预留给收敛后修订记录；两节均可缺省，编号固定不顺延——保证 distill 类脚本按节标题定位的稳定性），格式见 `decomposition-protocol.md` §Retrospective 扩展。
+
+---
+
+## §预算 gate（`scripts/budget_gate.py` 的数据契约）
+
+预算执行从 prose 计数迁移到 file-authoritative gate。每个 `active/<slug>/` 下两份机器可读文件，由脚本维护、仅追加、可机械重算（抗 compaction）。落地与残余边界见 `docs/plans/*/20260618-budget-enforcement-hardening.md`。
+
+### gate-ledger.jsonl（仅追加事件流，每行一个 JSON）
+
+`budget_gate.py` 启动每个命令前对全 ledger 跑 **严格 schema validator**（`validate_integrity` + `_validate_event`）：任一事件缺必填字段 / 错类型 / 非法 enum / 嵌套不合 → `FAIL_CLOSED`（不让损坏事件污染计数）。各事件类型的**完整契约**：
+
+```jsonc
+// reserved —— 必填：event, reservation_id(非空串), ts(ISO), target_role(∈ROLE_CONSUMES),
+//   consumes(== ROLE_CONSUMES[target_role], ∈{outer,blind,ultraverge,none}),
+//   counts_before 与 ceilings(均为含 outer/blind/ultraverge/total 四键的 int dict),
+//   tier(∈{enforced,auditable-only})；consuming(outer/blind/ultraverge)时 target_round 须为正整数；
+//   extension_id 为 非空串或 null。
+{"event":"reserved","reservation_id":"<session>:<tool_use>","ts":"<ISO>",
+ "target_round":N,"target_role":"...","consumes":"outer|blind|ultraverge|none",
+ "counts_before":{"outer":..,"blind":..,"ultraverge":..,"total":..},
+ "ceilings":{"outer":..,"blind":..,"ultraverge":..,"total":..},
+ "extension_id":"<或 null>","tier":"enforced|auditable-only"}
+// spawn_succeeded —— 必填：reservation_id, ts(ISO), instance_id(非空串)。
+{"event":"spawn_succeeded","reservation_id":"..","ts":"..","instance_id":".."}
+// spawn_failed —— 必填：reservation_id, ts；reason 可选(若有须为串)。
+{"event":"spawn_failed","reservation_id":"..","ts":"..","reason":".."}
+// cancelled —— 必填：reservation_id, ts；pre_execution 须为 bool(默认 false)；reason 可选。
+{"event":"cancelled","reservation_id":"..","ts":"..","pre_execution":true|false,"reason":".."}
+// decision —— 必填：decision_event_id(非空串), ts(ISO),
+//   verdict ∈ {MODE_SWITCH_REQUIRED, BLOCK:{budget|blind|ultraverge}_exhausted, BLOCK:total_spawn_cap,
+//              DENY:{unknown|illegal}_role, FAIL_CLOSED:<reason>}（闭合枚举，非法值如 "BANANA" → fail-closed）；
+//   scope ∈ {outer,blind,ultraverge,total,null}；BLOCK 系决策 scope 非 null 且 observed_usage/effective_ceiling 为 int；
+//   **非 BLOCK 决策（DENY/FAIL_CLOSED/MODE_SWITCH）须 scope=null 且 observed_usage=null 且 effective_ceiling=null（三字段均须显式存在为 null）**。
+{"event":"decision","decision_event_id":"<id>","ts":"..","verdict":"...",
+ "scope":"outer|blind|ultraverge|total|null","observed_usage":<int|null>,"effective_ceiling":<int|null>}
+```
+
+- **仅追加，永不改写**（同 attempts.md 硬约束）。spawn 结果不回填 reserved 事件，而是追加新事件引用 `reservation_id`。
+- **生命周期不变量**：reservation_id 不重复 reserved；settle（succeeded/failed/cancelled）必有前序 reserve 且不重复；同一 (scope, target_round) 至多一个活跃 reservation；outer/blind 产物文件须连续编号。违反 → `FAIL_CLOSED`。
+
+### _budget-state.json（结构化状态）
+
+```jsonc
+{"config": {"max_outer_loops":5, ...},          // 仅放需覆盖默认的项；int 参数须为 int 否则 fail-closed
+ "extensions": [                                  // 仅追加链；新记录写 supersedes，旧记录不可改
+   {"extension_id":"<id>","ts":"..","scope":"outer|blind|ultraverge|total",
+    "triggering_block_event_id":"<对应 decision 事件 id>",
+    "granted_at_usage":<int>,"prior_ceiling":<int>,"new_ceiling":<int>,
+    "supersedes":"<旧 id 或 null>","user_quote":"<用户原话>"}],
+ "fsm": {"mode":"standard|ultraverge","severities":{"<round>":["implementation",...]}}}
+```
+
+**extension 校验（违反 → FAIL_CLOSED）**：`triggering_block_event_id` 指向真实 BLOCK decision；`scope`/`granted_at_usage`/`prior_ceiling` 与该 decision 的 `scope`/`observed_usage`/`effective_ceiling` 一致；同 scope `supersedes` 为线性链（无分叉/环/多头）；`new_ceiling` 单调递增且 `> prior_ceiling`；取代旧记录时 `prior_ceiling == 被取代记录.new_ceiling`（链衔接）。`user_quote` 是人类可审计凭据，**不**机械证明来自用户。
+
+### 计数模型（确定性，脚本实现）
+
+```text
+realized(s) = 产物文件数  (outer: round-N.md / blind: blind-recheck-N.md / ultraverge: uv-init-N.md)
+pending(s)  = consumes=s、未 failed/cancelled、且产物未落成的 reservation 数
+effective_usage(s) = realized(s) + pending(s)                          # 可释放
+total_reservations_issued = 单调累计的不同 reservation_id（failed 不释放；仅 pre_execution cancelled 不计）
+reserve PROCEED iff total_reservations_issued < max_total_reserved_spawns AND effective_usage(s) < ceiling(s)
+```
+
+裁决优先级：`FAIL_CLOSED`(30) > `DENY`(21/22) > `BLOCK`(10/11/12/13) > `MODE_SWITCH_REQUIRED`(20) > `PROCEED`(0)。`max_total_reserved_spawns` 默认 = `ceil(total_safety×[3+max_ultraverge_initial+max_outer_loops×(1+max_inner_loops)+max_blind_rechecks+1])`。
+
+> **tier 说明**：上述脚本是 host-independent core（auditable-only 完整可用）。enforced tier 的宿主 PreToolUse/PostToolUse 接线、session→slug 绑定、角色 FSM 越权校验依赖宿主能力，属落地阶段待决设计点（见 `refs/framework-adapters.md` + plan §M1）。`budget_gate` 的 rule_frequency 触发检测方式：ledger 中出现 `decision` 事件即 triggered。

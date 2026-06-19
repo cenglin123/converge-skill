@@ -188,8 +188,11 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 1. 创建 .converge/active/<slug>/ 目录
 2. 初始化 _orchestrator-state.md（格式见 refs/state-schema.md）
 3. for round in 1..max_outer_loops:
-   a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）
-   b. 输出写入 round-N.md（格式见 refs/state-schema.md），记录 instance_id
+   a0. **预算 gate（reserve）**：spawn 前运行 `budget_gate.py reserve --role outer-reviewer --target-round N`。
+       - `PROCEED:<rid>` → 继续 spawn；非 PROCEED → 按返回值处置（见步骤 4）。
+       - enforced 宿主由 PreToolUse hook 自动执行并可拒绝；auditable-only 宿主由 Orchestrator 执行并记录（责任清单 M-11）。
+   a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）；spawn 后 `budget_gate.py settle`（enforced 宿主经 PostToolUse 自动；succeeded 须带 instance_id）
+   b. 输出写入 round-N.md（格式见 refs/state-schema.md），记录 instance_id；reviewer verdict（可执行/阻断需修复/需重新设计）+ 逐条 blocking severity → `budget_gate.py ingest-verdict`
    c. Orchestrator 处理：overturn 检测、等价标注、antipattern 关联
    c+1. **角色边界自检**（详见责任清单 #3）：
         - 本轮动作是否仅限于循环管理 + 语义判定？
@@ -212,7 +215,12 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
     g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
     h. plan_amendment_required 时先回写 plan 本体再改下游
     i. Continue 做 inner loop reviewer 验收（宪法第二部 #2：不可跳过；Continue 不可用时按 refs/framework-adapters.md §A.2/A.4 降级为 orchestrator 逐条验收并标注）
-4. 超 max_outer_loops → 预算软停，询问用户
+4. **gate 裁决处置**（取代旧「超 max_outer_loops 预算软停」的纯 prose 询问）：
+   - `BLOCK:budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `total_spawn_cap` → **停止**，向用户呈现决策菜单：继续迭代（须写入 round-stamped `budget_extension` 令牌，关联触发它的 decision 事件 + 用户原话）/ 接受当前产物（终止-c）/ 简化 plan / 终止。**无有效 extension 不得续 spawn。**
+   - `MODE_SWITCH_REQUIRED` → 呈现：接受进入执行 / 简化 plan（移除代码片段）重新收敛 / 终止。
+   - `DENY:unknown_role` / `illegal_role` → 角色非法，停止并复查。
+   - `FAIL_CLOSED:*` → 状态损坏/不确定（含 ledger schema 校验失败），停止，按 reason 修复后重试（绝不 fail-open）。
+   - 用户对超预算的续跑授权**必须显式、具体、可审计**（呼应宪法第二部 #3/#5 + 授权粒度澄清）；"走 converge 并执行"只授权到**默认**预算，不授权扩展。
 ```
 
 ### 盲审复核（Blank-Slate Recertification）
@@ -225,7 +233,8 @@ verdict=可执行 且 ≥2 轮 →
   ├ 零阻断 → 真正收敛，retrospective 记 blind_recheck: pass
   └ 有阻断 → findings 作为 escalated_issues（BR- 前缀独立注入块）注入主循环
              → Executor 修复 → 下一 outer loop Spawn fresh Reviewer 验收 → 再次可执行 → 再次盲审
-             → 超 max_blind_rechecks → 预算软停，问用户
+             → 盲审 spawn 同样经 budget_gate.py reserve（--role blind-reviewer）
+             → 超 max_blind_rechecks → gate 返回 BLOCK:blind_exhausted → 决策菜单（见主循环步骤 4），不自动续
   若终止-c（主观接受）+ 盲审失败 → 提示用户，用户可确认跳过（retrospective 记 blind_recheck: waived）
 ```
 
@@ -284,6 +293,7 @@ M-5. **Type R/F 等价标注** — 同源标注（语义判断）
 M-6. **信息源核对** — 逐条过 reviewer blocking 时，检查每条的事实前提是否与原始材料（用户原话 / reference_materials / contract.md）矛盾。若发现矛盾（信息源不忠实），按可机械核验性分流：**可机械核验的 agent 自裁**（对照原始材料驳回，记 `factual_self_adjudication`），**不可机械核验的才向用户申请仲裁**（用户驳回记 `user_arbitration`；具体操作见 `refs/orchestrator-guide.md` §九）。仅覆盖"可机械核验的事实矛盾"一类——非笼统不服、非语义层推理争议
 M-9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
 M-10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
+M-11. **预算 gate 执行** — 每次 spawn（reviewer / executor / 各类角色）前运行 `budget_gate.py reserve`，spawn 后 `settle`；非 PROCEED 一律停止并按主循环步骤 4 处置。**per-scope 预算（outer/blind/ultraverge）+ mode-switch + extension 菜单由 Orchestrator 经 reserve 驱动——两个 tier 都如此**。**`best-effort guarded`（= hook-blocked auditable-only，**非** enforced tier）**：会话开始 `budget_gate.py bind`、结束 `unbind`、扩容后 `refresh-cap`；宿主 `PreToolUse` hook 在绑定会话对每次 Agent spawn 维护**独立总量硬上限**（cap 派生自 validated `ceiling(state,total)`），达上限即 deny——防 runaway 兜底（即便 Orchestrator 遗忘 per-scope 预算也硬停），与 ledger/per-scope 互不干扰、不双计。绑定存在后 hook 对任何损坏 fail-closed deny。**禁止在未取得 PROCEED 时 spawn**；收口前确保无未结孤儿 reservation。续跑超默认预算须有效 `budget_extension`（关联真实 decision 事件 + 用户原话），不得以记忆中的旧授权续费。接线与诚实边界见 `refs/framework-adapters.md` §A.1
 
 **条件触发** ——
 C-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
@@ -333,6 +343,9 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 - [ ] 若触发了设计审查：`design-review.md` 已写入，highlights 已报告用户，用户决策已记录
 - [ ] 若本次收敛中 Executor 使用了降档（low）：验收已包含确定性核对，档位取值与三条件核对结果已记入 attempt log
 - [ ] 若本次收敛经历 ≥2 轮：盲审复核已完成（verdict=可执行 或 blind_recheck: waived），retrospective 中已记录 blind_recheck 字段
+- [ ] **每个预算内 spawn 均有有效 reservation（gate PROCEED）且已 settle；无未结孤儿 reservation**
+- [ ] **若发生过预算扩展（budget_extension）：每条均关联真实 BLOCK decision 事件 + round-stamped 用户原话；extension 仅抬高 ceiling，不替代 reservation；总量未突破 max_total_reserved_spawns**
+- [ ] **若宿主为 auditable-only（无 pre-spawn hook）：用户已被告知该降级模式及其对预算强制力的影响**（呼应宪法 #6）
 
 ---
 
@@ -353,6 +366,13 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
 | `max_blind_rechecks` | 2 | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
+| `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + max_ultraverge_initial + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数 = 44。扩容需 `scope=total` extension |
+| `total_safety` | 1.5 | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
+| `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
+| `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
+
+> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是「预算软停」从 prose 迁移到 file-authoritative gate 的核心。信任边界按宿主能力分级（enforced / auditable-only），机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `docs/plans/*/20260618-budget-enforcement-hardening.md`。
 
 ### pre-push hook 环境变量（`scripts/hooks/`）
 
@@ -386,6 +406,8 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 │   ├── contract.md             # Round 0 合同终稿（可选）
 │   ├── round-N.md              # 每轮 reviewer 输出 + orchestrator 处理记录
 │   ├── attempts.md             # 跨轮 attempt log（含 overturn 链）
+│   ├── gate-ledger.jsonl       # 预算 gate 仅追加事件流（reserved/settle/decision）
+│   ├── _budget-state.json      # 预算 gate 结构化状态（config 覆盖 / extensions 链 / fsm mode+severities）
 │   └── _orchestrator-state.md  # 抗 compact / 抗 session 切换
 ├── done/<slug>/                # 已收敛/已停止
 │   ├── ... (上述所有文件)
