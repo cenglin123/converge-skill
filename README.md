@@ -2,7 +2,9 @@
 
 双 Agent 迭代收敛，专为 AI 生成产物设计。不同于脚本化工作流，converge 使用独立 Agent 之间的**对抗式审查循环**，通过迭代驱动质量提升——直到 Reviewer 给出 `可执行` verdict 或触发停止条件。
 
-> **框架无关**：Reviewer / Executor 的启动和续命通过抽象能力层实现，不绑定特定框架 API。
+> **框架无关**：Reviewer / Executor 的启动和续命通过抽象能力层（Spawn / Continue / Identify）实现，不绑定特定框架 API。核心预算裁决脚本（file-authoritative `budget_gate.py`）同样宿主无关——reserve/settle/ingest-verdict 的语义在所有框架下一致。
+>
+> **预算执行分 tier**：核心 gate 虽宿主无关，但"能否在 spawn 前硬阻断"取决于框架是否提供可阻断的 pre-spawn hook。Claude Code 已落地 `best-effort guarded`（PreToolUse 总量兜底）；opencode / Codex 当前为 `auditable-only`；真正的 `enforced` 仍是未来能力。详见下方「预算执行」。
 
 ## 设计哲学
 
@@ -43,8 +45,34 @@ Round 1+：对抗收敛
 | **终止-a 严格首轮通过** | fresh reviewer 首轮 verdict = `可执行`，零阻断 |
 | **终止-b 渐近通过** | blocking 单调下降至 ≤1 低级项，用户确认 |
 | **终止-c 主观接受** | 用户明确说"够了" |
-| **预算软停** | 达轮次上限，用户决定不续费 |
+| **预算 gate 阻断** | gate 返回 `BLOCK:*`，无有效 extension 不得续 spawn；用户选择扩容 / 接受 / 简化 / 终止 |
 | **振荡硬停** | Type O/R 达阈值，自动硬停 |
+
+## 预算执行
+
+收敛的 spawn 预算由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前后裁决，不靠 Orchestrator 记忆计数。执行链路：
+
+```
+reserve → Agent spawn → settle → ingest-verdict
+```
+
+- **reserve**：spawn 前申请额度；`PROCEED:<rid>` 方可 spawn，否则按裁决处置
+- **settle**：spawn 后落账（succeeded 须带 instance_id）
+- **ingest-verdict**：reviewer verdict 落盘后驱动 mode 记录与边际递减判定
+
+### 当前能力 tier
+
+| 模式 | 能力 | 当前框架 |
+|------|------|---------|
+| `auditable-only` | 通用；Orchestrator 调用 reserve/settle；ledger + extension 链提供审计，pre-push hook 提供审计（阻断需显式 `CONVERGE_STRICT=1`） | opencode、Codex 及所有框架（缺省） |
+| `best-effort guarded` | Claude Code；在 auditable-only 基础上增加独立、单调的 Agent spawn 总量 hook（= hook-blocked auditable-only） | Claude Code |
+| true `enforced` | 尚未实现；需要角色 FSM、角色不可伪造及权限锁定 | （deferred） |
+
+> `best-effort guarded` **不是** `enforced`——只强制**总 spawn cap**：不执行 per-scope reserve/settle（仍由 Orchestrator 驱动）、不防主动删除或篡改 hook/binding、hook 不写 ledger 也不与 ledger 双计。它解决的是漂移、遗忘和 compaction 后失控。
+
+### 预算阻断处置
+
+达预算上限时 gate 返回 `BLOCK:budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `total_spawn_cap`：**停止**，无有效 `budget_extension`（须关联真实 BLOCK decision 事件 + 用户原话）不得续 spawn。用户选择：扩容续跑 / 接受当前产物（终止-c）/ 简化 plan / 终止。
 
 ## 适用场景
 
@@ -65,8 +93,15 @@ Round 1+：对抗收敛
 converge/
 ├── SKILL.md                  # 入口：Orchestrator 工作流 + 抽象能力层
 ├── scripts/
+│   ├── budget_gate.py             # 预算 gate（file-authoritative，reserve/settle/ingest-verdict/bind + PreToolUse hook）
 │   ├── l1_gate.py                 # L1 信号检测（非 LLM，零 token 成本）
-│   └── distill_antipatterns.py    # 反模式蒸馏器（全量编译 retrospective → status）
+│   ├── distill_antipatterns.py    # 反模式蒸馏器（全量编译 retrospective → status）
+│   └── hooks/
+│       ├── pre-commit             # 提交前检查
+│       ├── pre-push               # 推送前检查（含孤儿 reservation / stale 检测）
+│       └── stale-check.py         # active/ stale 项检测
+├── tests/
+│   └── test_budget_gate.py        # 预算 gate 验收用例（49 tests，stdlib only）
 └── refs/
     ├── contract-negotiation.md    # Round 0：合同谈判流程 + contract.md 格式
     ├── decomposition-protocol.md  # 层级式并行收敛：分解协议、分阶段管控
@@ -80,4 +115,14 @@ converge/
     ├── design-review-prompt.md    # 收敛后设计审查：7 维骨架，单轮咨询式
     └── antipatterns.md            # 反模式注册表（compiled 产物，status 由 distill 维护）
 ```
+
+## 验证
+
+```powershell
+python -W always::ResourceWarning tests/test_budget_gate.py
+python -m py_compile scripts/budget_gate.py tests/test_budget_gate.py
+git diff --check
+```
+
+期望：49 tests OK，无 ResourceWarning。预算 gate 不依赖外部库（stdlib only）。
 

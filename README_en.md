@@ -4,7 +4,9 @@
 
 Dual-agent iterative convergence for AI-generated artifacts. Instead of scripted workflows, converge uses **adversarial review cycles** between independent agents to drive quality through iteration — until Reviewer delivers a `executable` verdict or a stop condition is triggered.
 
-> **Framework-agnostic**: Reviewer / Executor spawning and continuation are implemented via an abstract capability layer (Spawn / Continue / Identify), not tied to any specific framework API.
+> **Framework-agnostic**: Reviewer / Executor spawning and continuation are implemented via an abstract capability layer (Spawn / Continue / Identify), not tied to any specific framework API. The core budget-adjudication script (file-authoritative `budget_gate.py`) is likewise host-independent — reserve/settle/ingest-verdict semantics are identical across all frameworks.
+>
+> **Budget enforcement is tiered**: the core gate is host-independent, but "can it hard-block before spawn?" depends on whether the framework exposes a blockable pre-spawn hook. Claude Code has a landed `best-effort guarded` (PreToolUse total-cap backstop); opencode / Codex are currently `auditable-only`; true `enforced` remains future work. See "Budget execution" below.
 
 ## Philosophy
 
@@ -45,8 +47,34 @@ Artifacts exit the convergence loop through one of five states (see `SKILL.md`):
 | **Terminate-a Strict first-pass** | Fresh reviewer's first verdict = `executable`, zero blocking issues |
 | **Terminate-b Asymptotic** | blocking_issues monotonically decreasing to ≤1 low-severity item, user confirms |
 | **Terminate-c Subjective acceptance** | User explicitly says "good enough" |
-| **Budget soft-stop** | Round limit reached, user declines to continue |
+| **Budget gate block** | gate returns `BLOCK:*`; no valid extension → no further spawn; user chooses extend / accept / simplify / terminate |
 | **Oscillation hard-stop** | Type O/R threshold reached, automatic stop |
+
+## Budget execution
+
+The spawn budget for a convergence is adjudicated by the deterministic script `scripts/budget_gate.py` before and after every spawn — it does not rely on the Orchestrator remembering counts. The pipeline:
+
+```
+reserve → Agent spawn → settle → ingest-verdict
+```
+
+- **reserve**: request quota before spawn; only `PROCEED:<rid>` permits spawn, otherwise act on the verdict
+- **settle**: record the outcome after spawn (succeeded requires an instance_id)
+- **ingest-verdict**: once the reviewer verdict is persisted, drives mode tracking and marginal-decrement judgment
+
+### Current capability tiers
+
+| Mode | Capability | Current frameworks |
+|------|-------------|-------------------|
+| `auditable-only` | Universal; Orchestrator calls reserve/settle; ledger + extension chain provide audit; pre-push hook provides audit (blocking requires explicit `CONVERGE_STRICT=1`) | opencode, Codex, and all frameworks (default) |
+| `best-effort guarded` | Claude Code; adds an independent, monotonic Agent-spawn total-cap hook on top of auditable-only (= hook-blocked auditable-only) | Claude Code |
+| true `enforced` | Not yet implemented; requires role FSM, role non-forgeability and permission lock-down | (deferred) |
+
+> `best-effort guarded` is **not** `enforced` — it only enforces a **total spawn cap**: it does not perform per-scope reserve/settle (still Orchestrator-driven), does not defend against active deletion or tampering of the hook/binding, and the hook writes no ledger (no double-counting with the ledger). It addresses drift, forgetting, and post-compaction loss of control.
+
+### Budget-block handling
+
+When a budget limit is hit the gate returns `BLOCK:budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `total_spawn_cap`: **stop**. No further spawn is allowed without a valid `budget_extension` (must reference a real BLOCK decision event + the user's verbatim quote). The user chooses: extend and continue / accept the current artifact (terminate-c) / simplify the plan / terminate.
 
 ## When to use
 
@@ -68,8 +96,15 @@ converge/
 ├── SKILL.md                  # Entry point: Orchestrator workflow + abstract capability layer
 ├── CONSTITUTION.md           # Constitutional design principles + governance file list
 ├── scripts/
+│   ├── budget_gate.py        # Budget gate (file-authoritative, reserve/settle/ingest-verdict/bind + PreToolUse hook)
 │   ├── l1_gate.py            # L1 signal detection (non-LLM, zero token cost)
-│   └── distill_antipatterns.py  # Antipattern distiller (compiles retrospective → status)
+│   ├── distill_antipatterns.py  # Antipattern distiller (compiles retrospective → status)
+│   └── hooks/
+│       ├── pre-commit        # Pre-commit check
+│       ├── pre-push          # Pre-push check (orphan reservation / stale detection)
+│       └── stale-check.py    # active/ stale-item detection
+├── tests/
+│   └── test_budget_gate.py   # Budget gate acceptance tests (49 tests, stdlib only)
 └── refs/
     ├── contract-negotiation.md    # Round 0: contract negotiation flow + contract.md format
     ├── decomposition-protocol.md  # Hierarchical parallel convergence: decomposition & phased control
@@ -84,3 +119,13 @@ converge/
     ├── antipatterns.md            # Antipattern registry (compiled product, distill-maintained)
     └── model-tiers.md             # Executor model tier reference table
 ```
+
+## Verification
+
+```powershell
+python -W always::ResourceWarning tests/test_budget_gate.py
+python -m py_compile scripts/budget_gate.py tests/test_budget_gate.py
+git diff --check
+```
+
+Expected: 49 tests OK, no ResourceWarning. The budget gate has no external dependencies (stdlib only).
