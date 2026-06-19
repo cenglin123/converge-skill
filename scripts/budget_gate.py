@@ -6,8 +6,10 @@
 ingest_verdict / preflight + 仅追加 ledger + 按 scope 有效计数 + 单调总量上限 +
 extension 链与 decision 交叉校验 + **统一 schema/lifecycle validator** + fail-closed。
 
-**不在本文件内的**：enforced tier 的宿主 PreToolUse/PostToolUse 接线、
-session→slug 绑定、角色 FSM 越权校验——依赖宿主能力，属落地阶段待决设计点。
+本文件还含 **best-effort guarded**（= hook-blocked auditable-only）：bind / refresh-cap /
+unbind + `hook-pretooluse`（PreToolUse 总量硬上限兜底）。**真正的 enforced**（角色不可
+伪造、角色 FSM 越权校验、权限锁定）仍属未来工作——Claude Code 不拥有 subagent prompt
+模板，FSM phase 机为 plan 推迟项。
 
 计数语义（plan §计数模型）：
   realized(s) = 已落成产物文件数（outer: round-N.md / blind: blind-recheck-N.md
@@ -692,6 +694,201 @@ def cmd_preflight(args) -> int:
     return EXIT_PROCEED
 
 
+# ---- best-effort guarded：宿主绑定 + PreToolUse 总量硬上限 hook --------------
+# 这**不是** "enforced" tier（不提供角色不可伪造/权限锁定保证）。命名为
+# **best-effort guarded**（亦即 hook-blocked auditable-only）：hook 在**绑定的收敛
+# 会话**中对每次 Agent spawn 维护一个**独立于 ledger 的单调计数器**，达总量硬上限
+# 即 deny。它不替代 orchestrator 的 per-scope reserve（两者互不干扰），只作 runaway
+# 的兜底——即便 orchestrator 完全遗忘 per-scope 预算，hook 也在 cap 处硬停。
+# cap 派生自 validated state 的 ceiling(total)（含授权链校验过的 scope=total
+# extension），不接受任意传入。绑定存于 host 域（默认 ~/.claude/converge/bindings/）；
+# 不做权限锁定，绑定可被 Agent 改写——该残余边界已与用户确认（蓄意自篡改属另一威胁模型）。
+BINDINGS_DIR = Path(os.environ.get(
+    "CONVERGE_BINDINGS_DIR", str(Path.home() / ".claude" / "converge" / "bindings")))
+SPAWN_TOOL_NAMES = {"Agent"}   # converge Spawn = Claude Code `Agent` 工具
+
+
+def _binding_path(session_id: str) -> Path:
+    # 无碰撞：以完整 session_id 的 sha256 命名（避免 a/b 与 a?b 撞同一文件）。
+    import hashlib
+    h = hashlib.sha256((session_id or "").encode("utf-8")).hexdigest()
+    return BINDINGS_DIR / f"{h}.json"
+
+
+class FileLock:
+    def __init__(self, path: Path, timeout: float = 5.0):
+        self.lock = Path(str(path) + ".lock")
+        self.timeout = timeout
+        self.fd = None
+
+    def __enter__(self):
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                if self.lock.exists() and (time.time() - self.lock.stat().st_mtime) > LOCK_STALE_SECONDS:
+                    self.lock.unlink(missing_ok=True)
+            except OSError:
+                pass
+            try:
+                self.fd = os.open(str(self.lock), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                return self
+            except FileExistsError:
+                if time.time() > deadline:
+                    raise FailClosed("binding_lock_timeout")
+                time.sleep(0.02)
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.lock.unlink(missing_ok=True)
+
+
+def _validate_binding(binding, sid: str) -> None:
+    """绑定文件严格 schema：防负数/错类型 counter 绕过 cap（finding 2）。任一异常 → FailClosed。"""
+    if not isinstance(binding, dict):
+        raise FailClosed("binding_not_object")
+    if not _nonempty_str(binding.get("session_id")) or binding.get("session_id") != sid:
+        raise FailClosed("binding_field:session_id")
+    for f in ("hook_spawn_count", "hook_spawn_cap"):
+        v = binding.get(f)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            raise FailClosed(f"binding_field:{f}")
+    if not _nonempty_str(binding.get("active_dir")):
+        raise FailClosed("binding_field:active_dir")
+    if binding.get("mode") != "best-effort-guarded":
+        raise FailClosed("binding_field:mode")
+
+
+def _validated_total_cap(active: Path) -> int:
+    """从**经完整校验**的 state 派生总量上限（含 validated scope=total extension）。
+
+    cap 不接受任意传入——只能来自 validate_integrity 通过的 state 的 ceiling(total)，
+    从而强制走 extension 授权链（封堵任意 --cap 绕过）。
+    """
+    state = read_state(active)
+    events = read_ledger(active)
+    validate_integrity(active, events, state)
+    return ceiling(state, "total")
+
+
+def cmd_bind(args) -> int:
+    active = Path(args.active_dir).resolve()
+    if not active.is_dir():
+        print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    BINDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    bp = _binding_path(args.session_id)
+    try:
+        with FileLock(bp):
+            if bp.exists():
+                # 已绑定 → 拒绝重置（防 re-bind 清零计数绕过 cap）。改用 refresh-cap。
+                print("FAIL_CLOSED:already_bound"); return EXIT_FAIL_CLOSED
+            cap = _validated_total_cap(active)
+            bp.write_text(json.dumps({
+                "session_id": args.session_id, "slug": active.name, "active_dir": str(active),
+                "mode": "best-effort-guarded", "hook_spawn_count": 0, "hook_spawn_cap": int(cap),
+                "governed_tools": sorted(SPAWN_TOOL_NAMES), "created_at": _now(),
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"BOUND:{args.session_id}:cap={cap}")
+        return EXIT_PROCEED
+    except FailClosed as e:
+        print(f"FAIL_CLOSED:{e.reason}"); return EXIT_FAIL_CLOSED
+
+
+def cmd_refresh_cap(args) -> int:
+    """扩容 cap，**保留 count**。新 cap **只能来自经验证的 `scope=total` extension**——
+    普通 config 变化不得改变已绑定 cap（封堵改 config 绕授权链）。"""
+    bp = _binding_path(args.session_id)
+    try:
+        with FileLock(bp):
+            if not bp.exists():
+                print("FAIL_CLOSED:not_bound"); return EXIT_FAIL_CLOSED
+            binding = json.loads(bp.read_text(encoding="utf-8"))
+            _validate_binding(binding, args.session_id)
+            active = Path(binding["active_dir"])
+            state = read_state(active)
+            validate_integrity(active, read_ledger(active), state)   # 校验 extension 授权链
+            ext = active_extension(state, "total")
+            if ext is None:
+                # 无 validated scope=total extension → 无授权可刷新（config 变化无效）。
+                print("FAIL_CLOSED:no_total_extension"); return EXIT_FAIL_CLOSED
+            new_cap = int(ext["new_ceiling"])
+            if new_cap < int(binding["hook_spawn_cap"]):
+                print("FAIL_CLOSED:cap_would_decrease"); return EXIT_FAIL_CLOSED
+            binding["hook_spawn_cap"] = new_cap            # count 保持不变
+            binding["refreshed_at"] = _now()
+            bp.write_text(json.dumps(binding, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"REFRESHED:{args.session_id}:cap={new_cap}:count={binding['hook_spawn_count']}")
+        return EXIT_PROCEED
+    except FailClosed as e:
+        print(f"FAIL_CLOSED:{e.reason}"); return EXIT_FAIL_CLOSED
+
+
+def cmd_unbind(args) -> int:
+    bp = _binding_path(args.session_id)
+    try:
+        with FileLock(bp):
+            bp.unlink(missing_ok=True)
+    except FailClosed as e:
+        print(f"FAIL_CLOSED:{e.reason}"); return EXIT_FAIL_CLOSED
+    print("UNBOUND")
+    return EXIT_PROCEED
+
+
+def _emit_deny(reason: str) -> None:
+    # ensure_ascii=True：deny JSON 走 ASCII，规避 Windows hook stdout 编码不确定性。
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }}, ensure_ascii=True))
+
+
+def cmd_hook_pretooluse(args) -> int:
+    """Claude Code PreToolUse hook 入口：读 stdin JSON，绑定会话的 Agent spawn 计数+裁决。
+
+    fail 边界（按审计指引）：
+    - **未绑定会话 / 非 spawn 工具 / 无法识别会话**（stdin 不可解析）→ 放行（passthrough）。
+      不误阻无关 Agent 调用；binding 被删＝未绑定＝放行，属已确认的 best-effort 残余
+      （蓄意自篡改属另一威胁模型）。
+    - **绑定存在 = 已知 enforced 会话**：此后**任何**歧义/损坏/锁/写错误 → **DENY**（fail-closed），
+      封堵"篡坏 binding 以禁用上限"的逃避向量；达上限亦 DENY。
+    """
+    try:
+        data = json.load(sys.stdin)
+        tool = data.get("tool_name")
+        sid = data.get("session_id")
+    except (json.JSONDecodeError, OSError, ValueError):
+        return EXIT_PROCEED   # 无法识别会话 → 放行（非 Agent 可控的逃避向量）
+    if tool not in SPAWN_TOOL_NAMES:
+        return EXIT_PROCEED
+    bp = _binding_path(sid or "")
+    if not bp.exists():
+        return EXIT_PROCEED   # 未绑定 → 放行
+
+    # —— 已知绑定会话：从此 fail-closed ——
+    try:
+        with FileLock(bp):
+            binding = json.loads(bp.read_text(encoding="utf-8"))
+            # 严格 schema（含文件内 session_id 一致、count/cap 为非负整数）。
+            _validate_binding(binding, sid)
+            count = binding["hook_spawn_count"]
+            cap = binding["hook_spawn_cap"]
+            if count >= cap:
+                _emit_deny(
+                    f"converge budget_gate: bound session Agent-spawn total hard cap {cap} reached "
+                    f"(slug={binding.get('slug')}). best-effort guarded runaway backstop. To continue: "
+                    f"user-authorized scope=total extension + refresh-cap, or accept/simplify/terminate.")
+                return EXIT_PROCEED
+            binding["hook_spawn_count"] = count + 1
+            bp.write_text(json.dumps(binding, ensure_ascii=False, indent=2), encoding="utf-8")
+        return EXIT_PROCEED
+    except Exception as exc:  # noqa: BLE001 —— 绑定会话出错 → fail-closed DENY
+        _emit_deny(
+            f"converge budget_gate: bound session binding is ambiguous/corrupt "
+            f"({type(exc).__name__}); failing closed (deny). Fix or unbind the binding and retry.")
+        return EXIT_PROCEED
+
+
 def _run(func, args) -> int:
     """统一异常边界：任何未预期异常 → FAIL_CLOSED(30)，绝不裸退出 1。"""
     try:
@@ -738,6 +935,22 @@ def main() -> int:
     pf = sub.add_parser("preflight")
     pf.add_argument("--plan", required=True)
     pf.set_defaults(func=cmd_preflight)
+
+    bd = sub.add_parser("bind")        # 会话开始时绑定 session→active（cap 派生自 validated state）
+    bd.add_argument("--session-id", required=True)
+    bd.add_argument("--active-dir", required=True)
+    bd.set_defaults(func=cmd_bind)
+
+    rc = sub.add_parser("refresh-cap")  # scope=total 扩容后原子刷新 cap，保留 count
+    rc.add_argument("--session-id", required=True)
+    rc.set_defaults(func=cmd_refresh_cap)
+
+    ub = sub.add_parser("unbind")      # 会话结束时解绑
+    ub.add_argument("--session-id", required=True)
+    ub.set_defaults(func=cmd_unbind)
+
+    hk = sub.add_parser("hook-pretooluse")   # PreToolUse hook 入口（读 stdin）
+    hk.set_defaults(func=cmd_hook_pretooluse)
 
     args = p.parse_args()
     return _run(args.func, args)

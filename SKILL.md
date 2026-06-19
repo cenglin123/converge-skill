@@ -293,7 +293,7 @@ M-5. **Type R/F 等价标注** — 同源标注（语义判断）
 M-6. **信息源核对** — 逐条过 reviewer blocking 时，检查每条的事实前提是否与原始材料（用户原话 / reference_materials / contract.md）矛盾。若发现矛盾（信息源不忠实），按可机械核验性分流：**可机械核验的 agent 自裁**（对照原始材料驳回，记 `factual_self_adjudication`），**不可机械核验的才向用户申请仲裁**（用户驳回记 `user_arbitration`；具体操作见 `refs/orchestrator-guide.md` §九）。仅覆盖"可机械核验的事实矛盾"一类——非笼统不服、非语义层推理争议
 M-9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
 M-10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
-M-11. **预算 gate 执行** — 每次 spawn（reviewer / executor / 各类角色）前运行 `budget_gate.py reserve`，spawn 后 `settle`；非 PROCEED 一律停止并按主循环步骤 4 处置。enforced 宿主由 hook 自动执行（Orchestrator 不得绕过）；auditable-only 宿主由 Orchestrator 执行并将结果落 ledger。**禁止在未取得 PROCEED 时 spawn**；收口前确保无未结孤儿 reservation。续跑超默认预算须有效 `budget_extension`（关联真实 decision 事件 + 用户原话），不得以记忆中的旧授权续费
+M-11. **预算 gate 执行** — 每次 spawn（reviewer / executor / 各类角色）前运行 `budget_gate.py reserve`，spawn 后 `settle`；非 PROCEED 一律停止并按主循环步骤 4 处置。**per-scope 预算（outer/blind/ultraverge）+ mode-switch + extension 菜单由 Orchestrator 经 reserve 驱动——两个 tier 都如此**。**`best-effort guarded`（= hook-blocked auditable-only，**非** enforced tier）**：会话开始 `budget_gate.py bind`、结束 `unbind`、扩容后 `refresh-cap`；宿主 `PreToolUse` hook 在绑定会话对每次 Agent spawn 维护**独立总量硬上限**（cap 派生自 validated `ceiling(state,total)`），达上限即 deny——防 runaway 兜底（即便 Orchestrator 遗忘 per-scope 预算也硬停），与 ledger/per-scope 互不干扰、不双计。绑定存在后 hook 对任何损坏 fail-closed deny。**禁止在未取得 PROCEED 时 spawn**；收口前确保无未结孤儿 reservation。续跑超默认预算须有效 `budget_extension`（关联真实 decision 事件 + 用户原话），不得以记忆中的旧授权续费。接线与诚实边界见 `refs/framework-adapters.md` §A.1
 
 **条件触发** ——
 C-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游

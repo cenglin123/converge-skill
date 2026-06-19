@@ -15,9 +15,14 @@ from pathlib import Path
 GATE = Path(__file__).resolve().parent.parent / "scripts" / "budget_gate.py"
 
 
-def run(*args, cwd=None):
+def run(*args, cwd=None, input=None, env=None):
+    full_env = None
+    if env:
+        import os
+        full_env = {**os.environ, **env}
     r = subprocess.run([sys.executable, str(GATE), *args],
-                       capture_output=True, text=True, encoding="utf-8", cwd=cwd)
+                       capture_output=True, text=True, encoding="utf-8",
+                       cwd=cwd, input=input, env=full_env)
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 
 
@@ -428,6 +433,175 @@ class TestAdversarial(Base):
         c, out, _ = self.reserve("outer-reviewer", "blk", rnd=1)
         self.assertEqual(out, "BLOCK:budget_exhausted")
         return self.last_block_decision("outer")
+
+
+class TestEnforcedHook(Base):
+    """best-effort guarded：bind/refresh-cap/unbind + PreToolUse 总量硬上限 hook。"""
+
+    # config 使总量公式 = ceil(1×[3+0+0×1+0+1]) = 4（最小 cap，便于测边界）
+    MIN_CAP = {"total_safety": 1, "max_outer_loops": 0, "max_inner_loops": 0,
+               "max_blind_rechecks": 0, "ultraverge_min_reviewers": 0}
+
+    def setUp(self):
+        super().setUp()
+        self._bindings = tempfile.TemporaryDirectory()
+        self.env = {"CONVERGE_BINDINGS_DIR": self._bindings.name}
+        self.sid = "sess-ABC"
+
+    def tearDown(self):
+        self._bindings.cleanup()
+        super().tearDown()
+
+    def _hook(self, tool="Agent", session=None):
+        payload = json.dumps({"tool_name": tool, "session_id": session or self.sid})
+        return run("hook-pretooluse", input=payload, env=self.env)
+
+    def _binding_file(self, session=None):
+        import hashlib, os
+        h = hashlib.sha256((session or self.sid).encode("utf-8")).hexdigest()
+        return os.path.join(self._bindings.name, h + ".json")
+
+    def _bind(self, session=None):
+        self.set_config(**self.MIN_CAP)
+        return run("bind", "--session-id", session or self.sid,
+                   "--active-dir", str(self.active), env=self.env)
+
+    def test_unbound_session_passthrough(self):
+        c, out, _ = self._hook()
+        self.assertEqual(c, 0); self.assertEqual(out, "")
+
+    def test_bound_blocks_at_cap(self):
+        c, out, _ = self._bind()
+        self.assertTrue(out.startswith("BOUND:"), out)
+        self.assertIn("cap=4", out)
+        for i in range(4):                       # cap=4 → 前 4 次放行
+            self.assertEqual(self._hook()[1], "", f"spawn {i} should pass")
+        c, out, _ = self._hook()                 # 第 5 次 deny
+        self.assertIn('"permissionDecision": "deny"', out, out)
+        self.assertIn("hard cap", out)
+
+    def test_rebind_refused_does_not_reset_count(self):
+        # finding 1：已绑定再 bind 必须拒绝且不清零 count（防 re-bind 绕过 cap）。
+        self._bind()
+        self.assertEqual(self._hook()[1], "")    # count -> 1
+        c, out, _ = run("bind", "--session-id", self.sid,
+                        "--active-dir", str(self.active), env=self.env)
+        self.assertEqual(out, "FAIL_CLOSED:already_bound", out)
+        for _ in range(3):                       # count 未重置：还能 3 次（总 4）
+            self.assertEqual(self._hook()[1], "")
+        self.assertIn("deny", self._hook()[1])   # 第 5 次 deny
+
+    def _read_binding(self, session=None):
+        return json.loads(Path(self._binding_file(session)).read_text(encoding="utf-8"))
+
+    def _write_binding(self, b, session=None):
+        Path(self._binding_file(session)).write_text(json.dumps(b), encoding="utf-8")
+
+    def _add_real_total_extension(self, new_ceiling):
+        # 触发真实 BLOCK:total_spawn_cap decision（reserve 充满 ledger 总量=4），
+        # 再追加引用它的 scope=total extension（真实授权链，非改 config）。
+        for i in range(4):
+            self.reserve("executor", f"tot{i}")
+        self.reserve("executor", "totX")                  # 第 5 次 → BLOCK:total
+        d = self.last_block_decision("total")
+        self.assertIsNotNone(d, "expected a BLOCK:total decision")
+        self.add_extension(extension_id="t1", scope="total",
+                           triggering_block_event_id=d["decision_event_id"],
+                           granted_at_usage=d["observed_usage"],
+                           prior_ceiling=d["effective_ceiling"],
+                           new_ceiling=new_ceiling, supersedes=None, user_quote="扩容")
+        return d
+
+    def test_refresh_cap_preserves_count_via_real_extension(self):
+        # finding 1：refresh 只认真实 scope=total extension；count 保留。
+        self.set_config(**self.MIN_CAP)                   # total cap baseline = 4
+        run("bind", "--session-id", self.sid, "--active-dir", str(self.active), env=self.env)
+        for _ in range(2):
+            self.assertEqual(self._hook()[1], "")          # hook count -> 2
+        self._add_real_total_extension(new_ceiling=8)
+        c, out, _ = run("refresh-cap", "--session-id", self.sid, env=self.env)
+        self.assertIn("cap=8", out); self.assertIn("count=2", out)
+        for _ in range(6):                                 # count 2→8
+            self.assertEqual(self._hook()[1], "")
+        self.assertIn("deny", self._hook()[1])
+
+    def test_refresh_cap_config_change_ignored(self):
+        # finding 1：无 extension、仅改 config → refresh 必须拒绝，cap 不变。
+        self._bind()                                       # cap=4
+        self.set_config(total_safety=100)                  # 试图用 config 抬高
+        c, out, _ = run("refresh-cap", "--session-id", self.sid, env=self.env)
+        self.assertEqual(out, "FAIL_CLOSED:no_total_extension", out)
+        for _ in range(4):                                 # cap 仍 = 4
+            self.assertEqual(self._hook()[1], "")
+        self.assertIn("deny", self._hook()[1])
+
+    def test_refresh_cap_rejects_corrupt_extension_chain(self):
+        self._bind()
+        st = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        st["extensions"] = [{"extension_id": "bad", "scope": "total",
+                             "triggering_block_event_id": "nope", "granted_at_usage": 0,
+                             "prior_ceiling": 4, "new_ceiling": 9, "supersedes": None,
+                             "user_quote": "x"}]
+        (self.active / "_budget-state.json").write_text(json.dumps(st), encoding="utf-8")
+        c, out, _ = run("refresh-cap", "--session-id", self.sid, env=self.env)
+        self.assertTrue(out.startswith("FAIL_CLOSED"), out)
+
+    def test_negative_count_fail_closed_deny(self):
+        # finding 2：负数 count 不得绕过 cap。
+        self._bind()
+        b = self._read_binding(); b["hook_spawn_count"] = -100
+        self._write_binding(b)
+        c, out, _ = self._hook()
+        self.assertIn('"permissionDecision": "deny"', out, out)
+        self.assertIn("fail", out.lower())
+
+    def test_bad_typed_cap_fail_closed_deny(self):
+        # finding 2：非整数 cap → deny。
+        self._bind()
+        b = self._read_binding(); b["hook_spawn_cap"] = "999"
+        self._write_binding(b)
+        c, out, _ = self._hook()
+        self.assertIn('"permissionDecision": "deny"', out, out)
+
+    def test_session_filename_no_collision(self):
+        # finding 2：a/b 与 a?b 不得映射同一文件。绑定 a/b 后 a?b（未绑定）应放行。
+        self._bind(session="a/b")
+        c, out, _ = self._hook(session="a?b")
+        self.assertEqual(out, "", out)
+
+    def test_session_id_mismatch_in_file_deny(self):
+        self._bind()
+        b = self._read_binding(); b["session_id"] = "someone-else"
+        self._write_binding(b)
+        c, out, _ = self._hook()
+        self.assertIn('"permissionDecision": "deny"', out, out)
+
+    def test_bound_corrupt_binding_deny(self):
+        self._bind()
+        Path(self._binding_file()).write_text("{ not valid json", encoding="utf-8")
+        c, out, _ = self._hook()
+        self.assertIn('"permissionDecision": "deny"', out, out)
+        self.assertIn("fail", out.lower())
+
+    def test_unparseable_stdin_passthrough(self):
+        c, out, _ = run("hook-pretooluse", input="not json at all", env=self.env)
+        self.assertEqual(c, 0); self.assertEqual(out, "")
+
+    def test_non_agent_tool_passthrough(self):
+        self._bind()
+        for _ in range(6):                       # 非 Agent 工具不计数、不阻断（>cap 也无妨）
+            self.assertEqual(self._hook(tool="Bash")[1], "")
+
+    def test_unbind_restores_passthrough(self):
+        self._bind()
+        self.assertEqual(self._hook()[1], "")
+        run("unbind", "--session-id", self.sid, env=self.env)
+        self.assertEqual(self._hook()[1], "")    # 解绑后放行
+
+    def test_default_cap_from_state_stock(self):
+        c, out, _ = run("bind", "--session-id", self.sid, "--active-dir", str(self.active),
+                        env=self.env)
+        self.assertIn("cap=44", out)             # stock 默认公式
 
 
 if __name__ == "__main__":
