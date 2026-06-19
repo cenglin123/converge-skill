@@ -64,7 +64,7 @@ reserve → Agent spawn → settle → ingest-verdict
 
 | 模式 | 能力 | 当前框架 |
 |------|------|---------|
-| `auditable-only` | 通用；Orchestrator 调用 reserve/settle；ledger、extension 链和 pre-push hook 提供审计与阻断 | opencode、Codex 及所有框架（缺省） |
+| `auditable-only` | 通用；Orchestrator 调用 reserve/settle；ledger + extension 链提供审计，pre-push hook 提供审计（阻断需显式 `CONVERGE_STRICT=1`） | opencode、Codex 及所有框架（缺省） |
 | `best-effort guarded` | Claude Code；在 auditable-only 基础上增加独立、单调的 Agent spawn 总量 hook（= hook-blocked auditable-only） | Claude Code |
 | true `enforced` | 尚未实现；需要角色 FSM、角色不可伪造及权限锁定 | （deferred） |
 

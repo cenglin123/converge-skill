@@ -66,7 +66,7 @@ reserve → Agent spawn → settle → ingest-verdict
 
 | Mode | Capability | Current frameworks |
 |------|-------------|-------------------|
-| `auditable-only` | Universal; Orchestrator calls reserve/settle; ledger, extension chain and pre-push hook provide audit and blocking | opencode, Codex, and all frameworks (default) |
+| `auditable-only` | Universal; Orchestrator calls reserve/settle; ledger + extension chain provide audit; pre-push hook provides audit (blocking requires explicit `CONVERGE_STRICT=1`) | opencode, Codex, and all frameworks (default) |
 | `best-effort guarded` | Claude Code; adds an independent, monotonic Agent-spawn total-cap hook on top of auditable-only (= hook-blocked auditable-only) | Claude Code |
 | true `enforced` | Not yet implemented; requires role FSM, role non-forgeability and permission lock-down | (deferred) |
 
