@@ -297,7 +297,7 @@ gate_findings:
 
 **A3 — 标注 `非规范（non-normative）` 的代码块 → 免逐行实现审查，但仍查矛盾。** 若 plan 把代码块明确标注为 `非规范`/`示例`，盲审**不**对其做逐行实现审查（这类细节属执行阶段 + 测试，不在 plan 收敛面）；但**仍须**检查它是否与规范文本 / 验收标准 / 安全边界矛盾。未标注的可执行代码块按常规审查（并可触发 `budget_gate.py preflight` 的 `code_heavy` 提示——建议剥离或标 `非规范`）。
 
-> **结构化输出供 gate 消费**：标准模板的 `verdict`（可执行/阻断需修复/需重新设计）与每条 blocking 的 `severity`（conceptual/architectural/structural/implementation）是 `budget_gate.py ingest-verdict` 的输入——前者驱动角色 FSM 转换（enforced tier），后者驱动边际递减 `MODE_SWITCH_REQUIRED` 判定。二者必须**逐条、可解析**；解析失败 → gate fail-closed。
+> **结构化输出供 gate 消费**：标准模板的 `verdict`（可执行/阻断需修复/需重新设计）与每条 blocking 的 `severity`（conceptual/architectural/structural/implementation）是 `budget_gate.py ingest-verdict` 的输入——前者驱动 mode 记录（角色 FSM 是未来 true enforced 的输入，当前 guarded hook 不消费），后者驱动边际递减 `MODE_SWITCH_REQUIRED` 判定。二者必须**逐条、可解析**；解析失败 → gate fail-closed。
 
 ### Prompt 模板
 

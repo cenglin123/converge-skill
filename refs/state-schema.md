@@ -280,7 +280,9 @@ status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard
 // reserved —— 必填：event, reservation_id(非空串), ts(ISO), target_role(∈ROLE_CONSUMES),
 //   consumes(== ROLE_CONSUMES[target_role], ∈{outer,blind,ultraverge,none}),
 //   counts_before 与 ceilings(均为含 outer/blind/ultraverge/total 四键的 int dict),
-//   tier(∈{enforced,auditable-only})；consuming(outer/blind/ultraverge)时 target_round 须为正整数；
+//   tier(∈{enforced,auditable-only})——ledger 记录字段，gate 不按此值改变裁决逻辑；
+//   guarded 模式的 ledger tier 仍为 auditable-only，guarded 状态存于独立 binding 的 mode=best-effort-guarded；
+//   tier=enforced 保留给未来真正 enforced。consuming(outer/blind/ultraverge)时 target_round 须为正整数；
 //   extension_id 为 非空串或 null。
 {"event":"reserved","reservation_id":"<session>:<tool_use>","ts":"<ISO>",
  "target_round":N,"target_role":"...","consumes":"outer|blind|ultraverge|none",
@@ -331,4 +333,4 @@ reserve PROCEED iff total_reservations_issued < max_total_reserved_spawns AND ef
 
 裁决优先级：`FAIL_CLOSED`(30) > `DENY`(21/22) > `BLOCK`(10/11/12/13) > `MODE_SWITCH_REQUIRED`(20) > `PROCEED`(0)。`max_total_reserved_spawns` 默认 = `ceil(total_safety×[3+max_ultraverge_initial+max_outer_loops×(1+max_inner_loops)+max_blind_rechecks+1])`。
 
-> **tier 说明**：上述脚本是 host-independent core（auditable-only 完整可用）。enforced tier 的宿主 PreToolUse/PostToolUse 接线、session→slug 绑定、角色 FSM 越权校验依赖宿主能力，属落地阶段待决设计点（见 `refs/framework-adapters.md` + plan §M1）。`budget_gate` 的 rule_frequency 触发检测方式：ledger 中出现 `decision` 事件即 triggered。
+> **tier 说明**：上述脚本是 host-independent core（auditable-only 完整可用）。`best-effort guarded`（= hook-blocked auditable-only）的 PreToolUse 总量硬上限 hook 已在 Claude Code 落地（PostToolUse settle 不存在）；其 ledger `tier` 仍为 `auditable-only`，guarded 状态独立存于 binding 的 `mode=best-effort-guarded`。true `enforced`（角色 FSM + 角色不可伪造 + 权限锁定）仍 deferred（升级要件见 `refs/framework-adapters.md` §A.1）。`budget_gate` 的 rule_frequency 触发检测方式：ledger 中出现 `decision` 事件即 triggered。
