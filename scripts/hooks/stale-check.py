@@ -231,6 +231,75 @@ def _scan_plans(repo_root):
     return critical, warning, note
 
 
+def _has_spawn_evidence(active):
+    """active 目录是否存在 spawn 产物（round/blind/uv），即应当有 gate ledger。"""
+    import glob
+    for pat in ("round-*.md", "blind-recheck-*.md", "uv-init-*.md"):
+        if glob.glob(os.path.join(active, pat)):
+            return True
+    return False
+
+
+def _scan_budget(repo_root):
+    """CRITICAL: 预算 gate 突破 / 未结孤儿 / 损坏状态 / 有 spawn 却无 ledger。
+
+    复用 budget_gate 自身逻辑，确保 hook 与 gate 判定不分叉。**fail-closed**：
+    导入失败、扫描异常、有 spawn 证据却缺 ledger，均上报 CRITICAL（不静默吞掉）。
+    """
+    critical = []
+    active_root = os.path.join(repo_root, ".converge", "active")
+    if not os.path.isdir(active_root):
+        return critical
+
+    scripts_dir = os.path.join(repo_root, "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    try:
+        import budget_gate as bg
+    except Exception as e:
+        # 无法验证 ≠ 没问题：fail-closed 上报，strict 下阻断。
+        critical.append(f"  budget_gate import failed — cannot verify budget ({e})")
+        return critical
+
+    import pathlib
+    for slug in sorted(os.listdir(active_root)):
+        active = pathlib.Path(active_root) / slug
+        if not active.is_dir():
+            continue
+        ledger_exists = (active / bg.LEDGER_NAME).exists()
+        if not ledger_exists:
+            # 有 spawn 产物却无 ledger = 预算 gate 被绕过（finding 5）
+            if _has_spawn_evidence(str(active)):
+                critical.append(
+                    f"  .converge/active/{slug}/ — spawn artifacts present but no gate-ledger "
+                    f"(budget gate bypassed)"
+                )
+            continue
+        try:
+            events = bg.read_ledger(active)
+            state = bg.read_state(active)
+            bg.validate_integrity(active, events, state)
+            res = bg._reservation_status(events)
+            orphans = [rid for rid, r in res.items() if r["status"] == "reserved"]
+            if orphans:
+                critical.append(
+                    f"  .converge/active/{slug}/ — {len(orphans)} unsettled orphan reservation(s)"
+                )
+            for scope in ("outer", "blind", "ultraverge"):
+                if bg.effective_usage(active, events, scope) > bg.ceiling(state, scope):
+                    critical.append(
+                        f"  .converge/active/{slug}/ — budget breach: {scope} usage > ceiling"
+                    )
+            if bg.total_reservations_issued(events) > bg.ceiling(state, "total"):
+                critical.append(f"  .converge/active/{slug}/ — total spawn cap breached")
+        except bg.FailClosed as e:
+            critical.append(f"  .converge/active/{slug}/ — budget state FAIL_CLOSED: {e.reason}")
+        except Exception as e:
+            # 扫描异常同样 fail-closed 上报，不静默 continue。
+            critical.append(f"  .converge/active/{slug}/ — budget scan error: {e}")
+    return critical
+
+
 def main():
     try:
         sys.stdout.reconfigure(errors="replace")
@@ -241,8 +310,9 @@ def main():
 
     c1, w1, n1 = _scan_converge(repo_root)
     c2, w2, n2 = _scan_plans(repo_root)
+    c3 = _scan_budget(repo_root)
 
-    critical_items = c1 + c2
+    critical_items = c1 + c2 + c3
     warning_items = w1 + w2
     note_items = n1 + n2
 

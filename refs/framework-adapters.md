@@ -18,6 +18,22 @@
 - **不可用场景**：不能替代独立 Reviewer。`/goal` 的评估器是小模型自检，不是独立全新上下文的对抗式审查。converge 的核心价值（独立交叉验证）必须通过 Spawn 实现。
 - **层级模式**：子收敛 subagent 可用 `/goal "收敛完成，verdict=可执行"` 自动跑完整个 converge 循环，加速分阶段执行。
 
+**预算 gate 接线（enforced tier）**：
+
+| gate 能力 | Claude Code 实现 | 状态 |
+|----------|-----------------|------|
+| spawn 前 reserve + 拒绝 | `PreToolUse` hook 匹配 `Agent` 工具 → 运行 `budget_gate.py reserve` → 非 PROCEED 返回 deny（阻断该工具调用）| 落地待接线 |
+| spawn 后 settle | `PostToolUse`（成功）/ `PostToolUseFailure`（失败）→ `budget_gate.py settle` | 落地待接线 |
+| reservation 键 | hook 输入提供的 `session_id` + `tool_use_id` | 原生支持 |
+
+**enforced 二要件（缺任一 → 整体 auditable-only，不得声称 enforced）**：
+- **session→slug 绑定**须存于**运行中 Agent 工具无法写入**的宿主域（权限隔离路径 / harness 维护的注册表）——否则 Agent 可改绑定逃避 gate。
+- **角色 FSM**（含 mode / round / in_flight / return_phase）同样须存于 Agent-不可写宿主域，由 settle/ingest-verdict 推进，hook 据其校验越权角色。
+
+**关键待决设计点（落地阶段解决，见 plan §M1-tier/role）**：(1) 全局 `PreToolUse` 对**所有** `Agent` 调用触发，须识别哪些是 converge spawn 并定位正确 `active/<slug>/`（候选：active-converge 标记文件 / prompt sentinel + 失败时 fail-closed）；(2) Claude Code 的 subagent prompt 由调用方全权控制，宿主**不拥有** role→prompt 模板 → enforced 只声称"计费标签受控 + 总量硬上限"，**不**声称"角色不可伪造"（plan §M1-role 第二档）。
+
+> **当前缺省 tier**：在宿主接线落地前，Claude Code 上运行于 **auditable-only**——Orchestrator 按责任清单 M-11 自行运行 `budget_gate.py`，违规由 gate ledger 缺口 + pre-push hook 兜底检测。
+
 ## A.2 opencode
 
 | 能力 | 实现 |
