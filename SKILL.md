@@ -190,8 +190,8 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
 3. for round in 1..max_outer_loops:
    a0. **预算 gate（reserve）**：spawn 前运行 `budget_gate.py reserve --role outer-reviewer --target-round N`。
        - `PROCEED:<rid>` → 继续 spawn；非 PROCEED → 按返回值处置（见步骤 4）。
-       - enforced 宿主由 PreToolUse hook 自动执行并可拒绝；auditable-only 宿主由 Orchestrator 执行并记录（责任清单 M-11）。
-   a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）；spawn 后 `budget_gate.py settle`（enforced 宿主经 PostToolUse 自动；succeeded 须带 instance_id）
+       - 两个已落地 tier（auditable-only 和 best-effort guarded）的 per-scope reserve 均由 Orchestrator 驱动并记录（责任清单 M-11）；best-effort guarded 仅额外提供独立 PreToolUse 总量 cap（不执行 per-scope reserve，true enforced 仍 deferred）。
+   a. Spawn 新 reviewer（prompt 模板见 refs/reviewer-prompt.md，若存在 contract.md 则一并传入）；spawn 后 `budget_gate.py settle`（一律由 Orchestrator 手动驱动；当前无 PostToolUse 自动 settle；succeeded 须带 instance_id）
    b. 输出写入 round-N.md（格式见 refs/state-schema.md），记录 instance_id；reviewer verdict（可执行/阻断需修复/需重新设计）+ 逐条 blocking severity → `budget_gate.py ingest-verdict`
    c. Orchestrator 处理：overturn 检测、等价标注、antipattern 关联
    c+1. **角色边界自检**（详见责任清单 #3）：
@@ -293,7 +293,7 @@ M-5. **Type R/F 等价标注** — 同源标注（语义判断）
 M-6. **信息源核对** — 逐条过 reviewer blocking 时，检查每条的事实前提是否与原始材料（用户原话 / reference_materials / contract.md）矛盾。若发现矛盾（信息源不忠实），按可机械核验性分流：**可机械核验的 agent 自裁**（对照原始材料驳回，记 `factual_self_adjudication`），**不可机械核验的才向用户申请仲裁**（用户驳回记 `user_arbitration`；具体操作见 `refs/orchestrator-guide.md` §九）。仅覆盖"可机械核验的事实矛盾"一类——非笼统不服、非语义层推理争议
 M-9. **instance_id + Continue 调度** — Spawn 后记录 id；inner loop 用 Continue 续命，禁止 Spawn 新 agent
 M-10. **_orchestrator-state.md 维护** — 每完成一个动作即更新
-M-11. **预算 gate 执行** — 每次 spawn（reviewer / executor / 各类角色）前运行 `budget_gate.py reserve`，spawn 后 `settle`；非 PROCEED 一律停止并按主循环步骤 4 处置。**per-scope 预算（outer/blind/ultraverge）+ mode-switch + extension 菜单由 Orchestrator 经 reserve 驱动——两个 tier 都如此**。**`best-effort guarded`（= hook-blocked auditable-only，**非** enforced tier）**：会话开始 `budget_gate.py bind`、结束 `unbind`、扩容后 `refresh-cap`；宿主 `PreToolUse` hook 在绑定会话对每次 Agent spawn 维护**独立总量硬上限**（cap 派生自 validated `ceiling(state,total)`），达上限即 deny——防 runaway 兜底（即便 Orchestrator 遗忘 per-scope 预算也硬停），与 ledger/per-scope 互不干扰、不双计。绑定存在后 hook 对任何损坏 fail-closed deny。**禁止在未取得 PROCEED 时 spawn**；收口前确保无未结孤儿 reservation。续跑超默认预算须有效 `budget_extension`（关联真实 decision 事件 + 用户原话），不得以记忆中的旧授权续费。接线与诚实边界见 `refs/framework-adapters.md` §A.1
+M-11. **预算 gate 执行** — 每次 spawn（reviewer / executor / 各类角色）前运行 `budget_gate.py reserve`，spawn 后 `settle`；非 PROCEED 一律停止并按主循环步骤 4 处置。**per-scope 预算（outer/blind/ultraverge）+ mode-switch + extension 菜单由 Orchestrator 经 reserve 驱动——两个已落地 tier（auditable-only / best-effort guarded）都如此（true enforced 仍 deferred）**。**`best-effort guarded`（= hook-blocked auditable-only，**非** enforced tier）**：会话开始 `budget_gate.py bind`、结束 `unbind`、扩容后 `refresh-cap`；宿主 `PreToolUse` hook 在绑定会话对每次 Agent spawn 维护**独立总量硬上限**（cap 派生自 validated `ceiling(state,total)`），达上限即 deny——防 runaway 兜底（即便 Orchestrator 遗忘 per-scope 预算也硬停），与 ledger/per-scope 互不干扰、不双计。绑定存在后 hook 对任何损坏 fail-closed deny。**禁止在未取得 PROCEED 时 spawn**；收口前确保无未结孤儿 reservation。续跑超默认预算须有效 `budget_extension`（关联真实 decision 事件 + 用户原话），不得以记忆中的旧授权续费。接线与诚实边界见 `refs/framework-adapters.md` §A.1
 
 **条件触发** ——
 C-5. **plan_amendment_required** — 先回写 plan 本体，再让 executor 改下游
@@ -345,7 +345,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 - [ ] 若本次收敛经历 ≥2 轮：盲审复核已完成（verdict=可执行 或 blind_recheck: waived），retrospective 中已记录 blind_recheck 字段
 - [ ] **每个预算内 spawn 均有有效 reservation（gate PROCEED）且已 settle；无未结孤儿 reservation**
 - [ ] **若发生过预算扩展（budget_extension）：每条均关联真实 BLOCK decision 事件 + round-stamped 用户原话；extension 仅抬高 ceiling，不替代 reservation；总量未突破 max_total_reserved_spawns**
-- [ ] **若宿主为 auditable-only（无 pre-spawn hook）：用户已被告知该降级模式及其对预算强制力的影响**（呼应宪法 #6）
+- [ ] **若宿主无可阻断的 pre-spawn hook（未 bind 的 auditable-only 会话）：用户已被告知该降级模式及其对预算强制力的影响**（呼应宪法 #6）
 
 ---
 
@@ -372,7 +372,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
 
-> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是「预算软停」从 prose 迁移到 file-authoritative gate 的核心。信任边界按宿主能力分级（enforced / auditable-only），机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `docs/plans/*/20260618-budget-enforcement-hardening.md`。
+> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是「预算软停」从 prose 迁移到 file-authoritative gate 的核心。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（20260618 plan §enforced 为 deferred 目标设计，已落地现状见 framework-adapters.md）。
 
 ### pre-push hook 环境变量（`scripts/hooks/`）
 
