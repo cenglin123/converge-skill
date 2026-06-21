@@ -601,7 +601,14 @@ class TestEnforcedHook(Base):
     def test_default_cap_from_state_stock(self):
         c, out, _ = run("bind", "--session-id", self.sid, "--active-dir", str(self.active),
                         env=self.env)
-        self.assertIn("cap=44", out)             # stock 默认公式
+        self.assertIn("cap=42", out)             # stock 默认公式（普通 converge, mbr=1）
+
+    def test_default_cap_ultraverge_config_override(self):
+        # ultraverge 路径：config 覆盖 max_blind_rechecks=2 → cap=44
+        self.set_config(max_blind_rechecks=2)
+        c, out, _ = run("bind", "--session-id", self.sid, "--active-dir", str(self.active),
+                        env=self.env)
+        self.assertIn("cap=44", out)             # ultraverge config 覆盖（mbr=2）
 
 
 if __name__ == "__main__":

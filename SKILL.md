@@ -87,6 +87,21 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 
 终止-a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → 终止-c。
 
+### 确认点分类（自主 vs 宪法强制 — 明线规则）
+
+普通 converge 的默认姿态是**自主推进到完成**，仅在宪法强制点向用户确认。下表把确认点分为「默认自主」与「宪法强制」两类——强制集**逐字保留**，不得缩小：
+
+| 确认点 | 类别 | 处置 |
+|--------|------|------|
+| 终止-a（零阻断首轮通过） | **默认自主** | 已自主，保持；无需确认、自动归档 |
+| 收敛后落地执行 | **默认自主**（受执行意图明线约束，见下） | 原始指令含执行意图时自主推进，不再追加"现在要执行吗"check-in |
+| `需重新设计` verdict | **宪法强制** | 保留——必须报告用户决定重写/缩范围/主观接受 |
+| 终止-b / 终止-c（渐近 / 主观接受） | **宪法强制**（#1/#5） | 保留显式确认 |
+| 预算软停 / `budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `MODE_SWITCH_REQUIRED` | **宪法强制**（#3/#5，GD-1 不授权扩展/切换） | 保留决策菜单 |
+| `FAIL_CLOSED` / `DENY:illegal_role` | **宪法强制**（状态损坏/非法） | 保留停机 |
+
+**执行意图机械明线**：落地执行的自主授权**当且仅当**原始指令含执行动词（如「并执行 / 落地 / apply」等）才成立；否则**不算**自主授权，落地前**仍需确认**。此明线防止 orchestrator 滥用「autonomous」跳过本应保留的确认。GD-1 已授权"走 converge 并执行"推进至默认预算 + 落地——A2 不扩大授权，只把已批准的自主/强制边界写成明线。
+
 ---
 
 ## 振荡检测
@@ -148,6 +163,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
   - 实际 spawn 数 ≥2 且 verdict 一致 → 降级为普通评议模式，Orchestrator 标注 `degraded_from: ultraverge` 并告知用户
   - 实际 spawn 数 <2 或 verdict 不一致 → 中止，告知用户原因，由用户决定是否降级为普通评议或稍后重试
 - **完整收敛**：若评议 verdict = 可执行 → 跳过（评议已在扩域下审查完毕，完整收敛新增发现概率极低，只增成本）；若 verdict ≠ 可执行 → 标准流程（Round 0→多轮→收敛）
+- **盲审预算**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 写入 **`max_blind_rechecks=2` 覆盖**（普通 converge 真实默认为 1）。纯 orchestrator 行为、零代码；总量上限随之由 42 重算为 44。
 - **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
 
 仅在用户显式使用 `ultraverge` 关键词时触发。**触发边界（明线规则）**：
@@ -209,7 +225,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
         d1. 若本次收敛经历 ≥2 轮 outer loop → 进入盲审复核（见下方"盲审复核"小节）
         d2. 若本次收敛经历 = 1 轮 → 直接收敛
          收敛！执行完成前必检清单，写 retrospective.md，移 done/
-         d3. 若用户后续要求落地执行（将方案改动清单写入目标文件）→ Orchestrator 按 `refs/orchestrator-guide.md` §落地执行编排 流程 spawn executor，使用 `refs/executor-prompt.md` Plan-Execution 模板
+         d3. 落地执行（将方案改动清单写入目标文件）：**当原始指令含执行意图时**（机械明线：指令含执行动词「并执行 / 落地 / apply」等，见 §确认点分类）→ Orchestrator **默认自主推进**，不追加"现在要执行吗"check-in，按 `refs/orchestrator-guide.md` §落地执行编排 流程 spawn executor，使用 `refs/executor-prompt.md` Plan-Execution 模板。**指令不含执行意图时**：落地前仍需用户确认。全部宪法强制 gate（终止-b/c、预算软停/`*_exhausted`、`MODE_SWITCH_REQUIRED`、`FAIL_CLOSED`、`需重新设计`）不受此影响、逐字保留。
     e. 若有 contract_amendment_required → 先回写 contract.md 再继续
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
     g. Executor 修复后更新 attempts.md（格式见 refs/state-schema.md）
@@ -365,12 +381,16 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 | `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
-| `max_blind_rechecks` | 2 | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
+| `max_blind_rechecks` | 1 [^mbr] | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
 | `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
-| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + max_ultraverge_initial + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数 = 44。扩容需 `scope=total` extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关：**普通 = 42 / ultraverge = 44**[^totalcap]。扩容需 `scope=total` extension |
 | `total_safety` | 1.5 | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
+
+[^mbr]: 普通 converge 的真实默认为 `1`（`scripts/budget_gate.py` DEFAULTS）。**ultraverge 在初始化时经 config 覆盖回写 `max_blind_rechecks=2`**（写入 `_budget-state.json` 的 config，纯 orchestrator 行为、零代码）。
+
+[^totalcap]: 两组 stock 上限均由同一确定性公式重算：普通（mbr=1）= `ceil(1.5 × 28)` = **42**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 29)` = **44**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。
 
 > **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是「预算软停」从 prose 迁移到 file-authoritative gate 的核心。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（20260618 plan §enforced 为 deferred 目标设计，已落地现状见 framework-adapters.md）。
 
