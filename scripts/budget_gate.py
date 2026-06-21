@@ -52,7 +52,7 @@ EXIT_FAIL_CLOSED = 30
 
 DEFAULTS = {
     "max_outer_loops": 5,
-    "max_blind_rechecks": 2,
+    "max_blind_rechecks": 1,
     "ultraverge_min_reviewers": 3,
     "max_inner_loops": 3,
     "impl_severity_streak_threshold": 3,
