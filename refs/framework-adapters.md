@@ -12,7 +12,7 @@
 | **Continue** | `SendMessage` 工具，`to` 参数为 `agentID` |
 | **Identify** | 主对话即 orchestrator，无需自标识 |
 
-**`fork` 子 agent 类型（框架能力 / 面向未来 Part B fork-executor，converge 尚未采用）**：harness 描述了 `subagent_type: fork`（继承父对话上下文的 spawn），但**并非所有部署都暴露**——已在至少一个当前 Claude Code 环境中实测**缺失**（顶层与嵌套 spawn 均返回 `Agent type 'fork' not found`）。因此 fork 必须按**运行时探测能力**对待：先探测可用性，**缺失即降级为 fresh Spawn**（converge 当前并不使用 fork）。
+**`fork` 子 agent 类型（框架能力；converge 不采纳 fork-executor——见 GD-2）**：harness 描述了 `subagent_type: fork`（继承父对话上下文的 spawn），但**并非所有部署都暴露**——已在至少一个当前 Claude Code 环境中实测**缺失**（顶层与嵌套 spawn 均返回 `Agent type 'fork' not found`）。因此 fork 必须按**运行时探测能力**对待：先探测可用性，**缺失即降级为 fresh Spawn**（converge 当前并不使用 fork）。
 
 **`/goal` 加速（v2.1.139+）**：Claude Code 的 `/goal` 命令可让单 agent 跨 turn 持续工作，直到用户定义的条件满足。在 converge 场景下：
 
@@ -67,7 +67,7 @@
 
 - **`subagent_type` 可用性非普遍**：`"general"` **并非**在所有模式可用——在 restricted / plan-mode 主 agent 下 `task general` 被拒，此类会话只暴露 `explore`。正常 / 全权限配置下 `general` 存在且适用于多步工作。Spawn 前应探测当前主 agent 实际暴露的 subagent 类型，不要假定 `general` 始终可用。
 - **无 per-spawn `model` 参**：`task` 调用本身不接受 `model` 参数；模型选择通过**已配置的 subagent 类型**实现（每个 agent 类型可 pin 一个 model；未配置则继承主 agent 模型）。
-- **`opencode run --fork` 是 CLI-session fork，非 live 子 agent**：它 fork 出一个**可恢复的 CLI 会话**，不是对话内的 live in-conversation subagent，**不可**当作子 agent 上下文继承机制（与 Part B fork-executor 无关）。
+- **`opencode run --fork` 是 CLI-session fork，非 live 子 agent**：它 fork 出一个**可恢复的 CLI 会话**，不是对话内的 live in-conversation subagent，**不可**当作子 agent 上下文继承机制（converge 不采纳 fork-executor，见 GD-2）。
 
 **降级**：若版本不支持 Continue，inner loop 由 orchestrator 自身逐条验收（标注 `inner_loop: orchestrator_self`）。
 
@@ -82,7 +82,7 @@
 
 | 能力 | 实现 |
 |------|------|
-| **Spawn** | `multi_agent_v1.spawn_agent`，**同时支持** fresh（`fork_context=false`/省略）与 **inherited**（`fork_context=true`）上下文。Reviewer 必须用 fresh self-contained prompt；inherited 变体是 CC `fork` 的原生等价物（框架能力 / 面向未来 Part B，converge 当前未采用）。Executor/Worker 必须明确 write scope |
+| **Spawn** | `multi_agent_v1.spawn_agent`，**同时支持** fresh（`fork_context=false`/省略）与 **inherited**（`fork_context=true`）上下文。Reviewer 必须用 fresh self-contained prompt；inherited 变体是 CC `fork` 的原生等价物（框架能力；converge 不采纳，见 GD-2）。Executor/Worker 必须明确 write scope |
 | **Continue（两步）** | ① `multi_agent_v1.send_input(target=<agent_id>)` 返回 `submission_id`（**不是** agent 的回复）；② `multi_agent_v1.wait_agent(targets=[...])` 返回状态 + 最终 response。Continue 不是单次返回回复的调用 |
 | **Resume** | `multi_agent_v1.resume_agent(id=<agent_id>)`：重开已关闭/空闲的 agent，上下文保留 |
 | **Close** | `multi_agent_v1.close_agent(target=<agent_id>)`；角色完成后关闭，避免悬挂 agent |
@@ -121,7 +121,7 @@
 2. 能否向它发跟进消息且保有上下文？（→ Continue）
 3. 如何引用该 agent 实例？（→ instance_id）
 
-> **第四问（面向未来 Part B fork-executor）**：Spawn 能否继承当前父对话线程，受何限制？（→ inherited-context Spawn，框架能力，converge 当前未采用）。Wait / Close 应作为生命周期能力探测，即便它们不属于上述三个概念原子。
+> **第四问（fork-executor——converge 不采纳，见 GD-2）**：Spawn 能否继承当前父对话线程，受何限制？（→ inherited-context Spawn，框架能力）。Wait / Close 应作为生命周期能力探测，即便它们不属于上述三个概念原子。
 
 ### `best-effort guarded`（deny-before-spawn）可移植性 — 未来扩展数据，**非已实现**
 
