@@ -20,6 +20,8 @@
   2. 豁免**单独实现阶段 ultraverge**（以本次人工多轮审计 + 实现级对抗验收替代）→ 用户选择 **"Yes, waive it"**。
 - **关联产物**：`CONSTITUTION.md` 第二部；`scripts/budget_gate.py` + `tests/test_budget_gate.py`；方案文件 `docs/plans/active/20260618-budget-enforcement-hardening.md`（`docs/` 被 .gitignore 忽略，为本地工作产物）。
 
+> 📎 注记（2026-06-21，plan 归档）：方案文件已归档至 `docs/plans/done/20260618-budget-enforcement-hardening.md`（plan 落地完成，从 active/ 移出）。原 active/ 路径作废；done/ 路径为本条目的准确指针。
+
 ---
 
 ## GD-2 · Part B（fork-executor）放弃决断
