@@ -56,3 +56,5 @@
 **晋升门槛（Bitter Lesson 自律）**：本判例为 N=1 观察，**不**据此硬编码新检测机制（如往振荡表加 `Type D (Divergence)`）——那正是 Bitter Lesson 反对的行为。当前作 distill 候选；若跨多个收敛复现 ≥3 次，再走 ultraverge 议 Type D 晋升，届时凭数据不凭单点。
 
 **详细案例**：见知识库笔记「20260621-converge发散识别判据-fork-executor弃案复盘」（Obsidian Vault 根目录），含完整 3 轮 Codex 复评经过 + 宪法第一部仲裁推理。
+
+> 📎 注记（2026-06-21，本计划落地执行日）：§ 判例 内容已迁移至 `refs/orchestrator-guide.md` § 发散检测（操作指导层，Orchestrator 运行时可读——dissolve 可达性悖论）。本 GD-2 entry 本体保留作**历史快照**（append-only，不回改）；live source = orchestrator-guide § 发散检测。

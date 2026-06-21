@@ -113,6 +113,8 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 | **Type F (Flip)** | 同一问题在 A↔B 之间来回翻转 | 标注 |
 | **Type S (Swing)** | 同 reviewer 在 inner loop 中反转自己判断 | 标注 |
 
+> 发散（非重复/翻转的持续深化失效模式）的识别判据与处置原则见 `refs/orchestrator-guide.md` § 发散检测。
+
 ---
 
 ## 模式边界：评议 / 单层收敛 / 层级收敛 / 审计
