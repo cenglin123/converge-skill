@@ -100,7 +100,7 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 | 预算软停 / `budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `MODE_SWITCH_REQUIRED` | **宪法强制**（#3/#5，GD-1 不授权扩展/切换） | 保留决策菜单 |
 | `FAIL_CLOSED` / `DENY:illegal_role` | **宪法强制**（状态损坏/非法） | 保留停机 |
 
-**执行意图机械明线**：落地执行的自主授权**当且仅当**原始指令含执行动词（如「并执行 / 落地 / apply」等）才成立；否则**不算**自主授权，落地前**仍需确认**。此明线防止 orchestrator 滥用「autonomous」跳过本应保留的确认。GD-1 已授权"走 converge 并执行"推进至默认预算 + 落地——A2 不扩大授权，只把已批准的自主/强制边界写成明线。
+**执行意图机械明线**：落地执行的自主授权**当且仅当**原始指令含执行动词（如「并执行 / 落地 / apply」等）才成立；否则**不算**自主授权，落地前**仍需确认**。此明线防止 orchestrator 滥用「autonomous」跳过本应保留的确认。GD-1 已授权"走 converge 并执行"推进至默认预算 + 落地——本明线不扩大授权，只把已批准的自主/强制边界写成明线。
 
 ---
 
@@ -394,7 +394,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 
 [^totalcap]: 两组 stock 上限均由同一确定性公式重算：普通（mbr=1）= `ceil(1.5 × 28)` = **42**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 29)` = **44**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。
 
-> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是「预算软停」从 prose 迁移到 file-authoritative gate 的核心。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（20260618 plan §enforced 为 deferred 目标设计，已落地现状见 framework-adapters.md）。
+> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是预算软停 file-authoritative gate 的核心（不依赖 Orchestrator 记忆计数）。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（enforced tier 为 deferred 目标）。
 
 ### pre-push hook 环境变量（`scripts/hooks/`）
 

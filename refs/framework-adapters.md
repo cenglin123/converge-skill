@@ -1,6 +1,6 @@
 # 框架适配 · 附录 A
 
-从 `SKILL.md` 外提。保留原 A.x 小节编号，维持内部交叉引用完整性。
+小节采用 A.x 编号以维持内部交叉引用稳定性。
 
 ---
 
@@ -24,7 +24,7 @@
 
 > **命名（治理边界）**：本机制**不是 "enforced" tier**——它不提供角色不可伪造/权限锁定保证。准确称谓为 **`best-effort guarded`**（即 `hook-blocked auditable-only`）：在 auditable-only 之上加一道宿主 hook 总量兜底。真正的 enforced（角色 FSM + 权限锁定）仍为未来工作。
 
-`PreToolUse` hook 在**绑定的收敛会话**中对每次 `Agent` spawn 维护一个**独立于 ledger 的单调计数器**，达 `max_total_reserved_spawns` 即 `deny`。这是防 runaway 的兜底——即便 Orchestrator 完全遗忘 per-scope 预算，hook 也在 cap 处硬停（直击 31 轮失控的"漂移/遗忘"成因）。
+`PreToolUse` hook 在**绑定的收敛会话**中对每次 `Agent` spawn 维护一个**独立于 ledger 的单调计数器**，达 `max_total_reserved_spawns` 即 `deny`。这是防 runaway 的兜底——即便 Orchestrator 完全遗忘 per-scope 预算，hook 也在 cap 处硬停（封堵漂移/遗忘导致的 runaway 路径）。
 
 | 阶段 | 命令 | 说明 |
 |------|------|------|
@@ -49,7 +49,7 @@
 **`best-effort guarded` 的诚实边界**：
 - hook 只强制**总量硬上限**；per-scope（outer/blind/ultraverge）预算、mode-switch、extension 菜单仍由 Orchestrator 经 `budget_gate.py reserve` 驱动（两条路互不干扰、不双计——hook 用独立计数器，不写 ledger）。
 - **未做权限锁定**：绑定文件 Agent 可写/可删，蓄意自篡改可绕过——属"主动破坏自身治理"的不同威胁模型，已与用户确认排除（封堵的是漂移/遗忘，非恶意）。
-- **角色不可伪造 + 角色 FSM**（per-scope 在 hook 层强制 + 越权 deny）属**后续工作**：Claude Code 不拥有 subagent prompt 模板，且 FSM phase 机为 plan 明确推迟项（审计已冻结其枚举转测试）。
+- **角色不可伪造 + 角色 FSM**（per-scope 在 hook 层强制 + 越权 deny）属**后续工作**：Claude Code 不拥有 subagent prompt 模板，且 FSM phase 机为 plan 明确推迟项。
 
 **升级到真正 enforced 的二要件**：session→slug 绑定 + 角色 FSM 须存于 **Agent 不可写**宿主域（权限隔离路径 / harness 注册表）+ settings.json/hook 脚本/budget_gate.py 同样锁定，否则只能 `best-effort guarded`。
 

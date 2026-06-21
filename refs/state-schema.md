@@ -270,7 +270,7 @@ status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard
 
 ## §预算 gate（`scripts/budget_gate.py` 的数据契约）
 
-预算执行从 prose 计数迁移到 file-authoritative gate。每个 `active/<slug>/` 下两份机器可读文件，由脚本维护、仅追加、可机械重算（抗 compaction）。落地与残余边界见 `docs/plans/*/20260618-budget-enforcement-hardening.md`。
+预算执行由 file-authoritative gate 承担。每个 `active/<slug>/` 下两份机器可读文件，由脚本维护、仅追加、可机械重算（抗 compaction）。落地与残余边界见 `docs/plans/*/20260618-budget-enforcement-hardening.md`。
 
 ### gate-ledger.jsonl（仅追加事件流，每行一个 JSON）
 

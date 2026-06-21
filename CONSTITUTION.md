@@ -50,7 +50,7 @@
 
 > 执行上述语义判定时，参考 `refs/orchestrator-guide.md` 中的操作步骤、偏见意识和边界场景处置。
 
-> **授权粒度澄清**（呼应 #3/#5；2026-06-19 经用户明确确认批准，记录见 `GOVERNANCE-DECISIONS.md` GD-1）：用户指令"走 converge 并执行"授权 (a) converge 推进至**默认**预算上限，(b) 收敛后进入落地执行。该指令**不**授权：预算扩展（budget_extension）、模式切换接受、终止-b/c。三者各需**新鲜、具体、可审计**的显式确认；超默认预算的续跑须写入关联真实 BLOCK decision 事件的 extension 令牌（含用户原话）。预算执行由 `scripts/budget_gate.py` 在 spawn 前裁决，但本条授权底线属宪法约束，不因执行机制变化而改变。
+> **授权粒度澄清**（呼应 #3/#5；记录见 `GOVERNANCE-DECISIONS.md` GD-1）：用户指令"走 converge 并执行"授权 (a) converge 推进至**默认**预算上限，(b) 收敛后进入落地执行。该指令**不**授权：预算扩展（budget_extension）、模式切换接受、终止-b/c。三者各需**新鲜、具体、可审计**的显式确认；超默认预算的续跑须写入关联真实 BLOCK decision 事件的 extension 令牌（含用户原话）。预算执行由 `scripts/budget_gate.py` 在 spawn 前裁决，但本条授权底线属宪法约束，不因执行机制变化而改变。
 
 ---
 
