@@ -202,6 +202,30 @@ contract_proposal:
 - Match: <yes | no — explain>
 ```
 
+### Post-execution mechanical self-check
+
+落地后直接跑脚本核对以下**最小可枚举机械项**，零 token：
+
+1. **文件存在性** — 改动清单列出的每个文件在预期路径存在
+2. **改动项数对齐** — 改动清单项数 == 实际已修改文件数
+3. **脚本验证** — `sync_agents.py` / 相关 test / lint 退出码 == 0
+4. **frontmatter check** — 新建/修改的 markdown 文件含必填 frontmatter 字段（`model` / `generated_at` / `status` 等）
+
+将验证结果附加到 Execution Report：
+
+```
+### Mechanical self-check
+
+| Check | Status |
+|-------|--------|
+| File existence | pass / fail |
+| Item count match | pass / fail |
+| Script exit code(s) | pass / fail |
+| Frontmatter completeness | pass / fail |
+```
+
+**失败语义**：复用 Hard discipline #2（失败即停止并报告）——机械自检不通过时不强行收口，将失败项交回 orchestrator 裁决。
+
 ### Hard disciplines
 
 1. **不跳过清单项** — 每一项都必须执行，不得以"已经满足"为由跳过
