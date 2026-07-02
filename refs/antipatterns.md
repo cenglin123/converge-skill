@@ -173,6 +173,25 @@ antipatterns:
       English equivalents: "moved from", "extracted from", "formerly located in",
       "relocated to". CHANGELOG 文件不在此检测范围内——CHANGELOG 是专用变更日志，
       其内容本身就是在记录变更历史，属于有意设计而非考古残留。
+      Sibling: iterative_sediment (parallel) — 捕获多轮迭代沉积（"评议补/已上移"等脚手架散落），与本条单点迁移考古模式正交。
+
+  - id: iterative_sediment
+    layer: design
+    status: active
+    last_confirmed: ""
+    confirmed_count: 0
+    zero_streak: 0
+    resurrection_log: []
+    description: |
+      多轮 reviewer→executor 反复改造成的「沉积层」——残留评议痕迹、失效过渡语、指向已删内容的引用、"已上移/已补/删除线"等脚手架散落正文。判据是通用"是否像未整合的多轮沉积"，枚举字符串仅作示例。
+
+      Reviewer 检测方式: 收束前最后一轮 fresh reviewer (终止-a / 终止-b / 终止-c 判定前 R{N}) 检查产物连贯性。当 vault 启用 sediment gate protocol 时，同步采集 sediment_findings 字段（schema 由该 protocol 定义；当前 vault-local 实现见 sediment gate plan §3 Phase 1 step 2 sub 2.5；SKILL 不强制该字段）。observation 六档示例: none / minor / significant / n/a_self_reference / n/a_degraded / n/a_oscillation（vault-local 枚举，非 SKILL schema）。
+
+      自指豁免: 已收敛 plan (前期 converge 签发可执行) 不计入 sediment 信号——标 n/a_self_reference 而非 trial 命中。
+
+      Sibling: 与 archaeology_leftover 并列 (parallel)，分别捕获多轮沉积 vs 单点迁移考古。
+
+      English equivalents (round-referential iteration sediment markers only): "as discussed in R{N}", "per review feedback", "per review suggestion", "已迁入已上移" — 类迭代修订 marker in 英文产物. **NOT** inclusive of generic scope markers (TODO / FIXME / XXX) — those are 通用 incompleteness / identity_crisis 类 issues, not iterative_sediment. 区分见 SKILL `refs/antipatterns.md` design-layer 段其他条目 (false_generality / identity_crisis).
 
   # ── Orchestrator 层（间接检测，通过日志痕迹）─────────────────────────
 

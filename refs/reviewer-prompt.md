@@ -83,7 +83,7 @@ suggestion_issues:  # non-blocking, will NOT block convergence
     drift_detected: <true | false>  # 可选，仅当意图漂移检查激活且发现漂移时标注
 antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
   - round_referenced: 3
-    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）
+    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | iterative_sediment | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）
     evidence: |
       <quote from attempts.md>
 rubric_scores:              # 仅当 contract 中定义了维度时填写
