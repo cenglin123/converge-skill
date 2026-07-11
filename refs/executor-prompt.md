@@ -128,6 +128,7 @@ inner loop 最多 3 次 Continue，超过即该轮失败。
    - 若是修 bug → 先写能复现 bug 的失败测试，再修代码让它通过
    - 若是重构 → 确保已有测试覆盖重构范围，重构后测试全绿
 4. **有新增 lint 警告时**：在 attempt_log_entry 中说明原因（是有意的还是遗漏的）。
+5. **禁止破坏性 git 操作**：修复过程只改文件 + 跑测试。禁止 `git reset --hard` / `git checkout -- <file>` / `git restore` / `git restore --staged` / `git rm` / `git stash` / `git clean -fd` / `git commit --no-verify` / `git push --force` / 任何 `--force`、`--no-verify` 标志 / 直接改 `.git/` / 以及任何会修改仓库状态或丢弃工作区未提交修改的等效操作（`git rebase`/`cherry-pick`/`commit --amend` 等未列举变体同样适用）——它们会丢弃工作区未提交状态或绕过 hook（前序轮次的修复常驻工作区未入库，丢失会触发 report_hallucination）。提交由 Orchestrator 统一处理，Executor 不 commit、不 reset。审查/测试 hook 用纯观察（读 `.git/hooks/*` 脚本），必须实测时在隔离临时仓库里做。只读/可逆 git 操作（`git log` / `git diff` / `git status` / `git show` / `git add` 等）不受此禁令限制。
 ````
 
 ---

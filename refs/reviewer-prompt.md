@@ -163,6 +163,20 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 
 确定性检查的结果是不可辩驳的——不需要语义判断，不需要归因讨论。通过确定性检查后再进入语义审查（架构、边界条件、逻辑正确性等），让模型的判断力用在只有模型能做的地方。
 
+### 确定性检查的安全约束（硬纪律——源于真实事故）
+
+确定性检查必须**只读、非破坏性**。你是 Reviewer，不是仓库操作者。以下操作**一律禁止**，因为它们会改变仓库状态、丢弃前序轮次未提交的工作区修改，或绕过你正在审查的机制：
+
+- `git reset --hard` / `git checkout -- <file>` / `git restore` / `git restore --staged` / `git rm` / `git stash` / `git clean -fd` — 丢弃工作区/index 未提交修改（前序 Executor 的修复常驻工作区未入库，一旦丢失触发 report_hallucination）
+- `git commit --no-verify` / `git push --force` / 任何 `--force`、`--no-verify` 标志 — 绕过被审查的 hook/CI
+- 直接改 `.git/` 下任何内容
+- **原则兜底**（枚举不可能穷尽）：任何会修改仓库状态或丢弃工作区/index 未提交修改的 git 操作一律禁止——`git rebase`、`git cherry-pick`、`git commit --amend` 等未列举变体同样适用。
+- **不受限制**（只读/可逆）：`git log` / `git diff` / `git status` / `git show` / `git blame` / `git add` 等只读或可逆操作不在禁令内（`git add` 仅暂存，`git reset` 即可撤回）。
+
+**审查 hook/CI/拦截机制时**：优先**纯观察**（读 `.git/hooks/*` 脚本、`git config core.hooksPath`、CI 配置文件），而非亲手触发。若必须实测拦截行为，在隔离的临时仓库（`tmp/` 或独立 clone）里做，**绝不**在被审查仓库的工作区里 commit/reset。
+
+> **事故出处**：某 converge 会话中，Reviewer 为验证 pre-commit hook 跑了 `git commit --no-verify -m "bypass test"` + `git reset --hard HEAD~1` 清理；`--hard` 重置了整个工作区，丢弃前序轮次 Executor 未提交的修复，制造出"修复丢失"的 report_hallucination 假象，浪费两轮收敛才由 `git reflog` 查出真因。此约束即源于该事故。
+
 > **双重测试说明**：Executor 也会运行测试（见 executor-prompt.md §代码项目修改），但 Reviewer 的测试运行是**独立验证**——不依赖 Executor 的测试结果或断言。两次运行的价值不同：Executor 的测试确认"修复后代码能通过"，Reviewer 的测试确认"在全新上下文中独立验证同样通过"。Orchestrator 不应优化掉其中任何一次。
 
 ### 语义审查（确定性检查通过后，或确定性检查跳过时）
