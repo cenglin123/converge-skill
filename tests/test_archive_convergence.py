@@ -5,7 +5,6 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-import shutil
 import threading
 from pathlib import Path
 
@@ -228,18 +227,37 @@ class ArchiveContractTests(unittest.TestCase):
     def test_plan_time_bootstrap_fixture_imports_raw_evidence_without_root_clutter(self):
         import archive_convergence
 
-        source = ROOT / ".converge" / "active" / "20260712-archive-contract"
-        fixture_names = {
-            "_budget-state.json", "_orchestrator-state.md", "design-review.md",
-            "gate-ledger.jsonl", "plan-amendment-report.md", "plan.md",
-            "reference-materials.md", "round-1.md", "uv-init-1-inner-1.md",
-            "uv-init-1-inner-2.md", "uv-init-1.md", "uv-init-2-inner-1.md",
-            "uv-init-2.md", "uv-init-3-inner-1.md", "uv-init-3.md",
-        }
         target = self.root / "bootstrap"
         target.mkdir()
-        for name in fixture_names:
-            shutil.copy2(source / name, target / name)
+        reservations = [
+            {
+                "event": "reserved", "reservation_id": "uv-r1", "ts": "2026-07-12T00:00:00+00:00",
+                "target_round": 1, "target_role": "ultraverge-initial", "consumes": "ultraverge",
+                "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+                "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+                "extension_id": None, "tier": "auditable-only",
+            },
+            {"event": "spawn_succeeded", "reservation_id": "uv-r1",
+             "ts": "2026-07-12T00:00:01+00:00", "instance_id": "uv-instance"},
+            {
+                "event": "reserved", "reservation_id": "plan-amend-r1", "ts": "2026-07-12T00:00:02+00:00",
+                "target_round": None, "target_role": "executor", "consumes": "none",
+                "counts_before": {"outer": 0, "blind": 0, "ultraverge": 1, "total": 1},
+                "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+                "extension_id": None, "tier": "auditable-only",
+            },
+            {"event": "spawn_succeeded", "reservation_id": "plan-amend-r1",
+             "ts": "2026-07-12T00:00:03+00:00", "instance_id": "executor-instance"},
+        ]
+        (target / "gate-ledger.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in reservations), encoding="utf-8", newline="\n")
+        for name in ("_orchestrator-state.md", "design-review.md", "plan.md", "round-1.md"):
+            (target / name).write_text(f"# {name}\n", encoding="utf-8", newline="\n")
+        (target / "_budget-state.json").write_text("{}\n", encoding="utf-8", newline="\n")
+        (target / "uv-init-1.md").write_text("initial review\n", encoding="utf-8", newline="\n")
+        (target / "uv-init-1-inner-1.md").write_text("inner review\n", encoding="utf-8", newline="\n")
+        (target / "plan-amendment-report.md").write_text("amendment\n", encoding="utf-8", newline="\n")
+        (target / "reference-materials.md").write_text("reference\n", encoding="utf-8", newline="\n")
         archive_convergence._bootstrap_import(target)
         self.assertTrue((target / "evidence" / "events").is_dir())
         self.assertFalse(any(target.glob("uv-init-*.md")))
@@ -592,7 +610,9 @@ class ArchiveContractTests(unittest.TestCase):
     def test_b6_pre_push_is_nul_safe_and_checks_any_done_change(self):
         hook = (SCRIPTS / "hooks" / "pre-push").read_text(encoding="utf-8")
         self.assertNotIn("for path in $changed", hook)
-        self.assertIn("--check-push-range", hook)
+        invocation = '"$python_exe" "$top/scripts/archive_convergence.py" check-push-range'
+        self.assertEqual(hook.count(invocation), 3)
+        self.assertNotIn('"$top/scripts/archive_convergence.py" --check-push-range', hook)
         cli = (SCRIPTS / "archive_convergence.py").read_text(encoding="utf-8")
         self.assertIn('"--name-only", "-z"', cli)
         self.assertIn('"git", "archive"', cli)
