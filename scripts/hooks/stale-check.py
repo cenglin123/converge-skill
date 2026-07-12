@@ -19,6 +19,8 @@ import re
 import subprocess
 import sys
 import time
+import json
+import pathlib
 
 _AGE_UNKNOWN = float("inf")
 _CRITICAL_STATUSES = frozenset({"done", "landed"})
@@ -158,6 +160,38 @@ def _scan_converge(repo_root):
             )
 
     return critical, warning, note
+
+
+def _scan_archive_journals(repo_root):
+    """Classify archive/reopen transaction journals without mutating recovery state."""
+    critical = []
+    note = []
+    active_root = os.path.join(repo_root, ".converge", "active")
+    if not os.path.isdir(active_root):
+        return critical, note
+    try:
+        names = os.listdir(active_root)
+    except OSError as exc:
+        return [f"  .converge/active — journal scan error: {exc}"], note
+    scripts_dir = os.path.join(repo_root, "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    try:
+        from archive_contract.transaction import journal_state
+    except Exception as exc:
+        return [f"  .converge/active — journal parser unavailable: {exc}"], note
+    for name in names:
+        if not (name.startswith(".archive-") and name.endswith(".journal.json")):
+            continue
+        slug = name[len(".archive-"):-len(".journal.json")]
+        state = journal_state(pathlib.Path(active_root), slug)
+        if state in ("preparing", "source-backed-up", "reopen-prepared", "reopen-moved", "reopen-parent-stored", "reopen-marker-stored", "recoverable"):
+            critical.append(f"  .converge/active/{name} — archive/reopen transaction state={state}; recover before push")
+        elif state in ("committed", "rolled-back"):
+            note.append(f"  .converge/active/{name} — completed transaction journal state={state}; retry archive recovery")
+        else:
+            critical.append(f"  .converge/active/{name} — unknown archive journal state; treat as recoverable")
+    return critical, note
 
 
 def _scan_plans(repo_root):
@@ -311,10 +345,11 @@ def main():
     c1, w1, n1 = _scan_converge(repo_root)
     c2, w2, n2 = _scan_plans(repo_root)
     c3 = _scan_budget(repo_root)
+    c4, n4 = _scan_archive_journals(repo_root)
 
-    critical_items = c1 + c2 + c3
+    critical_items = c1 + c2 + c3 + c4
     warning_items = w1 + w2
-    note_items = n1 + n2
+    note_items = n1 + n2 + n4
 
     if not critical_items and not warning_items and not note_items:
         return

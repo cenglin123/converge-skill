@@ -79,9 +79,9 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 
 | 终止类型 | 判据 | 用户确认 | 产物要求 |
 |----------|------|---------|---------|
-| **终止-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，移 done/ |
-| **终止-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 写 retrospective.md，移 done/ |
-| **终止-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 写 retrospective.md，移 done/ |
+| **终止-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，记录 terminal decision，执行单一 `archive` |
+| **终止-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
+| **终止-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
 | **预算软停**（无终止类型对应） | 达预算上限（默认 5 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
 | **振荡硬停**（无终止类型对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
 
@@ -226,7 +226,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
    d. 若 verdict = 可执行 →
         d1. 若本次收敛经历 ≥2 轮 outer loop → 进入盲审复核（见下方"盲审复核"小节）
         d2. 若本次收敛经历 = 1 轮 → 直接收敛
-         收敛！执行完成前必检清单，写 retrospective.md，移 done/
+         收敛！执行完成前必检清单，写 retrospective.md，并由 `archive_convergence.py archive` 原子归档
          d3. 落地执行（将方案改动清单写入目标文件）：**当原始指令含执行意图时**（机械明线：指令含执行动词「并执行 / 落地 / apply」等，见 §确认点分类）→ Orchestrator **默认自主推进**，不追加"现在要执行吗"check-in，按 `refs/orchestrator-guide.md` §落地执行编排 流程 spawn executor，使用 `refs/executor-prompt.md` Plan-Execution 模板。**指令不含执行意图时**：落地前仍需用户确认。全部宪法强制 gate（终止-b/c、预算软停/`*_exhausted`、`MODE_SWITCH_REQUIRED`、`FAIL_CLOSED`、`需重新设计`）不受此影响、逐字保留。
     e. 若有 contract_amendment_required → 先回写 contract.md 再继续
     f. Spawn 新 executor（prompt 模板见 refs/executor-prompt.md）
@@ -282,11 +282,11 @@ verdict=可执行 且 ≥2 轮 →
 **流程**：
 
 ```
-1. 将 done/<slug>/ 移回 active/<slug>/
+1. 运行 `archive_convergence.py reopen <active-root> <done-root> <slug>`，禁止手工移动或改写历史 manifest
 2. 在 attempts.md 追加新 entry（标注 source: user_external_input）
 3. Executor 根据外部输入修订产物
 4. Spawn fresh Reviewer 审查修订后的完整产物（含新增内容）
-5. 若通过 → 更新 retrospective，重新归档 done/
+5. 若通过 → 更新 retrospective，记录新 terminal decision，再运行单一 `archive`
 6. 若有阻断 → 进入标准 converge 主循环
 ```
 
@@ -352,8 +352,9 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 - [ ] 每轮 boundary_check 均为 pass，或违反已记录并告知用户
 - [ ] **若收敛对象是代码**：所有测试通过（全绿）
 - [ ] 所有 suggestion items 已处置（采纳/拒绝/延后，记录在 retrospective 中）
-- [ ] retrospective.md 已写入 `.converge/done/<slug>/`
-- [ ] `active/<slug>/` 目录已移至 `done/<slug>/`
+- [ ] retrospective.md 已在 active 目录完成，并引用唯一 terminal decision event id/value
+- [ ] `scripts/archive_convergence.py archive <active-root> <done-root> <slug>` 返回成功；禁止手工移动
+- [ ] done 最终路径的只读 `check` 返回 valid-v1
 - [ ] 用户已被告知收敛结果
 - [ ] 若存在 contract.md：contract 中所有验收断言已被至少一轮 Reviewer 逐条验证
 - [ ] 不存在未处理的 `contract_amendment_required: true` 标记
@@ -442,6 +443,18 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 > 格式规范见 `refs/state-schema.md`。slug 命名：`<YYYYMMDD>-<对象简述>`。
 >
 > 收敛后修订时：done/ → active/ → 修订 → 重新归档 done/。retrospective 追加修订记录，不覆盖原有内容。
+
+## Archive Contract v1
+
+所有 Spawn 与 Continue 都必须在宿主调用前先执行 `begin-invocation`，在宿主返回后执行 `complete-invocation`；中断恢复只能用 `recover-invocation` 追加失败、取消或超时 terminal event。事件由 CLI 在排他锁内分配全局连续 sequence，禁止手写、覆盖或回填 started event。预算约束 Spawn 必须与 `gate-ledger.jsonl` 的 reserve/settle 双向绑定。
+
+模型记录区分 requested 与 resolved provenance。只有宿主回执或工具响应能够支持 observed/host-reported；配置值和父实例只能记录为 configured/inherited。无法解析实际模型时必须写 closed reason code，并在 INDEX 暴露 degradation，不能声称“实际模型已证明”。
+
+prompt、output 与 reviewed artifact 默认 `metadata-only`，只保存脱敏 locator、原始字节 hash/size 和状态；`redacted` 保存调用方确认的脱敏副本，`exact` 必须逐次显式 opt-in。外部文件内容还要求本次新鲜授权，普通 `check` 永不回读源。常见秘密、链接/reparse、hardlink、设备、越界路径和超限文件 fail closed。
+
+完成门禁只有 `scripts/archive_convergence.py archive`：它在同卷 staging 中导入 evidence、从 owner events/canonical records 投影 manifest、生成 INDEX、完整 check 后原子提交到 done，并在最终路径再 check。`check`/`scan` 只读；旧 done 无 manifest 时仅报告 `legacy-unverifiable`，不得自动改写。修订必须使用 `reopen` 保存旧 manifest revision 后再追加事实。
+
+v1 只主张归档时点内部一致性、结构完整性和声明 provenance 可追溯性。SHA-256 不是来源认证；它不证明历史真实性，也不抵抗拥有同等写权限者整体重写归档、ledger、manifest 与 Git 历史。
 
 ---
 

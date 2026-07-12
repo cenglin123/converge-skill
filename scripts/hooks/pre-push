@@ -4,3 +4,23 @@ python_exe="${PYTHON:-python}"
 top="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [ -n "$top" ] || exit 0
 "$python_exe" "$top/scripts/hooks/stale-check.py"
+stale_rc=$?
+[ "$stale_rc" -eq 0 ] || exit "$stale_rc"
+
+echo "[pre-push] checking changed Archive Contract v1 done directories..."
+received=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  received=1
+  case "$local_sha" in 0000000000000000000000000000000000000000) continue ;; esac
+  case "$remote_sha" in
+    0000000000000000000000000000000000000000)
+      "$python_exe" "$top/scripts/archive_convergence.py" --check-push-range "$top" "$remote_sha" "$local_sha" || exit $? ;;
+    *) "$python_exe" "$top/scripts/archive_convergence.py" --check-push-range "$top" "$remote_sha" "$local_sha" || exit $? ;;
+  esac
+done
+
+# Direct/manual hook invocation has no pre-push stdin; inspect the latest commit.
+if [ "$received" -eq 0 ]; then
+  zero=0000000000000000000000000000000000000000
+  "$python_exe" "$top/scripts/archive_convergence.py" --check-push-range "$top" "$zero" HEAD || exit $?
+fi

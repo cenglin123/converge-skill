@@ -4,6 +4,26 @@
 
 ---
 
+## Archive Contract provenance 采集
+
+可执行矩阵由 `archive_contract.model.PROVENANCE_MATRIX` 唯一拥有，adapter fixture 必须逐 backend 映射到该矩阵，文档不得另建宽松枚举：
+
+- opencode / Codex / Claude 若宿主回执给出本 invocation 的 provider 与 model/family，使用 `observed|host-reported + host_receipt`；tool response 必须绑定 `invocation:<invocation-id>:tool-response`。
+- 仅 CLI/agent 配置可见时使用 `configured`，reason 只能是 `backend-does-not-expose|receipt-missing`。
+- Continue 只继承同 instance 时使用 `inherited + parent_instance + inherited-concrete-model-hidden`。
+- 解析前失败使用 `unavailable + none + invocation-failed-before-resolution`，且只能用于非 succeeded terminal。
+
+所有 adapter 只向 capture 层提交声明与宿主 receipt，不直接写 manifest/INDEX。采集优先级为宿主可验证 receipt > tool response > CLI 明示配置 > agent config > parent instance > unavailable。
+
+| backend | requested | resolved/receipt | 合法 evidence |
+|---|---|---|---|
+| Claude Code | Agent 参数/配置 | Agent 返回的 agentID；若宿主未暴露 concrete model 则留空 | agentID 是 host-reported instance，不自动证明 model；配置模型为 configured |
+| opencode | subagent type 配置 | task_id；tool response 若含 provider/model 才可记录 resolved | task_id 为 host-reported；配置 pin 为 configured，继承但 concrete 隐藏为 inherited + reason |
+| Codex native agent | spawn 参数（如宿主实际暴露） | agent_id/submission_id/wait response | tool response 中 concrete model 才是 host-reported；仅父会话信息为 inherited |
+| orchestrator_self | 当前会话配置 | 无独立子调用 receipt | configured 或 unavailable；必须作为 capability degradation |
+
+observed 仅用于宿主提供可直接观察且绑定本次 invocation 的字段；host-reported 表示信任宿主回执但无外部签名。`configured/inherited` 永远不能提升成 observed。失败发生在解析前用 `invocation-failed-before-resolution`；receipt 缯失用 `receipt-missing`；backend 不暴露字段用 `backend-does-not-expose`。
+
 ## A.1 Claude Code
 
 | 能力 | 实现 |
