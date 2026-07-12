@@ -2,6 +2,34 @@
 
 > 本文件定义 `.converge/` 下所有持久化文件的格式。写文件时参考此处。
 
+## Archive Contract v1（规范单源）
+
+`schema_id="converge.archive"`，`schema_version="1.0"`。读取按 schema dispatch，不按日期：无 manifest 为 `missing/legacy-unverifiable`；严格 JSON 失败（含重复 key、BOM、NaN/Infinity）为 `malformed`；缺版本、外部 schema 或更新版本为 `unsupported`；可识别 v1 但闭包失败为 `invalid`；全部通过为 `valid`。未知版本 fail-safe，scan 只读且不迁移。
+
+### 权威与依赖
+
+可执行单源是 `scripts/archive_contract/model.py`；本节解释同一字段和枚举。模块依赖固定为 `capture -> model <- transaction`、`presentation -> model`，CLI 只装配。采集期 owner 是 append-only events；budget settlement 唯一 owner 是 `gate-ledger.jsonl`；旧 revision owner 是 `evidence/revisions/<revision-id>/manifest.json`。归档时 manifest 是 owners 的冻结投影，INDEX 只从 manifest 生成，不能产生事实。
+
+### Event 与主外键
+
+公共字段：`schema_id/schema_version/event_type/event_id/sequence`。event id 为 UUID；sequence 在所有 event 类型中从 1 连续且无缺口。`invocation-started` 拥有 invocation kind（spawn/continue）、role、phase、round、attempt、parent、reservation、started_at 与 requested provenance；`invocation-terminal` 只引用 started event，拥有 terminal status、completed_at、host receipt、settlement ref 与 resolved provenance。同一 started 恰有一个 terminal。Continue 必须引用同 instance 的 Spawn parent。
+
+terminal status 为 `succeeded|failed|cancelled|timeout`；仅 succeeded 必须有 output evidence。失败 reason 为 `backend-error|cancelled-by-host|timeout|process-interrupted`。terminal decision 是闭合联合：`reviewer-verdict` 只引用成功 fresh/blank-slate Reviewer terminal；`user-decision` 只用于 terminal-b/c，必须含 `user_quote/source_ref/presented_degradations/accepted_state`。`design-review-completion` 是 advisory，禁止出现在 `final_verdict_ref`。最终 round 与 retrospective 必须反向引用同一 decision event id/value。
+
+requested provenance 字段为 `requested_provider/requested_model`；resolved 字段为 `resolved_provider/resolved_model/resolved_family/backend/backend_version`。`evidence_level=observed|host-reported|configured|inherited|unavailable`，`resolution_source=host_receipt|tool_response|cli_argument|agent_config|parent_instance|none`。configured/inherited 不得带 resolved model。partial/unavailable reason 仅允许 `backend-does-not-expose|receipt-missing|inherited-concrete-model-hidden|invocation-failed-before-resolution`。
+
+### Evidence 与路径
+
+`evidence_mode=metadata-only|redacted|exact` 分别映射 `identity-only|redacted-copy|snapshot`。hash 始终是原始输入字节 SHA-256（64 位小写 hex），size 是 byte；redacted 副本有自己的 hash/size，不能称 exact。workspace locator 仅含 `{kind,workspace_id,path}`；external 仅含 `{kind,display_locator,portable:false,authorization_ref}`，展示 locator 必须不可解引用，普通 drift 固定 `unavailable/external-read-disabled`。
+
+根 allowlist：`INDEX.md/manifest.json/plan.md/contract.md/attempts.md/retrospective.md/design-review.md/_orchestrator-state.md/gate-ledger.jsonl/_budget-state.json/round-[1-9][0-9]*.md`。比较采用 NFC+casefold 唯一键。归档树拒绝 UNC、extended path、ADS、设备名、尾随点/空格、越界、symlink/junction/reparse、hardlink 与非普通文件。Markdown 导航必须是 archive-root 内 POSIX 相对链接；raw evidence 内容不改写也不当导航。
+
+### Manifest 闭包与事务状态
+
+manifest 承诺 canonical records、events、invocation/artifact blobs、revision manifests 的相对路径/hash/size，以及 invocation projection、artifact projection、final decision、advisory refs、degradations、parent revision。manifest 不自哈希；检查从 owners 重投影做语义比较，再逐字节重建 INDEX。archive 事务状态为 `preparing -> source-backed-up -> committed`，post-check 失败进入 `rolled-back`；reopen 使用 `reopen-prepared -> reopen-moved` journal。异常 journal 报 `recoverable`。重试从 journal 恢复，且任一时刻只接受 active、backup 或 done 中一个 authoritative 副本。只有 canonical done root 内且 check valid 才是 archived。reopen 将旧 manifest 原字节进入 revisions，新事件从历史最大 sequence 继续。
+
+威胁边界：v1 只保证归档时点内部一致性、结构完整性和声明 provenance 可追溯性；hash 不认证来源，configured/inherited 不证明实际模型。本契约不抵抗同权限整体重写归档、ledger、manifest 和 Git 历史。
+
 ---
 
 ## 一、Round Log（`round-N.md`）
