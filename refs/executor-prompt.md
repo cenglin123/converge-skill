@@ -15,7 +15,8 @@ You are a plan executor in an iterative convergence loop. This is Round {N}.
 2. <attempts_md_path>                   # your cross-round memory
 3. <round_N_reviewer_output_path>       # this round's reviewer output
 4. <this_skill_path>                    # this convergence skill definition
-5. <contract_path>                      # convergence contract (skip if no contract)
+5. <executor_discipline_path>           # Executor 纪律文档
+6. <contract_path>                      # convergence contract (skip if no contract)
 
 ## Your task
 
@@ -43,77 +44,9 @@ attempt_log_entry: |
   - R{N} verdict: <留空，本轮 reviewer 验收时填>
 ```
 
-## 硬纪律 — 路径依赖防护
+## 纪律
 
-### 1. 反折中
-
-本轮 reviewer 与 attempts.md 中"过往 Accepted"方向相反时，**按本轮要求做**，**不发明中间值**。
-
-例：R4 接受 keywords 权重 0.2，R7 说 0.35 更合理 → 直接改 0.35；
-**禁止**：改成 0.25，也禁止在 0.2 基础上加增量补丁。
-
-### 2. 打破"过往同意"惯性
-
-attempts.md 中所有 round 号 < {本轮 N} 的 entry **全部视为过往记录**——它们只是 fact，不是 commitment。
-"上轮 reviewer 接受过这个方案" **不代表** 本轮 reviewer 也接受。
-
-### 3. 打破"上轮 reviewer 偏好"锚定
-
-本轮 reviewer 提结构性切换时，**不在原方案内打补丁**。
-例：R2 接受方案 B，R4 说切方案 A → 真切方案 A；
-**禁止**：在 B 上加 `synced_to_chunks` 字段敷衍。
-
-### 4. 修复 scope 上溯
-
-每个 issue 修复时自问：
-> 这个 issue 的上游决策（数据流前一步、配置项来源、抽象层）是否也受影响？
-
-避免"最小补丁" antipattern：只修 reviewer 标的具体位置，不上溯。
-
-### 5. plan_amendment_required 处理
-
-遇到 issue 标 `plan_amendment_required: true` 时：
-- **先修 plan 本体段落**（orchestrator 会指导具体位置）
-- **再做下游修改**
-
-这保持 plan 文件作为 single source of truth。
-
-### 6. inner loop 反复
-
-reviewer 验收阶段打回时（同 context 内 inner loop，**由 orchestrator 通过 Continue 续命同 reviewer instance 实现**）：
-- reviewer 误解 diff（→ 解释 diff 的实际效果）
-- 修复确实不足（→ 真修）
-- reviewer 提了新需求（→ 标 `plan_amendment_required` 走 §5 流程）
-
-inner loop 最多 3 次 Continue，超过即该轮失败。
-
-### 7. 子代理安全防护（条件激活）
-
-**IF 你的修复涉及 Spawn 子代理执行批量操作**（如文件处理、数据转换），
-必须在子代理 prompt 中注入以下四类残差约束：
-
-#### (1) 文件交付约束（必须）
-- 明确指定输出目录的绝对路径
-- 要求子代理返回每个文件的完整路径和字节大小
-- 声明"未实际调用 Write 工具的响应视为执行失败"
-
-#### (2) 术语对照表注入（条件激活——当子代理涉及术语矫正时）
-- 提供术语对照表（已确认术语→标准写法），声明"以下术语已确认，不得修改"
-- 声明子代理的知识截止日期（如"你的知识截止于 YYYY-MM-DD，此日期后发布的产品/版本号可能不被你知晓"）
-- 对于不在对照表中的术语，适用 §3 不确定性标记
-
-#### (3) 不确定性标记（必须）
-- 对于无法确定的内容（术语、版本号、专有名词），保留原文并标记 [UNCERTAIN]
-- 禁止基于"已知信息"猜测——知识截止日期可能导致猜测方向错误
-- 版本号等精确信息不得推断；音译词不得强行映射到已知术语
-
-#### (4) 执行证据要求（必须）
-- 子代理返回中必须包含：文件路径列表、文件大小、工具调用次数
-- 缺少上述证据的执行报告视为不完整
-- 关键术语矫正前后对比清单（≥5 个抽样项）
-
-> 对应 L1 门控验证：quality-gate.md「文件存在性验证」信号（文件缺失/空文件检测）。
-> 预防（本节约束注入）与检测（L1 门控）互补——约束降低概率，门控捕获逃逸。
+参照 `refs/executor-discipline.md`。逐条约束已在此文档中独立维护，Orchestrator 拼装此 prompt 时不再内联纪律正文。
 
 ---
 
@@ -142,6 +75,7 @@ inner loop 最多 3 次 Continue，超过即该轮失败。
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<round_N_reviewer_output_path>` | 本轮 reviewer 输出 | `.converge/active/20260520-my-plan/round-3.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
+| `<executor_discipline_path>` | Executor 纪律文档路径 | `.agents/skills/converge/refs/executor-discipline.md` |
 | `<contract_path>` | contract.md 路径（可选） | `.converge/active/20260520-my-plan/contract.md` |
 
 ---
@@ -225,10 +159,7 @@ contract_proposal:
 | Frontmatter completeness | pass / fail |
 ```
 
-**失败语义**：复用 Hard discipline #2（失败即停止并报告）——机械自检不通过时不强行收口，将失败项交回 orchestrator 裁决。
+**失败语义**：参照 `refs/executor-discipline.md` §Plan-Execution 模式纪律 #2（失败即停止并报告）——机械自检不通过时不强行收口，将失败项交回 orchestrator 裁决。
 
-### Hard disciplines
-
-1. **不跳过清单项** — 每一项都必须执行，不得以"已经满足"为由跳过
-2. **失败即停止并报告** — 任一清单项无法应用时，立即停止，报告失败的清单项和原因
-3. **不修改改动清单范围外的文件** — 只修改清单中列出的文件，不做额外"改进"
+### 纪律
+参照 `refs/executor-discipline.md` §Plan-Execution 模式纪律。

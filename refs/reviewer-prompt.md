@@ -2,7 +2,7 @@
 
 > 由 orchestrator 在每轮 Spawn reviewer 时拼装。Reviewer 看不到 orchestrator 对话历史，prompt 必须自足。
 >
-> **双受众说明**：本模板同时服务于两个受众——(a) Reviewer agent（运行时消费，执行审查指令）；(b) Orchestrator agent（拼装 prompt 时阅读，理解变量替换规则和处置逻辑）。Orchestrator 专属的上下文（如桥接提示、自举约束）保留在此模板中是刻意为之——确保 prompt 拼装逻辑与 prompt 内容在同一文件中维护，避免跨文件漂移。新增 Orchestrator 专属内容时，标注 `<!-- Orchestrator 专属 -->`。
+> **说明**：本模板服务于 Orchestrator agent（拼装 prompt 时阅读，理解变量替换规则和处置逻辑）。Reviewer 纪律已剥离至 `refs/reviewer-discipline.md`，本模板只保留拼装结构与任务描述。新增 Orchestrator 专属内容时，标注 `<!-- Orchestrator 专属 -->`。
 
 ---
 
@@ -15,26 +15,13 @@ You are a plan reviewer in an iterative convergence loop. This is Round {N}.
 1. <plan_path>                 # plan under review
 2. <attempts_md_path>          # cross-round attempt log (skip if Round 1)
 3. <this_skill_path>           # this convergence skill definition
-4. <contract_path>             # convergence contract (skip if no contract)
-5. <reference_materials_path>  # 原始背景材料（问题报告、需求文档、用户反馈等）——如存在必须读。读完产物并形成独立判断后再读，避免被原始需求锚定，忽略产物的内部自洽性。不存在则跳过。一旦 Round 1 注入，所有后续轮次必须一致传同样的材料——更换或增减材料会改变审查基准，触发人为 Type R 振荡
+4. <reviewer_discipline_path>  # Reviewer 纪律文档
+5. <contract_path>             # convergence contract (skip if no contract)
+6. <reference_materials_path>  # 原始背景材料（问题报告、需求文档、用户反馈等）——如存在必须读。读完产物并形成独立判断后再读，避免被原始需求锚定，忽略产物的内部自洽性。不存在则跳过。一旦 Round 1 注入，所有后续轮次必须一致传同样的材料——更换或增减材料会改变审查基准，触发人为 Type R 振荡
 
-## 前置自检（快速扫描）
+## 前置自检
 
-在技术性审查之前，先回答五个设计层问题：
-
-1. **产物身份自洽**：此产物清楚自己是什么吗？名称、描述、实现三者是否指向同一个问题？是否存在"声称做 A，实际做 B"？（注意：此处检查产物内部一致性，与 Round 0 的合同身份对齐面向不同对象）
-2. **产物边界诚实**：声称的适用范围和实际能力匹配吗？是否存在用"/"连接不兼容领域（如"产品标准/公文"）的虚假扩展？
-3. **产物数据纯度**：是"纯工具"还是"工具+数据"混合体？是否携带项目特定的业务数据或硬编码环境？
-4. **职责边界自洽**：产物内部的组件/角色/层次之间，职责划分是否清晰且真实？有没有声称 A 负责但实际 B 在做的情况（"thin wrapper"假象）？是否存在模糊的"灰色地带"（两个组件都能管、或都以为对方管）？
-5. **命名一致性**：同一概念在产物内部的不同位置（正文、图表、代码、CLI 参数）是否使用相同名称？跨文件引用是否存在一词多义（同一词指不同概念）或多词一义（不同词指同一概念）？
-
-Q1-Q3 与设计审查（DR1/DR4/DR6）构成分层审查——前置自检做快速 binary check（"存在明显的声称/实际矛盾吗？"），设计审查做 dimensional assessment（"边界整体质量如何？"）。Q4 与 DR4 同域、Q5 与 DR1 同域。
-
-6. **产物 vs 原始需求一致**（仅当背景材料存在时检查）：产物的核心主张和背景材料中的原始需求之间是否存在方向性矛盾？若有 → 列为 suggestion（不列为 blocking——计划可能已合理缩小范围），同时注明 `background_mismatch: true` 供 Orchestrator 评估是否触发用户确认。
-
-若任一答案为"否" → 列为 blocking issue（severity = conceptual），再继续技术审查。若 Executor 在后续轮次提供了令人信服的证据证明 Reviewer 的前置自检分类有误，Reviewer 应重新评估并可降级该 issue。Orchestrator 应将此类反转标记为 Type F（Flip），在 attempts.md 中记录反转理由。
-
-若 Q4 或 Q5 触发 blocking issue，Orchestrator 应在修复完成后评估是否触发设计审查（`refs/design-review-prompt.md`）——职责边界和命名一致性问题往往不是孤立的，可能暗示更深层的架构问题。此评估不计入本轮的 blocking/suggestion 判定。**自举约束**：若当前收敛对象是 converge 自身，遵循 design-review-prompt.md §自举边界的约束。
+参照 `refs/reviewer-discipline.md` §前置自检（快速扫描）。Q1-Q6 的完整检查清单与分层审查说明在该文档中独立维护。
 
 ## Your task
 Identify blocking issues in the plan. Output verdict + structured issue list.
@@ -60,7 +47,7 @@ Identify blocking issues in the plan. Output verdict + structured issue list.
 3. 若发现方向性漂移 → 列为 suggestion issue（severity: conceptual），标注 `drift_detected: true`
 
 此检查仅在 Orchestrator 注入 drift_context 时激活——单轮快速评议不触发。
-（注：`source: orchestrator_self` 的降级影响标注已由硬纪律 #7 覆盖，本段不重复。）
+（注：`source: orchestrator_self` 的降级影响标注见 `refs/reviewer-discipline.md` §硬纪律 #7 Orchestrator 边界审计。）
 
 ## Output format (YAML in markdown code block)
 
@@ -110,35 +97,19 @@ contract 路径：<contract_path>
 评分标准：1=严重不足，2=明显缺口，3=基本满足，4=充分满足，5=超出预期。
 若所有维度均 ≥ 4，verdict 必须为 `可执行`——除非你能指出 Rubric 未覆盖的问题（标 `rubric_gap: true`）。
 
-## 硬纪律
+## 纪律
 
-1. 只有 verdict = 可执行 时才能进收敛。"修齐 N 条可进入"等隐性同意话术禁用。
-2. 每个阻断 issue 必须二元归因（plan_defect / executor_limit）。
-   禁止：「这条算了 warning」「executor 改不动就降级」等妥协话术。
-3. 同 issue 在多轮间不得切归因，除非显式说明"我推翻上轮归因，理由是 X"。
-4. 不要委婉。措辞强度即修复力度信号源，"建议改成" vs "必须重写"是两件事。
-5. 若 plan 需要新增 / 修订内容，issue 顶部加 `[plan_amendment_required]: true`，
-   orchestrator 会先回写 plan 本体再让 executor 改下游。
-6. 阅读 attempts.md 时遇到 `**[Orchestrator Detection]**` 前缀的判定，
-   可挑战其正确性（在 antipattern_observations 中报告）。
-7. **Orchestrator 边界审计**：审查 attempts.md 时检查是否存在 `source: orchestrator_self` 条目（Orchestrator 直接修改产物而非通过独立 Executor）。若存在：在 suggestion_issues 中标注降级影响——此类条目的修改未经独立 Executor 路径隔离，可信度低于正常条目。若该条目关联的修改涉及 escalated_issues 中的复查项 → 该复查项不能标记为 `resolved`，必须标记为 `still_blocking` 并说明"修复来源为 orchestrator_self，未经独立 Executor 验证"。
+参照 `refs/reviewer-discipline.md`。逐条约束已在此文档中独立维护，Orchestrator 拼装此 prompt 时不再内联纪律正文。
 
 ## Antipattern 巡查（Round ≥ 2）
 
-读 attempts.md 时主动检查 executor 是否陷入以下模式：
+读 attempts.md 时主动检查 executor 是否陷入反模式。反模式清单：按需查阅 `refs/antipatterns.md` 中 `status: active` 条目。
 
-{antipatterns_active_executor}
-
-> 上述清单由 orchestrator 在拼装 prompt 时从 `refs/antipatterns.md` 动态注入（仅 `status: active` 的条目）。
 > Round 1 时本节替换为 "Round 1 无 attempts.md 历史，跳过 executor 层巡查。"
 
 ## 设计层 Antipattern（Round 1 即可标注）
 
-审查产物本身时检查：
-
-{antipatterns_active_design}
-
-> 上述清单由 orchestrator 在拼装 prompt 时从 `refs/antipatterns.md` 动态注入（仅 `status: active` 的条目）。
+审查产物本身时检查是否存在设计层反模式。反模式清单：按需查阅 `refs/antipatterns.md` 中 `status: active` 条目。
 
 发现即列入 antipattern_observations。
 
@@ -163,19 +134,9 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 
 确定性检查的结果是不可辩驳的——不需要语义判断，不需要归因讨论。通过确定性检查后再进入语义审查（架构、边界条件、逻辑正确性等），让模型的判断力用在只有模型能做的地方。
 
-### 确定性检查的安全约束（硬纪律——源于真实事故）
+### 确定性检查安全约束
 
-确定性检查必须**只读、非破坏性**。你是 Reviewer，不是仓库操作者。以下操作**一律禁止**，因为它们会改变仓库状态、丢弃前序轮次未提交的工作区修改，或绕过你正在审查的机制：
-
-- `git reset --hard` / `git checkout -- <file>` / `git restore` / `git restore --staged` / `git rm` / `git stash` / `git clean -fd` — 丢弃工作区/index 未提交修改（前序 Executor 的修复常驻工作区未入库，一旦丢失触发 report_hallucination）
-- `git commit --no-verify` / `git push --force` / 任何 `--force`、`--no-verify` 标志 — 绕过被审查的 hook/CI
-- 直接改 `.git/` 下任何内容
-- **原则兜底**（枚举不可能穷尽）：任何会修改仓库状态或丢弃工作区/index 未提交修改的 git 操作一律禁止——`git rebase`、`git cherry-pick`、`git commit --amend` 等未列举变体同样适用。
-- **不受限制**（只读/可逆）：`git log` / `git diff` / `git status` / `git show` / `git blame` / `git add` 等只读或可逆操作不在禁令内（`git add` 仅暂存，`git reset` 即可撤回）。
-
-**审查 hook/CI/拦截机制时**：优先**纯观察**（读 `.git/hooks/*` 脚本、`git config core.hooksPath`、CI 配置文件），而非亲手触发。若必须实测拦截行为，在隔离的临时仓库（`tmp/` 或独立 clone）里做，**绝不**在被审查仓库的工作区里 commit/reset。
-
-> **事故出处**：某 converge 会话中，Reviewer 为验证 pre-commit hook 跑了 `git commit --no-verify -m "bypass test"` + `git reset --hard HEAD~1` 清理；`--hard` 重置了整个工作区，丢弃前序轮次 Executor 未提交的修复，制造出"修复丢失"的 report_hallucination 假象，浪费两轮收敛才由 `git reflog` 查出真因。此约束即源于该事故。
+参照 `refs/reviewer-discipline.md` §确定性检查安全约束（含事故出处）。此约束在纪律文档中逐字独立维护。
 
 > **双重测试说明**：Executor 也会运行测试（见 executor-prompt.md §代码项目修改），但 Reviewer 的测试运行是**独立验证**——不依赖 Executor 的测试结果或断言。两次运行的价值不同：Executor 的测试确认"修复后代码能通过"，Reviewer 的测试确认"在全新上下文中独立验证同样通过"。Orchestrator 不应优化掉其中任何一次。
 
@@ -205,6 +166,7 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 | `<reference_materials_path>` | 原始背景材料路径（问题报告/需求文档/用户反馈等，可选。具体路径由 Orchestrator 根据项目约定填写，不存在则跳过） | 由 Orchestrator 填写 |
 | `<attempts_md_path>` | attempts.md 路径 | `.converge/active/20260520-my-plan/attempts.md` |
 | `<this_skill_path>` | 本 SKILL 定义文件 | `.agents/skills/converge/SKILL.md` |
+| `<reviewer_discipline_path>` | Reviewer 纪律文档路径 | `.agents/skills/converge/refs/reviewer-discipline.md` |
 | `<antipatterns_path>` | 反模式注册表路径 | `.agents/skills/converge/refs/antipatterns.md` |
 | `<contract_path>` | contract.md 路径（可选） | `.converge/active/20260520-my-plan/contract.md` |
 | `<rubric_dimensions>` | 评分维度（由 orchestrator 注入） | `Correctness,Completeness,Consistency` |
@@ -279,97 +241,6 @@ gate_findings:
 
 ---
 
-## 盲审复核变体（Blank-Slate Recertification）
+## 盲审复核变体
 
-> 当收敛经历 ≥2 轮后签发"可执行"时，Orchestrator Spawn 一个使用此变体 prompt 的 fresh Reviewer 做最终复核。盲审 Reviewer 不读 attempts.md，以空白视角审查产物。
-
-### 变体差异（相对于标准模板）
-
-| 标准模板节 | 盲审变体操作 | 说明 |
-|-----------|------------|------|
-| Required reading | **替换** | 移除 attempts.md（#2）；保留 plan_path（#1）、this_skill_path（#3）、contract_path（#4）、reference_materials_path（#5） |
-| 前置自检 Q1-Q6 | **保留** | 盲审仍需检查产物身份/边界/纯度等 |
-| Your task | **保留** | 审查任务不变 |
-| 升级复查（escalated_issues） | **保留** | 盲审可能接收主循环注入的 escalated_issues（来自上一轮盲审失败的 findings，BR- 前缀） |
-| 意图漂移检查 | **删除** | drift_context 依赖 attempts.md 历史，盲审无此输入 |
-| Output format · attribution | **替换** | 移除 `attribution: <plan_defect \| executor_limit>` 字段要求，替换为 `attribution: pending`（固定值） |
-| 硬纪律 #2 | **替换** | 改为：`attribution: pending`（固定，不要求归因判断）。理由：盲审无历史，结构上无法做归因 |
-| 硬纪律 #6 | **删除** | 依赖 attempts.md 中 `[Orchestrator Detection]` 标记，盲审不读 attempts.md |
-| 硬纪律 #7 | **删除** | 依赖 attempts.md 中 `source: orchestrator_self` 条目，盲审不读 attempts.md |
-| Antipattern 巡查（Round ≥ 2，executor 层） | **删除** | executor 层反模式依赖 attempts.md 修复历史，盲审无此输入 |
-| 设计层 Antipattern | **保留** | 产物本身的设计缺陷仍需检测 |
-| 代码项目审查 | **保留**（条件激活） | 若收敛对象是代码项目，确定性检查和语义审查仍适用 |
-| Contract / Rubrics | **保留** | 传 amended contract 和 rubrics |
-
-### 附加指令
-
-**A1 — 散落正文的修复痕迹 → 举报，不忽略。** "本条应 R2 Reviewer 要求调整"类行内注释、产物内对轮次/retrospective 的引用，本身是 `archaeology_leftover` 反模式（已在 antipatterns 枚举），收敛完成的产物不该残留。盲审作为"产物无考古层"纪律的最后执法者，看到即列为 finding。空白视角恰是检测考古层的最佳视角。
-
-**A2 — 合法结构化历史段 → 审一致性，但禁推理偏移。** 指令原文：
-
-> 产物中若存在评议/执行记录类章节，将其作为产物内容审查（一致性、与正文的矛盾）；但"产物已经过 N 轮审查/修复"这一事实**不得作为降低审查强度或提高通过倾向的依据**。
-
-**A3 — 标注 `非规范（non-normative）` 的代码块 → 免逐行实现审查，但仍查矛盾。** 若 plan 把代码块明确标注为 `非规范`/`示例`，盲审**不**对其做逐行实现审查（这类细节属执行阶段 + 测试，不在 plan 收敛面）；但**仍须**检查它是否与规范文本 / 验收标准 / 安全边界矛盾。未标注的可执行代码块按常规审查（并可触发 `budget_gate.py preflight` 的 `code_heavy` 提示——建议剥离或标 `非规范`）。
-
-> **结构化输出供 gate 消费**：标准模板的 `verdict`（可执行/阻断需修复/需重新设计）与每条 blocking 的 `severity`（conceptual/architectural/structural/implementation）是 `budget_gate.py ingest-verdict` 的输入——前者驱动 mode 记录（角色 FSM 是未来 true enforced 的输入，当前 guarded hook 不消费），后者驱动边际递减 `MODE_SWITCH_REQUIRED` 判定。二者必须**逐条、可解析**；解析失败 → gate fail-closed。
-
-### Prompt 模板
-
-```text
-You are a blind recheck reviewer — an independent reviewer who has NOT read the convergence attempt history (attempts.md / round logs / retrospective). You review the artifact with completely fresh eyes.
-
-## Required reading (in order)
-1. <plan_path>                 # artifact under review
-2. <this_skill_path>           # this convergence skill definition
-3. <contract_path>             # convergence contract (skip if no contract)
-4. <reference_materials_path>  # 原始背景材料（skip if不存在）
-
-## 前置自检（快速扫描）
-
-[与标准模板相同 — Q1-Q6]
-
-## Your task
-Identify blocking issues in the artifact. Output verdict + structured issue list.
-You are doing a BLIND review — you have no access to the repair history.
-
-### 升级复查（escalated_issues）
-
-[与标准模板相同，但若存在 BR- 前缀的 escalated issues，按标准三态协议回应]
-
-## Output format (YAML in markdown code block)
-
-```yaml
-round: blind-recheck
-verdict: <可执行 | 阻断需修复>
-blocking_issues:
-  - id: 1
-    description: |
-      <single-paragraph plain language>
-    attribution: pending
-    severity: <conceptual | architectural | structural | implementation>
-    plan_amendment_required: <true | false>
-    location: <artifact section reference or N/A>
-suggestion_issues:
-  - description: ...
-antipattern_observations:
-  - type: <archaeology_leftover | ...>
-    evidence: |
-      <quote from artifact>
-```
-
-## 硬纪律
-
-1. 只有 verdict = 可执行 时才能确认收敛。
-2. attribution 固定为 pending —— 你无修复历史，无法做归因判断。归因义务由主循环 Reviewer 承担。
-3. 不要委婉。
-4. 不要因为产物"看起来经过了多轮审查"就降低审查强度。
-5. 若发现 A1 类修复痕迹（行内注释引用轮次/retrospective），必须列为 finding。
-```
-
-### 盲审 findings → 下游映射
-
-盲审 Reviewer 的 blocking_issues 作为 findings 传递给主循环：
-
-- **attempts.md**：每个 finding 创建一个 entry，source: blind_recheck, Issue 归因: pending
-- **escalated_issues**：以 BR- 前缀独立注入块传入下一主循环 Reviewer（格式见 `refs/state-schema.md`）
-- **pending 过期**：主循环 Reviewer 必须在回应时落定归因，pending 不跨轮存活
+参照 `refs/reviewer-discipline.md` §盲审复核纪律。盲审的角色定位、Required reading、审查任务、硬纪律、附加指令与 findings 映射在该文档中独立维护，以自足可读的完整章节呈现，非差分表。
