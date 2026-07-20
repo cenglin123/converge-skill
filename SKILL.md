@@ -336,6 +336,23 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
   C-20. **盲审复核编排** — 当收敛经历 ≥2 轮 outer loop 且 verdict=可执行时：(a) 判断是否满足盲审触发条件（≥2 轮）；(b) Spawn 盲审 Reviewer（使用 refs/reviewer-prompt.md 盲审变体 prompt）；(c) 若盲审有阻断，将 findings 以 BR- 前缀独立注入块格式转为 escalated_issues，注入下一主循环轮；(d) 在 attempts.md 中为盲审 findings 创建 entry（source: blind_recheck, attribution: pending）；(e) 检查 pending 归因是否在下一主循环轮落定（硬过期）；(f) 维护 retrospective 的 blind_recheck 标注（pass / fail / waived）。操作指引见 `refs/orchestrator-guide.md`
   C-21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) Spawn executor（使用 refs/executor-prompt.md Plan-Execution 模板，fresh-context spawn）；(b) **不得直接编辑文件**（宪法硬约束 #7 在落地阶段同样适用）；(c) 记录 executor instance_id 到 retrospective 或落地日志条目（客观证据）；(d) 核对改动清单项数与 executor 报告的已修改文件数一致。(e) 落地后**建议**（非强制）触发 `.meta/audit` plan-landing 子模式——条件触发见 `.meta/audit/README.md` 子模式段（阈值不复述，单源）；小落地（<3 文件、单模块、非治理文档类）走 executor 自报告 + (a)-(d) 核对即可。**ultraverge 落地（治理文档类）不适用小落地豁免，必走 audit plan-landing 子模式**——与强制设计审查配套（落地前审设计决策 + 落地后审实施对齐），消除 ultraverge 强制链在落地阶段的强度断层。操作指引见 `refs/orchestrator-guide.md` §落地执行编排
 
+### 传话编排（relay orchestration）
+
+> **C-21 后收敛执行编排的变体**，不是主循环替代，不新增模式。
+
+**适用条件（三条同时满足，缺一不可）**：
+1. 产物已收敛且方案已定稿
+2. 验收判据机械可核（测试退出码 / hook 返回码 / diff / 计数）
+3. 参与方 ≤ 2
+
+**机制**：orchestrator 默认不发言，只做「固定格式包裹 + 转发 + 记录」；仅在检测到偏差时介入，介入依据为 plan 原文 + orchestrator 纪律。
+
+**载荷强制**：载荷必须为**文件引用**，**不得为消息全文**——消息载荷下两侧 agent 各自累积对方全部历史，输入 token 随轮次二次增长，与该模式的成本论据方向相反。
+
+**独立性降级声明**：传话编排的两侧 agent 若为持续会话，则 converge 的反锚定机制（executor 纪律「打破过往同意惯性」/「打破上轮 reviewer 偏好锚定」、盲审复核、`past_commitment_anchoring` 巡查）**不生效**。使用该变体时 orchestrator **必须**按宪法 #6 告知用户当前处于独立性降级模式。
+
+**角色边界**：传话编排中 orchestrator 的「纠偏」限定为**指出偏差并要求对方修正**，**不含直接修改产物**（宪法 #7 在落地阶段同样适用，C-21(b) 已有明文）。若偏差需要改产物，仍须 **spawn executor**。Orchestrator **不得直接修改**产物文件。
+
 ---
 
 > Orchestrator 不可让渡的行为边界详见 `CONSTITUTION.md` 第二部。

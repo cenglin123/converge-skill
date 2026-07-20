@@ -379,6 +379,52 @@ executor 完成后报告已修改文件列表，Orchestrator 交叉核对：
 3. N ≠ M → 向用户报告不一致，列出差异项
 4. N = M → 确认，报告用户落地完成
 
+### 传话编排（relay orchestration）
+
+C-21 后收敛执行编排的变体，适用条件见 SKILL.md Orchestrator 责任清单。以下为操作指引：
+
+#### 1. 包裹格式
+
+固定模板，零判断零筛选：
+
+```
+[转发自 {sender_role}] — 轮次 {round_id}
+产物路径: {artifact_path}
+内容 hash: {content_hash}
+---
+{payload}
+---
+[转发至 {receiver_role}]
+```
+
+#### 2. 记录字段
+
+每次转发记录以下字段：
+
+- `timestamp`：ISO 时间戳
+- `sender_role`：发送方角色（reviewer / executor）
+- `round_id`：轮次标识
+- `artifact_path`：产物文件路径
+- `content_hash`：产物内容哈希
+- `verdict_or_response`：接收方结论摘要
+
+#### 3. 介入判据
+
+「明显偏差」的判据：接收方产出与 plan 原文的要求存在**可机械核验的差异**（文件路径错误、遗漏清单项、未执行指定命令、输出格式不符等）。判据来源为 plan 原文 + orchestrator 纪律（CONSTITUTION.md 第二部 #7 + SKILL.md 核心角色表）。
+
+不构成介入的情形：语义层判断分歧、偏好差异、命名风格选择——这些不属于「偏差」，不触发介入。
+
+#### 4. 介入前自检
+
+与主循环 M-3 `boundary_check` 同构：**「我即将做的动作是纠偏还是越界？」**
+
+- **纠偏**（允许）：指出偏差，引用 plan 原文，要求对方修正。不触及产物文件。
+- **越界**（禁止）：直接编辑产物、替对方完成工作、绕过 spawn executor 修改文件。
+
+自检违反时记录：
+- 在 relay ledger（若已创建）中标注 `boundary_violation_pending`
+- 若已越界执行 → 标注 `source: orchestrator_self`，告知用户降级影响（参照 C-21(b) 与宪法 #7）
+
 ---
 
 ## 九、信息源核对与申诉仲裁
