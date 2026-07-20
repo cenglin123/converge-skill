@@ -377,7 +377,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
 | `plan_drift_check_interval` | 5 | plan 漂移检测间隔（轮） |
-| `converge_dir` | `.converge/` | 收敛目录路径。可改为 `.meta/.converge/` 等自定义路径 |
+| `converge_dir` | `.converge/` | 收敛目录路径。可改为 `.meta/.converge/` 等自定义路径。**设 `CONVERGE_DIR` 环境变量可覆盖默认值（仅影响项目级 converge 产出，不影响 SKILL 自身 `.converge/` 内部记录）** |
 | `gate_l1_interval` | 1 | 门控 L1 每 N 个 phase 触发 |
 | `gate_l2_mode` | `signal` | 门控 L2 启动方式：`always` / `signal` / `adaptive` |
 | `gate_l2_signal_threshold` | `warn` | 信号触发条件（当前仅支持 `warn`；`info`/`critical` 级别预留给后续 L1 信号扩展） |
