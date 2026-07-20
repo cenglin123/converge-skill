@@ -31,6 +31,8 @@ You are a plan executor in an iterative convergence loop. This is Round {N}.
 ```yaml
 issue_id: <reviewer 标的 id>
 approach: <一句话修复思路>
+rejected_alternatives: <考虑过并排除的方案及排除理由；无则填「无」>
+upstream_scope_check: <硬纪律「修复 scope 上溯」自问的结论：受影响的上游决策；无则填「无」>
 diff: |
   <unified diff 或 markdown 段落 before/after>
 attempt_log_entry: |
@@ -40,6 +42,8 @@ attempt_log_entry: |
   - Issue 归因（reviewer 判定）: <plan_defect | executor_limit>
   - plan_amendment_required: <true | false>
   - Approach: <一句话>
+  - Rejected alternatives: <排除的方案及理由，或「无」>
+  - Upstream scope check: <受影响的上游决策，或「无」>
   - Diff: <hash | inline>
   - R{N} verdict: <留空，本轮 reviewer 验收时填>
 ```

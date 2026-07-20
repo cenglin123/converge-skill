@@ -71,6 +71,8 @@ generated_at: <ISO datetime>
 - Issue 归因（reviewer 判定）: plan_defect | executor_limit | pending | reviewer_factual_error   # pending 仅限 source: blind_recheck；reviewer_factual_error 仅限 source ∈ {factual_self_adjudication, user_arbitration}（reviewer 事实误读导致的剔除）
 - plan_amendment_required: true | false
 - Approach: <executor 一句话修复思路>
+- Rejected alternatives: <executor 考虑过并排除的方案及排除理由；无则填「无」>
+- Upstream scope check: <executor 对硬纪律「修复 scope 上溯」的自问结论；无则填「无」>
 - Diff: <commit hash | inline 段落变更>
 - R{N} verdict: Accepted | Rejected   # source ∈ {factual_self_adjudication, user_arbitration} 且为事实矛盾剔除时，verdict 取 Rejected，并在下一行追加 `- Rejection reason: factual_error`
 - **[Orchestrator Detection at R{M}]** Status changed to: Overturned   # 仅当后续轮次推翻时追加
