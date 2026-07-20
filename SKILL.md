@@ -353,6 +353,8 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 
 **角色边界**：传话编排中 orchestrator 的「纠偏」限定为**指出偏差并要求对方修正**，**不含直接修改产物**（宪法 #7 在落地阶段同样适用，C-21(b) 已有明文）。若偏差需要改产物，仍须 **spawn executor**。Orchestrator **不得直接修改**产物文件。
 
+**振荡裁判**：orchestrator 对每次转发追加一条 relay-ledger 记录。每 `relay_oscillation_interval` 轮（默认 3），spawn 一个一次性「振荡裁判」agent——**输入仅为 relay-ledger**，**输出仅为 Type O/R/F/S 的枚举判定**。orchestrator 只负责 spawn 与转发判定结果，**保持沉默**——不自行做语义判定。该 spawn 记入现有 gate ledger，落在 `total_safety`（1.5）的余量内，不单列新预算 scope。
+
 ---
 
 > Orchestrator 不可让渡的行为边界详见 `CONSTITUTION.md` 第二部。
@@ -407,6 +409,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `total_safety` | 1.5 | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
+| `relay_oscillation_interval` | 3 | 传话编排下振荡裁判的触发间隔（轮）。每 N 轮 spawn 一次性裁判 agent，输入仅 relay-ledger |
 
 [^mbr]: 普通 converge 的真实默认为 `1`（`scripts/budget_gate.py` DEFAULTS）。**ultraverge 在初始化时经 config 覆盖回写 `max_blind_rechecks=2`**（写入 `_budget-state.json` 的 config，纯 orchestrator 行为、零代码）。
 

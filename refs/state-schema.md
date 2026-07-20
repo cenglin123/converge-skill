@@ -92,6 +92,50 @@ generated_at: <ISO datetime>
 
 ---
 
+## relay-ledger（`relay-ledger.md`）
+
+> 传话编排（relay orchestration）的**转发事件日志**。放在收敛对象目录下（`active/<slug>/`），与 `attempts.md`、`_orchestrator-state.md` 同级。
+
+**硬约束**：
+
+1. **append-only，不改写**——与 `attempts.md` 的「历史 entry 不改写，只追加 annotation」同源
+2. 每条记录对应一次 orchestrator 转发事件
+
+**字段**：
+
+| 字段 | 说明 |
+|------|------|
+| 发送方 | `executor` / `reviewer` — 本轮产物的发出方 |
+| 轮次 | 当前传话轮次（从 1 起） |
+| 产物路径 | 转发产物的文件路径 |
+| 内容 hash | 产物内容 SHA-256（64 位小写 hex） |
+| 结论摘要 | 本轮结论的一句话摘要 |
+
+**与 `attempts.md` 的职责区分**（收敛后设计审查 DR5 明确结论）：
+- `relay-ledger.md` 记**转发事件**——orchestrator 在 executor 与 reviewer 之间每完成一次转发，追加一条记录
+- `attempts.md` 记**修复尝试**——executor 每完成一次修复，追加一条 entry
+- 二者**不冗余**：relay-ledger 侧重编排层的时序与完整性，attempts.md 侧重修复层的因果与归因
+
+**记录样例**：
+
+```markdown
+## Round 1 · executor → reviewer
+- 发送方: executor
+- 轮次: 1
+- 产物路径: src/plan.md
+- 内容 hash: a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+- 结论摘要: executor 按 reviewer R1 阻断清单完成 3 项修复，产物已更新
+
+## Round 2 · reviewer → executor
+- 发送方: reviewer
+- 轮次: 2
+- 产物路径: src/plan.md
+- 内容 hash: b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890ab
+- 结论摘要: reviewer 发现 1 项遗留阻断，需 executor 修复
+```
+
+---
+
 ## 三、Orchestrator State（`_orchestrator-state.md`）
 
 > 抗 compact / 抗 session 切换的根本机制。每个收敛对象目录下一份。
