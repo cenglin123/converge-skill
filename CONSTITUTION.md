@@ -67,6 +67,8 @@
 - `refs/contract-negotiation.md` — Round 0 合同谈判协议（定义 Reviewer/Executor 行为边界）
 - `refs/decomposition-protocol.md` — 层级收敛协议（定义系统架构级约束）
 - `refs/design-review-prompt.md` — 设计审查 prompt 模板（Reviewer 行为定义）
+- `refs/executor-discipline.md` — Executor 纪律文档
+- `refs/reviewer-discipline.md` — Reviewer 纪律文档
 
 以下文件不受宪法保护：
 
