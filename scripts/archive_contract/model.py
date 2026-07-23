@@ -55,6 +55,45 @@ PROVENANCE_MATRIX = {
 }
 
 
+def canonical_round(value: Any) -> int | None:
+    """Single canonical Round 0 representation, reused by ledger (`budget_gate.py` reserve),
+    invocation capture (`begin_invocation`), and this module's own event schema (`round` must
+    be null or a positive integer, see `EVENT_FIELDS`/`validate_event`). Round 0 (no round /
+    contract-negotiation phase) is represented as ``None`` everywhere; a literal ``0`` is
+    accepted as an alias here and normalized to ``None`` so no caller (ledger or invocation)
+    ever persists a literal 0 — closing the "one place writes 0, one place requires null" gap.
+    Any other non-null, non-positive-int input is rejected.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("round must be null or a non-negative integer")
+    return None if value == 0 else value
+
+
+def validate_reviewer_verdict_authority(events: list[dict[str, Any]], decision: dict[str, Any]) -> None:
+    """Shared reviewer-verdict authority check.
+
+    Reused at two points: (1) early, inside `capture.record_terminal_decision`, **before** the
+    terminal-decision fact is ever persisted — so a role outside `REVIEWER_AUTHORITIES` for the
+    claimed `review_kind` (e.g. `l2-gate-reviewer`, an advisory-only Dynamic Workflows gate per
+    `refs/quality-gate.md` — it never appears in `REVIEWER_AUTHORITIES`) is refused *before* it
+    can be registered as a terminal decision owner, not only detected later when the archive is
+    checked; and (2) at archive-time inside `validate_event_graph`, as a structural re-check over
+    the full closed event graph. Both call sites must reject the exact same set of illegal facts.
+    """
+    by_id = {e["event_id"]: e for e in events}
+    terminal = by_id.get(decision.get("reviewer_event_id"))
+    if not terminal or terminal.get("event_type") != "invocation-terminal" or terminal.get("terminal_status") != "succeeded":
+        raise ArchiveError("decision-reviewer-ref", "Final reviewer verdict does not reference a successful invocation terminal.", "evidence/events")
+    started = by_id.get(terminal.get("started_event_id"))
+    allowed_roles = REVIEWER_AUTHORITIES.get(decision.get("review_kind"), frozenset())
+    if not started or started.get("invocation_kind") != "spawn" or started.get("role") not in allowed_roles:
+        raise ArchiveError("decision-reviewer-authority", "Final verdict owner is not an authorized fresh reviewer Spawn.", "evidence/events")
+    if decision.get("verdict_output_ref") != terminal.get("event_id") or not terminal.get("output_evidence"):
+        raise ArchiveError("decision-output-binding", "Reviewer verdict does not bind the referenced invocation output.", "evidence/events")
+
+
 def owner_process_liveness(pid: int) -> str:
     """Non-signalling owner probe; unknown callers must fail closed."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid < 1:
@@ -719,15 +758,7 @@ def validate_event_graph(events: list[dict[str, Any]]) -> None:
             raise ArchiveError("decision-chain", "Terminal decisions must form one append-only supersession chain.", "evidence/events")
         previous = decision["event_id"]
         if decision["decision_type"] == "reviewer-verdict":
-            terminal = by_id.get(decision["reviewer_event_id"])
-            if not terminal or terminal.get("event_type") != "invocation-terminal" or terminal.get("terminal_status") != "succeeded":
-                raise ArchiveError("decision-reviewer-ref", "Final reviewer verdict does not reference a successful invocation terminal.", "evidence/events")
-            started = by_id.get(terminal["started_event_id"])
-            allowed_roles = REVIEWER_AUTHORITIES[decision["review_kind"]]
-            if not started or started.get("invocation_kind") != "spawn" or started.get("role") not in allowed_roles:
-                raise ArchiveError("decision-reviewer-authority", "Final verdict owner is not an authorized fresh reviewer Spawn.", "evidence/events")
-            if decision["verdict_output_ref"] != terminal["event_id"] or not terminal.get("output_evidence"):
-                raise ArchiveError("decision-output-binding", "Reviewer verdict does not bind the referenced invocation output.", "evidence/events")
+            validate_reviewer_verdict_authority(events, decision)
         else:
             prior = [e for e in events if e["sequence"] < decision["sequence"]]
             message = by_id.get(decision["source_ref"])

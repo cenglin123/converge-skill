@@ -680,6 +680,151 @@ class ArchiveContractTests(unittest.TestCase):
         self.assertTrue((reopened / ".reopen-state.json").exists())
         self.assertFalse((done / "case").exists())
 
+    # ---- plan Phase1 step1: 调用前阻止越权角色被登记为 terminal owner -------------------
+    def test_l2_gate_reviewer_rejected_before_persist_by_record_terminal_decision(self):
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+        from archive_contract.model import ArchiveError
+
+        self._append_ledger_pair("r1", 1, "l2-1")
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="l2-gate-reviewer", phase="gate",
+            round_number=1, attempt=1, reservation_id="r1", requested_provider=None, requested_model=None,
+        )
+        terminal = complete_invocation(
+            self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="l2-1", receipt="receipt-l2", evidence_level="unavailable",
+            resolution_source="none", resolution_reason_code="backend-does-not-expose",
+            output_bytes=b"gate_findings: []\n",
+        )
+        events_before = len(list((self.active / "evidence" / "events").glob("*.json")))
+        with self.assertRaises(ArchiveError) as caught:
+            record_terminal_decision(self.active, {
+                "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+                "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+            })
+        # l2-gate-reviewer 不在 REVIEWER_AUTHORITIES["fresh"] 中——门控角色不能被登记为终局 owner。
+        self.assertEqual(caught.exception.code, "decision-reviewer-authority")
+        # 关键：这个事实在写入**之前**就被拒绝——ledger 上事件数不应增加。
+        events_after = len(list((self.active / "evidence" / "events").glob("*.json")))
+        self.assertEqual(events_before, events_after)
+
+    def test_outer_reviewer_accepted_by_record_terminal_decision(self):
+        # 正对照：outer-reviewer 在 REVIEWER_AUTHORITIES["fresh"] 内，应被正常接受并落盘。
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+
+        self._append_ledger_pair("r1", 1, "review-1")
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="outer-reviewer", phase="final-review",
+            round_number=1, attempt=1, reservation_id="r1", requested_provider=None, requested_model=None,
+        )
+        terminal = complete_invocation(
+            self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="review-1", receipt="receipt-1", evidence_level="unavailable",
+            resolution_source="none", resolution_reason_code="backend-does-not-expose",
+            output_bytes=b"verdict: executable\n",
+        )
+        decision = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+        })
+        self.assertEqual(decision["event_type"], "terminal-decision")
+        # settlement_ref 也验证了自动生成（见下方专门测试），此处只确认 complete_invocation
+        # 已经绑定了规范值，terminal owner 校验才有真实的 succeeded invocation 可引用。
+        self.assertEqual(terminal["settlement_ref"], "gate-ledger.jsonl:r1")
+
+    # ---- plan Phase1 step2: Round 0 单一规范表示 --------------------------------------
+    def test_begin_invocation_round_zero_normalized_to_null(self):
+        from archive_contract.capture import begin_invocation
+
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="contract-proposer", phase="round-0-propose",
+            round_number=0, attempt=1, reservation_id="r0", requested_provider=None, requested_model=None,
+        )
+        self.assertIsNone(started["round"])   # 字面 0 被归一化为 null，与 budget_gate 的 canonical_round 一致
+
+    def test_begin_invocation_negative_round_rejected(self):
+        from archive_contract.capture import begin_invocation
+        from archive_contract.model import ArchiveError
+
+        with self.assertRaises(ArchiveError) as caught:
+            begin_invocation(
+                self.active, invocation_kind="spawn", role="contract-proposer", phase="round-0-propose",
+                round_number=-1, attempt=1, reservation_id="r0", requested_provider=None, requested_model=None,
+            )
+        self.assertEqual(caught.exception.code, "invocation-round")
+
+    # ---- plan Phase1 step3: settlement_ref 自动生成 ------------------------------------
+    def test_complete_invocation_auto_generates_canonical_settlement_ref(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="reviewer", phase="review",
+            round_number=1, attempt=1, reservation_id="r9", requested_provider=None, requested_model=None,
+        )
+        terminal = complete_invocation(
+            self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="i9", receipt="p9", evidence_level="unavailable",
+            resolution_source="none", resolution_reason_code="backend-does-not-expose",
+            output_bytes=b"ok",
+        )   # settlement_ref 未传——调用方不得手拼
+        self.assertEqual(terminal["settlement_ref"], "gate-ledger.jsonl:r9")
+
+    def test_complete_invocation_explicit_settlement_ref_override_kept(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="reviewer", phase="review",
+            round_number=1, attempt=1, reservation_id="r10", requested_provider=None, requested_model=None,
+        )
+        terminal = complete_invocation(
+            self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="i10", receipt="p10", settlement_ref="custom-ref-1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok",
+        )
+        self.assertEqual(terminal["settlement_ref"], "custom-ref-1")   # 显式覆盖保留，不强制改写为规范值
+
+    def test_complete_invocation_settlement_ref_format_rejected(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import ArchiveError
+
+        started = begin_invocation(
+            self.active, invocation_kind="spawn", role="reviewer", phase="review",
+            round_number=1, attempt=1, reservation_id="r11", requested_provider=None, requested_model=None,
+        )
+        with self.assertRaises(ArchiveError) as caught:
+            complete_invocation(
+                self.active, started["invocation_id"], terminal_status="succeeded",
+                instance_id="i11", receipt="p11", settlement_ref="",   # 空串，格式非法
+                evidence_level="unavailable", resolution_source="none",
+                resolution_reason_code="backend-does-not-expose", output_bytes=b"ok",
+            )
+        self.assertEqual(caught.exception.code, "settlement-ref-format")
+
+    def test_continue_invocation_settlement_ref_stays_none_without_reservation(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+
+        spawn_start = begin_invocation(
+            self.active, invocation_kind="spawn", role="reviewer", phase="review",
+            round_number=1, attempt=1, reservation_id="r12", requested_provider=None, requested_model=None,
+        )
+        spawn_terminal = complete_invocation(
+            self.active, spawn_start["invocation_id"], terminal_status="succeeded",
+            instance_id="i12", settlement_ref="gate-ledger.jsonl:r12", evidence_level="unavailable",
+            resolution_source="none", resolution_reason_code="backend-does-not-expose", output_bytes=b"ok",
+        )
+        cont_start = begin_invocation(
+            self.active, invocation_kind="continue", role="reviewer", phase="inner",
+            round_number=1, attempt=2, parent_event_id=spawn_start["event_id"],
+            requested_provider=None, requested_model=None,
+        )
+        cont_terminal = complete_invocation(
+            self.active, cont_start["invocation_id"], terminal_status="succeeded",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok2",
+        )   # continue 没有 reservation_id → 无可自动生成的规范值，settlement_ref 保持 None（既有语义不变）
+        self.assertIsNone(cont_terminal["settlement_ref"])
+
     @staticmethod
     def _evidence(data):
         import hashlib

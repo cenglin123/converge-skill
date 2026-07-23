@@ -16,7 +16,13 @@
 
 terminal status 为 `succeeded|failed|cancelled|timeout`；仅 succeeded 必须有 output evidence。失败 reason 为 `backend-error|cancelled-by-host|timeout|process-interrupted`。terminal decision 是闭合联合：`reviewer-verdict` 只引用成功 fresh/blank-slate Reviewer terminal；`user-decision` 只用于 terminal-b/c，必须含 `user_quote/source_ref/presented_degradations/accepted_state`。`design-review-completion` 是 advisory，禁止出现在 `final_verdict_ref`。最终 round 与 retrospective 必须反向引用同一 decision event id/value。
 
+`reviewer-verdict` 的 owner 授权（`REVIEWER_AUTHORITIES`：`fresh={reviewer,outer-reviewer,ultraverge-initial}`、`blank-slate={blank-slate-reviewer,blind-reviewer}`）由 `model.validate_reviewer_verdict_authority()` 统一实现，且在**两处**调用同一函数：`capture.record_terminal_decision`（写入前，越权角色的事实**不会被持久化**）与 `model.validate_event_graph`（归档时的结构化复核）。一个角色不在任一列表内（例如 `l2-gate-reviewer`——`refs/quality-gate.md` 定义的 "L2 重量级" Reviewer，对应 `scripts/budget_gate.py` `ROLE_CONSUMES` 的字面角色名 `l2-gate-reviewer`；consumes=none，是设计选择而非遗漏：门控"不否决不阻断"，只产出 `gate_findings`，绝不能登记为终局 owner）永远不能通过 `record_terminal_decision` 落盘为 reviewer-verdict 的 `reviewer_event_id`。
+
+Round 表示由 `model.canonical_round()` 单点归一化：`round` 字段只有 `null`（Round 0 / 无轮次）或正整数两种合法值；调用方传入字面 `0` 会被这个函数自动归一化为 `null`——`budget_gate.py` 的 `cmd_reserve`（ledger `target_round`）与 `capture.begin_invocation`（invocation `round`）都调用同一个 `canonical_round()`，不允许一处写 `0`、一处要求 `null`。
+
 requested provenance 字段为 `requested_provider/requested_model`；resolved 字段为 `resolved_provider/resolved_model/resolved_family/backend/backend_version`。`evidence_level=observed|host-reported|configured|inherited|unavailable`，`resolution_source=host_receipt|tool_response|cli_argument|agent_config|parent_instance|none`。configured/inherited 不得带 resolved model。partial/unavailable reason 仅允许 `backend-does-not-expose|receipt-missing|inherited-concrete-model-hidden|invocation-failed-before-resolution`。
+
+`settlement_ref`（`invocation-terminal` 字段）由 `capture.complete_invocation` 自动生成规范值 `gate-ledger.jsonl:<reservation_id>`——仅当调用方**未显式传入** `settlement_ref` 且该 invocation 是持有 `reservation_id` 的 spawn 时触发；调用方仍可显式传入覆盖值（走基本格式校验：非空、有界字符串），但**不再需要**为常见路径手拼规范值。Continue（无 reservation）不受影响，`settlement_ref` 保持 `None`，语义不变。`gate-ledger.jsonl` 侧的 `ledger-settlement-ref` 交叉校验（archive 时）不变——若显式覆盖值与对应 reservation 不一致，仍会在 `validate_ledger` 处被拒绝。
 
 ### Evidence 与路径
 
@@ -352,30 +358,38 @@ status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard
 
 ```jsonc
 // reserved —— 必填：event, reservation_id(非空串), ts(ISO), target_role(∈ROLE_CONSUMES),
-//   consumes(== ROLE_CONSUMES[target_role], ∈{outer,blind,ultraverge,none}),
-//   counts_before 与 ceilings(均为含 outer/blind/ultraverge/total 四键的 int dict),
+//   consumes(== ROLE_CONSUMES[target_role], ∈{outer,blind,ultraverge,none,task-envelope}),
+//   counts_before 与 ceilings(均为**至少**含 outer/blind/ultraverge/total 四键的 int dict；
+//   仅当任务档已配置——见下方"任务档预算"——时，两个 dict 才额外携带 task-envelope 键，
+//   若出现须为 int；未配置任务档时两个 dict 恰好四键，与改造前完全一致，A8 向后兼容),
 //   tier(∈{enforced,auditable-only})——ledger 记录字段，gate 不按此值改变裁决逻辑；
 //   guarded 模式的 ledger tier 仍为 auditable-only，guarded 状态存于独立 binding 的 mode=best-effort-guarded；
 //   tier=enforced 保留给未来真正 enforced。consuming(outer/blind/ultraverge)时 target_round 须为正整数；
-//   extension_id 为 非空串或 null。
+//   consumes=none/task-envelope 时 target_round 须为 null 或正整数（不接受字面 0，见上文
+//   canonical_round——cmd_reserve 已在写入前把调用方传入的 0 归一化为 null，本处校验属防御性
+//   fail-closed，只在有人绕过 CLI 直接注入 ledger 时才会触发）；extension_id 为 非空串或 null。
 {"event":"reserved","reservation_id":"<session>:<tool_use>","ts":"<ISO>",
- "target_round":N,"target_role":"...","consumes":"outer|blind|ultraverge|none",
+ "target_round":N,"target_role":"...","consumes":"outer|blind|ultraverge|none|task-envelope",
  "counts_before":{"outer":..,"blind":..,"ultraverge":..,"total":..},
  "ceilings":{"outer":..,"blind":..,"ultraverge":..,"total":..},
  "extension_id":"<或 null>","tier":"enforced|auditable-only"}
 // spawn_succeeded —— 必填：reservation_id, ts(ISO), instance_id(非空串)。
 {"event":"spawn_succeeded","reservation_id":"..","ts":"..","instance_id":".."}
-// spawn_failed —— 必填：reservation_id, ts；reason 可选(若有须为串)。
-{"event":"spawn_failed","reservation_id":"..","ts":"..","reason":".."}
+// spawn_failed —— 必填：reservation_id, ts；reason 可选(若有须为串)；pre_execution 可选
+//   (若有须为 bool，默认视为 false)——true 表示启动前失败/CLI 参数错误（模型从未被真正
+//   调用），false（默认）表示模型确已被调用、只是调用后失败。用于双计数模型（见下）区分
+//   attempted_dispatch 与 model_invocation。
+{"event":"spawn_failed","reservation_id":"..","ts":"..","reason":"..","pre_execution":true|false}
 // cancelled —— 必填：reservation_id, ts；pre_execution 须为 bool(默认 false)；reason 可选。
 {"event":"cancelled","reservation_id":"..","ts":"..","pre_execution":true|false,"reason":".."}
 // decision —— 必填：decision_event_id(非空串), ts(ISO),
 //   verdict ∈ {MODE_SWITCH_REQUIRED, BLOCK:{budget|blind|ultraverge}_exhausted, BLOCK:total_spawn_cap,
-//              DENY:{unknown|illegal}_role, FAIL_CLOSED:<reason>}（闭合枚举，非法值如 "BANANA" → fail-closed）；
-//   scope ∈ {outer,blind,ultraverge,total,null}；BLOCK 系决策 scope 非 null 且 observed_usage/effective_ceiling 为 int；
+//              BLOCK:task_envelope_exhausted, DENY:{unknown|illegal}_role, FAIL_CLOSED:<reason>}
+//              （闭合枚举，非法值如 "BANANA" → fail-closed）；
+//   scope ∈ {outer,blind,ultraverge,total,task-envelope,null}；BLOCK 系决策 scope 非 null 且 observed_usage/effective_ceiling 为 int；
 //   **非 BLOCK 决策（DENY/FAIL_CLOSED/MODE_SWITCH）须 scope=null 且 observed_usage=null 且 effective_ceiling=null（三字段均须显式存在为 null）**。
 {"event":"decision","decision_event_id":"<id>","ts":"..","verdict":"...",
- "scope":"outer|blind|ultraverge|total|null","observed_usage":<int|null>,"effective_ceiling":<int|null>}
+ "scope":"outer|blind|ultraverge|total|task-envelope|null","observed_usage":<int|null>,"effective_ceiling":<int|null>}
 ```
 
 - **仅追加，永不改写**（同 attempts.md 硬约束）。spawn 结果不回填 reserved 事件，而是追加新事件引用 `reservation_id`。
@@ -386,25 +400,76 @@ status 由 `distill_antipatterns.py` 的 `--rules` 模式按阈值计算（guard
 ```jsonc
 {"config": {"max_outer_loops":5, ...},          // 仅放需覆盖默认的项；int 参数须为 int 否则 fail-closed
  "extensions": [                                  // 仅追加链；新记录写 supersedes，旧记录不可改
-   {"extension_id":"<id>","ts":"..","scope":"outer|blind|ultraverge|total",
+   {"extension_id":"<id>","ts":"..","scope":"outer|blind|ultraverge|total|task-envelope",
     "triggering_block_event_id":"<对应 decision 事件 id>",
     "granted_at_usage":<int>,"prior_ceiling":<int>,"new_ceiling":<int>,
     "supersedes":"<旧 id 或 null>","user_quote":"<用户原话>"}],
  "fsm": {"mode":"standard|ultraverge","severities":{"<round>":["implementation",...]}}}
 ```
 
-**extension 校验（违反 → FAIL_CLOSED）**：`triggering_block_event_id` 指向真实 BLOCK decision；`scope`/`granted_at_usage`/`prior_ceiling` 与该 decision 的 `scope`/`observed_usage`/`effective_ceiling` 一致；同 scope `supersedes` 为线性链（无分叉/环/多头）；`new_ceiling` 单调递增且 `> prior_ceiling`；取代旧记录时 `prior_ceiling == 被取代记录.new_ceiling`（链衔接）。`user_quote` 是人类可审计凭据，**不**机械证明来自用户。
+**extension 校验（违反 → FAIL_CLOSED）**：`triggering_block_event_id` 指向真实 BLOCK decision；`scope`/`granted_at_usage`/`prior_ceiling` 与该 decision 的 `scope`/`observed_usage`/`effective_ceiling` 一致；同 scope `supersedes` 为线性链（无分叉/环/多头）；`new_ceiling` 单调递增且 `> prior_ceiling`；取代旧记录时 `prior_ceiling == 被取代记录.new_ceiling`（链衔接）。`user_quote` 是人类可审计凭据，**不**机械证明来自用户。`scope="task-envelope"` 额外要求 `new_ceiling` 不得超过该任务档的一次性授权上限（`task_envelope_cap` 或 `TASK_TIERS[task_tier]["cap"]`）——这是 task-envelope 独有的约束，outer/blind/ultraverge/total 的 extension 无此上限（只要求单调递增）。
+
+### 角色对照表（`ROLE_CONSUMES`，`scripts/budget_gate.py` 单一权威源）
+
+| `target_role` | consumes | 对应机制/文档 | 终局 owner 资格（`REVIEWER_AUTHORITIES`） |
+|---|---|---|---|
+| `outer-reviewer` | outer | 主循环 Reviewer（`refs/reviewer-prompt.md`） | fresh |
+| `blind-reviewer` | blind | 盲审复核 | blank-slate |
+| `ultraverge-initial` | ultraverge | ultraverge 初审 | fresh |
+| `executor` | none | Executor | 不适用（非 reviewer） |
+| `contract-proposer`/`contract-challenger`/`contract-finalizer` | none | Round 0 合同谈判（`refs/contract-negotiation.md`） | 不适用 |
+| `arbiter` | none | 仲裁 | 不适用 |
+| `l2-gate-reviewer` | none | **`refs/quality-gate.md` "L2 重量级" Reviewer**（该文档只用 "L2 Reviewer" 散文名，二者是同一机制） | **无**——不在 `REVIEWER_AUTHORITIES` 任一列表内；`capture.record_terminal_decision` 在**写入前**拒绝将其登记为 reviewer-verdict owner（见上文）。设计选择：门控"不否决不阻断"，只产出 `gate_findings`（advisory） |
+| `design-reviewer` | none | 设计审查（`refs/design-review-prompt.md`） | 不适用（advisory，独立的 `design-review-completion` 事件类型，非 terminal-decision） |
+| `task-envelope` | task-envelope | 任务级总信封（见下）——不是真正的 "Spawn 角色"，是复用 reserve/settle 框架的粗粒度计量入口 | 不适用 |
+
+`reviewer`（`REVIEWER_AUTHORITIES.fresh` 的字面角色名之一，供未纳入 outer/ultraverge 计数的通用 fresh reviewer 使用）与 `outer-reviewer` 均可作终局 owner；两者不是同一角色，只是都落在 `fresh` 授权集合内。
+
+### 任务档预算 / task-envelope scope（plan `20260724-OCSR-converge薄编排与成本控制修复.md` §6.1/§6.2/§6.3）
+
+四档任务预算是 converge 既有 spawn 预算（本节其余部分描述的 outer/blind/ultraverge/total）的**上层信封**——按任务级 OCSR 调用总量计量，维度更粗、跨度更大，不替换、不重复实现 per-scope reserve/settle。实现为**新增一个并行 scope**：`consumes="task-envelope"`，通过 `--role task-envelope` 触发，复用完全相同的 reserve/settle/extension 机制。
+
+- **四档默认值**（`budget_gate.py` 的 `TASK_TIERS`）：
+
+  | 任务档 | 初始额度（ceiling 默认值） | 一次性授权上限（extension 硬顶） |
+  |---|---:|---:|
+  | small | 4 | 8 |
+  | medium | 8 | 16 |
+  | feature | 16 | 24 |
+  | critical / critical/ultraverge | 20 | 30 |
+
+  配置方式：`config.task_tier` 设为上表档名之一；或用 `config.task_envelope_initial`/`config.task_envelope_cap` 直接覆盖具体数值（`cap` 须 `>= initial`，否则 fail-closed）。
+- **未配置行为**：`config` 中既无 `task_tier` 也无 `task_envelope_cap` 时，`reserve --role task-envelope` 直接 `FAIL_CLOSED:task_envelope_not_configured`；**其它任何角色的 reserve/settle 行为与改造前逐字节一致**（counts_before/ceilings 不出现 `task-envelope` 键）——这是 A8 向后兼容的机制保证，不依赖调用方记得"不要用这个新功能"。
+- **与 total 的正交性**：task-envelope 的 reserve **不**计入、也**不**受 `total_reservations_issued`/`ceiling(state,"total")` 约束（`total_reservations_issued()` 显式排除 `consumes=="task-envelope"` 的 reservation）——两者是完全独立的计量维度，双方互不挤占对方的预算空间。
+- **计量方式**：task-envelope 没有对应的文件产物（不像 outer/blind/ultraverge 有 `round-N.md` 等），因此不用 `realized()+pending()` 模型，而是用 `scope_reservations_issued(events, "task-envelope")`——与 `total_reservations_issued` 同构的单调计数（settled 的 succeeded/failed 都计入，仅 `pre_execution=true` 的 cancelled 不计）。
+- **BLOCK 语义（design-review highlight #3 已定案）**：信封触发 `BLOCK:task_envelope_exhausted` 时，只阻止**新的** `reserve` 调用；已经 `reserve` 成功、处于 in-flight（pending，尚未 settle）状态的动作允许正常 `settle` 完成——`settle()` 本身从不检查预算（reserve/settle 分离是既有设计，BLOCK 只发生在 reserve 侧），故该语义无需额外代码即天然成立，本节只是显式记录这一点供后续实现/审查引用。
 
 ### 计数模型（确定性，脚本实现）
 
 ```text
 realized(s) = 产物文件数  (outer: round-N.md / blind: blind-recheck-N.md / ultraverge: uv-init-N.md)
 pending(s)  = consumes=s、未 failed/cancelled、且产物未落成的 reservation 数
-effective_usage(s) = realized(s) + pending(s)                          # 可释放
-total_reservations_issued = 单调累计的不同 reservation_id（failed 不释放；仅 pre_execution cancelled 不计）
+effective_usage(s) = realized(s) + pending(s)                          # 可释放，仅 outer/blind/ultraverge 使用
+total_reservations_issued = 单调累计的不同 reservation_id，**不含 task-envelope**
+                            （failed 不释放；仅 pre_execution cancelled 不计）
+scope_reservations_issued(s) = 单调累计的、consumes=s 的 reservation_id（口径同 total_reservations_issued，
+                                但按 scope 过滤）——task-envelope 用此口径而非 effective_usage
 reserve PROCEED iff total_reservations_issued < max_total_reserved_spawns AND effective_usage(s) < ceiling(s)
+                    （task-envelope 的判据是 scope_reservations_issued("task-envelope") < ceiling(state,"task-envelope")，
+                     且完全不参与 total_reservations_issued 的判据）
 ```
 
-裁决优先级：`FAIL_CLOSED`(30) > `DENY`(21/22) > `BLOCK`(10/11/12/13) > `MODE_SWITCH_REQUIRED`(20) > `PROCEED`(0)。`max_total_reserved_spawns` 默认 = `ceil(total_safety×[3+max_ultraverge_initial+max_outer_loops×(1+max_inner_loops)+max_blind_rechecks+1])`。
+**双计数模型（`attempted_dispatch` vs `model_invocation`，plan Phase1 step4）**：
+
+```text
+attempted_dispatch(s)  = 已 settle 且非(pre_execution cancelled) 的 reservation 数
+                          ——含启动前失败/CLI 错误（spawn_failed 且 pre_execution=true）
+model_invocation(s)    = spawn_succeeded 数 + (spawn_failed 且 pre_execution=false) 数
+                          ——只计真正发生过的模型调用，不含从未真正调用模型的失败/取消
+```
+
+两者由 `budget_gate.py summary --active-dir <active>` 命令输出（全局汇总 + 按 scope 拆分的 JSON），每次调用从 ledger 全量重算，不依赖缓存（幂等，同条款2）。
+
+裁决优先级：`FAIL_CLOSED`(30) > `DENY`(21/22) > `BLOCK`(10/11/12/13/14) > `MODE_SWITCH_REQUIRED`(20) > `PROCEED`(0)。`max_total_reserved_spawns` 默认 = `ceil(total_safety×[3+max_ultraverge_initial+max_outer_loops×(1+max_inner_loops)+max_blind_rechecks+1])`。exit code 14 = `BLOCK:task_envelope_exhausted`。
 
 > **tier 说明**：上述脚本是 host-independent core（auditable-only 完整可用）。`best-effort guarded`（= hook-blocked auditable-only）的 PreToolUse 总量硬上限 hook 已在 Claude Code 落地（PostToolUse settle 不存在）；其 ledger `tier` 仍为 `auditable-only`，guarded 状态独立存于 binding 的 `mode=best-effort-guarded`。true `enforced`（角色 FSM + 角色不可伪造 + 权限锁定）仍 deferred（升级要件见 `refs/framework-adapters.md` §A.1）。`budget_gate` 的 rule_frequency 触发检测方式：ledger 中出现 `decision` 事件即 triggered。

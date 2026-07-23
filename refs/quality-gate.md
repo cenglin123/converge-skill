@@ -79,6 +79,8 @@
 
 ### L2 重量级（单轮对抗审查，按需）
 
+> **角色名对照**：本节的 "L2 Reviewer" 对应 `scripts/budget_gate.py` `ROLE_CONSUMES` 的字面角色名 `l2-gate-reviewer`（`consumes=none`，不占用 outer/blind/ultraverge 预算）。Spawn 该 Reviewer 时按 `refs/orchestrator-guide.md` 的既有 reserve 约定调用 `budget_gate.py reserve --role l2-gate-reviewer ...`。该角色**不在** `scripts/archive_contract/model.py` 的 `REVIEWER_AUTHORITIES` 任一列表内，机制层面（`capture.record_terminal_decision`，写入前拒绝）与文档层面（本节"门控不是审批者"）双重保证它永远不能被登记为 terminal decision 的 owner——它只产出下方 `gate_findings`，不产生也不能产生 `verdict`/`terminal-decision`。完整角色对照表见 `refs/state-schema.md` §预算 gate 「角色对照表」。
+
 **做什么**：Spawn 独立 Reviewer，按 converge 标准做一轮深度审查。审查对象是当前 phase 的中间产物 + 收口模型的综合判断。不跑完整多轮 converge——太重。跑一轮快审。
 
 **触发条件**（优先级递降）：

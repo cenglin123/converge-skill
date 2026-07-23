@@ -17,12 +17,30 @@ from .model import (
     ROOT_FIXED, ROUND_RE, ensure_safe_root, ensure_safe_tree, normalize_relative, sha256_size, strict_json_bytes,
     validate_event,
     validate_identifier,
+    validate_reviewer_verdict_authority,
+    canonical_round,
     owner_process_liveness,
 )
 
 DEFAULT_FILE_LIMIT = 16 * 1024 * 1024
 DEFAULT_TOTAL_LIMIT = 64 * 1024 * 1024
 SECRET_NAMES = frozenset({".env", ".netrc", "id_rsa", "id_ed25519", "credentials", "credentials.json"})
+LEDGER_FILENAME = "gate-ledger.jsonl"
+
+
+def _canonical_settlement_ref(reservation_id: str) -> str:
+    return f"{LEDGER_FILENAME}:{reservation_id}"
+
+
+def _validate_settlement_ref_format(value: Any) -> None:
+    """Format check for an explicit `--settlement-ref` override. Callers may still override
+    (e.g. legacy/bootstrap flows), but the value must at least be a well-formed bounded string —
+    the same shape `validate_event`'s `_text(...)` enforces downstream. This does not force the
+    override to equal the canonical `gate-ledger.jsonl:<reservation_id>` value (that stronger
+    cross-check already exists at archive time in `model.validate_ledger`); it only rejects
+    obviously malformed hand-typed input early, at capture time."""
+    if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
+        raise ArchiveError("settlement-ref-format", "Settlement reference must be a bounded non-empty string.", "evidence/events")
 
 
 _owner_process_liveness = owner_process_liveness
@@ -190,6 +208,10 @@ def begin_invocation(root: Path, *, invocation_kind: str, role: str, phase: str,
         raise ArchiveError("evidence-mode", "Unsupported evidence mode.")
     if invocation_kind not in ("spawn", "continue") or not isinstance(role, str) or not role or not isinstance(phase, str) or not phase:
         raise ArchiveError("invocation-input", "Invocation kind, role, and phase are invalid.")
+    try:
+        round_number = canonical_round(round_number)
+    except ValueError as exc:
+        raise ArchiveError("invocation-round", "Invocation round must be null or a positive integer.") from exc
     if invocation_kind == "spawn" and not reservation_id:
         raise ArchiveError("spawn-reservation-required", "Every Spawn requires a budget reservation before capture.")
     if invocation_kind == "continue" and (not parent_event_id or reservation_id is not None):
@@ -256,6 +278,15 @@ def complete_invocation(root: Path, invocation_id: str, *, terminal_status: str,
     if output_path is not None:
         output_bytes = _read_regular_file(output_path)
     started = _find_started(root, invocation_id)
+    if settlement_ref is None:
+        # settlement_ref 由 API 自动生成规范值——调用方不得手拼（plan Phase1 step3）。仅当
+        # started invocation 绑定了 reservation_id（即 spawn，非 continue）时才有对应 ledger
+        # 记录可引用；continue 没有 reservation，settlement_ref 保持 None（既有语义不变）。
+        rid = started.get("reservation_id")
+        if rid:
+            settlement_ref = _canonical_settlement_ref(rid)
+    else:
+        _validate_settlement_ref_format(settlement_ref)
     if terminal_status not in TERMINAL_STATUSES or evidence_level not in EVIDENCE_LEVELS or resolution_source not in RESOLUTION_SOURCES:
         raise ArchiveError("terminal-enum", "Terminal or provenance enum is invalid.")
     if evidence_mode not in EVIDENCE_MODES:
@@ -374,9 +405,16 @@ def capture_artifact(root: Path, source: Path, *, artifact_id: str, revision_id:
 
 
 def record_terminal_decision(root: Path, fields: dict[str, Any]) -> dict[str, Any]:
+    root = Path(root)
     values = {"event_type": "terminal-decision", "generated_at": _now(), **fields}
     values.setdefault("supersedes_decision_event_id", None)
-    return append_event(Path(root), values)
+    if values.get("decision_type") == "reviewer-verdict":
+        # 调用前阻止：把 REVIEWER_AUTHORITIES 授权检查前移到落盘之前，而不是只在归档时
+        # (validate_event_graph) 才发现——一个越权角色（如 l2-gate-reviewer，只是
+        # refs/quality-gate.md 定义的 advisory 门控，从不在 REVIEWER_AUTHORITIES 中）
+        # 永远不能被登记为 terminal owner，这个事实本身都不应该被写入 ledger。
+        validate_reviewer_verdict_authority(_read_existing(root), values)
+    return append_event(root, values)
 
 
 def record_design_review_completion(root: Path, *, invocation_event_id: str,

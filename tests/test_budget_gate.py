@@ -611,5 +611,179 @@ class TestEnforcedHook(Base):
         self.assertIn("cap=44", out)             # ultraverge config 覆盖（mbr=2）
 
 
+class TestRound0Unification(Base):
+    """plan Phase1 step2：ledger 的 Round 0 表示与 archive_contract 的 invocation `round`
+    契约（null 或正整数）统一——不允许一处写字面 0、一处要求 null。"""
+
+    def test_target_round_zero_normalized_to_null(self):
+        c, out, _ = self.reserve("executor", "e1", rnd=0)   # consumes:none，CLI 传 0
+        self.assertTrue(out.startswith("PROCEED"), out)
+        reserved = [e for e in self.ledger() if e.get("event") == "reserved"][0]
+        self.assertIsNone(reserved["target_round"])          # 归一化为 null，不是字面 0
+
+    def test_target_round_zero_injected_raw_fail_closed(self):
+        # 绕过 CLI 直接在 ledger 注入字面 0（consumes:none）→ 下一次 reserve 校验时 fail-closed。
+        with (self.active / "gate-ledger.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"event": "reserved", "reservation_id": "raw0",
+                                "ts": "2026-06-19T00:00:00+00:00",
+                                "target_role": "executor", "consumes": "none",
+                                "target_round": 0}) + "\n")
+        c, out, _ = self.reserve("executor", "next")
+        self.assertTrue(out.startswith("FAIL_CLOSED:event_field:reserved.target_round"), out)
+
+    def test_negative_round_rejected(self):
+        c, out, _ = run("reserve", "--active-dir", str(self.active), "--role", "executor",
+                        "--reservation-id", "neg", "--target-round", "-1", "--tier", "auditable-only")
+        self.assertTrue(out.startswith("FAIL_CLOSED:event_field:reserved.target_round"), out)
+
+
+class TestSettlementRefAndAuthorityCrossRef(Base):
+    """plan Phase1 step1/step3 在 budget_gate 侧的可见影响：l2-gate-reviewer 角色存在但
+    consumes:none，从不参与 outer/blind/ultraverge scope 记账（archive 侧的终局 owner
+    拒绝见 tests/test_archive_convergence.py）。"""
+
+    def test_l2_gate_reviewer_reserve_does_not_consume_any_scope(self):
+        self.set_config(max_outer_loops=1)
+        c, out, _ = self.reserve("l2-gate-reviewer", "l2-1")
+        self.assertTrue(out.startswith("PROCEED"), out)
+        reserved = [e for e in self.ledger() if e.get("event") == "reserved"][0]
+        self.assertEqual(reserved["consumes"], "none")
+        # l2-gate-reviewer 消耗不影响 outer scope 的独立预算
+        c, out, _ = self.reserve("outer-reviewer", "o1", rnd=1)
+        self.assertTrue(out.startswith("PROCEED"), out)
+
+
+class TestDualCounting(Base):
+    """plan Phase1 step4：attempted_dispatch（含启动前失败/CLI 错误）与 model_invocation
+    （真实模型调用）分别计数，summary 命令可验证重算。"""
+
+    def _summary(self):
+        c, out, _ = run("summary", "--active-dir", str(self.active))
+        self.assertEqual(c, 0, out)
+        return json.loads(out)
+
+    def test_attempted_dispatch_counts_pre_execution_failures_model_invocation_does_not(self):
+        self.reserve("executor", "a")
+        self.settle("a", "succeeded", instance_id="ia")              # 真实调用成功
+        self.reserve("executor", "b")
+        self.settle("b", "failed")                                   # 真实调用后失败（pre_execution 默认 false）
+        self.reserve("executor", "c")
+        self.settle("c", "failed", pre_execution=True)                # 启动前失败/CLI 错误，从未真正调用模型
+        self.reserve("executor", "d")
+        self.settle("d", "cancelled", pre_execution=True)             # 零消耗，不计 attempted_dispatch
+
+        summary = self._summary()
+        # attempted_dispatch：a, b, c 计入（3），d（pre_execution cancelled）不计
+        self.assertEqual(summary["attempted_dispatch"], 3)
+        # model_invocation：只有 a（succeeded）与 b（failed 但非 pre_execution）计入（2）
+        self.assertEqual(summary["model_invocation"], 2)
+
+    def test_summary_is_idempotent_recompute(self):
+        self.reserve("executor", "a")
+        self.settle("a", "succeeded", instance_id="ia")
+        first = self._summary()
+        second = self._summary()
+        self.assertEqual(first, second)   # 纯重算，无缓存漂移
+
+
+class TestTaskEnvelope(Base):
+    """plan Phase1 step5：四档任务预算 + task-envelope scope（§6.1/§6.2/§6.3）。"""
+
+    def test_unconfigured_fails_closed(self):
+        c, out, _ = self.reserve("task-envelope", "t1")
+        self.assertTrue(out.startswith("FAIL_CLOSED:task_envelope_not_configured"), out)
+
+    def test_a8_fallback_unconfigured_task_never_gains_task_envelope_key(self):
+        # A8：未配置任务档时，行为与改造前完全一致——普通 reserve 的 ledger 记录不出现
+        # task-envelope 键。
+        self.reserve("executor", "e1")
+        reserved = [e for e in self.ledger() if e.get("event") == "reserved"][0]
+        self.assertNotIn("task-envelope", reserved["counts_before"])
+        self.assertNotIn("task-envelope", reserved["ceilings"])
+
+    def test_small_tier_initial_blocks_then_extension_allows_up_to_cap(self):
+        self.set_config(task_tier="small")   # initial=4, cap=8
+        ok = 0
+        for i in range(4):
+            c, out, _ = self.reserve("task-envelope", f"te{i}")
+            self.assertTrue(out.startswith("PROCEED"), out)
+            ok += 1
+        self.assertEqual(ok, 4)
+        c, out, _ = self.reserve("task-envelope", "te_blocked")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted", out)
+        d = self.last_block_decision("task-envelope")
+        self.assertIsNotNone(d)
+        # 一次性授权：直接扩到 cap=8（不需要每 2 次打断用户）
+        self.add_extension(extension_id="x1", scope="task-envelope",
+                           triggering_block_event_id=d["decision_event_id"],
+                           granted_at_usage=d["observed_usage"],
+                           prior_ceiling=d["effective_ceiling"],
+                           new_ceiling=8, supersedes=None, user_quote="一次性授权到cap")
+        for i in range(4, 8):
+            c, out, _ = self.reserve("task-envelope", f"te{i}")
+            self.assertTrue(out.startswith("PROCEED"), out)
+        c, out, _ = self.reserve("task-envelope", "te_over_cap")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted", out)
+
+    def test_extension_cannot_exceed_hard_cap(self):
+        self.set_config(task_tier="small")   # cap=8
+        ok = 0
+        for i in range(4):
+            self.reserve("task-envelope", f"te{i}")
+            ok += 1
+        c, out, _ = self.reserve("task-envelope", "te_blocked")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted", out)
+        d = self.last_block_decision("task-envelope")
+        self.add_extension(extension_id="x1", scope="task-envelope",
+                           triggering_block_event_id=d["decision_event_id"],
+                           granted_at_usage=d["observed_usage"],
+                           prior_ceiling=d["effective_ceiling"],
+                           new_ceiling=9,   # 超过 cap=8
+                           supersedes=None, user_quote="试图突破硬上限")
+        c, out, _ = self.reserve("task-envelope", "te_after")
+        self.assertTrue(out.startswith("FAIL_CLOSED"), out)
+        self.assertIn("ext_task_envelope_exceeds_cap", out)
+
+    def test_task_envelope_orthogonal_to_total_cap(self):
+        # 把 total cap 压到很小，task-envelope 的 reserve 不应受其约束、也不应消耗它。
+        self.set_config(max_outer_loops=1, max_inner_loops=0, max_blind_rechecks=0,
+                        ultraverge_min_reviewers=0, total_safety=1.0,   # total cap = 5
+                        task_tier="feature")   # initial=16, cap=24
+        for i in range(10):   # 远超 total cap=5，但 task-envelope 有自己的独立 ceiling
+            c, out, _ = self.reserve("task-envelope", f"te{i}")
+            self.assertTrue(out.startswith("PROCEED"), out)
+        # 其它角色的 total 预算仍然独立可用（未被 task-envelope 挤占）
+        c, out, _ = self.reserve("executor", "e0")
+        self.assertTrue(out.startswith("PROCEED"), out)
+
+    def test_block_stops_new_reserve_but_allows_in_flight_settle(self):
+        # design-review highlight #3：信封触发 BLOCK 时停止新 reserve、允许已 settle 动作完成。
+        self.set_config(task_tier="small")   # initial=4
+        for i in range(4):
+            self.reserve("task-envelope", f"te{i}")
+        # 第 4 个仍处于 reserved（未 settle）——BLOCK 之后应仍可正常结算
+        c, out, _ = self.reserve("task-envelope", "te_blocked")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted", out)
+        c, out, _ = self.settle("te3", "succeeded", instance_id="i3")
+        self.assertEqual(out, "OK", out)   # 已 reserve 的动作允许完成，不因信封 BLOCK 被卡住
+
+    def test_explicit_cap_override_without_tier(self):
+        self.set_config(task_envelope_initial=2, task_envelope_cap=3)
+        self.reserve("task-envelope", "a")
+        self.reserve("task-envelope", "b")
+        c, out, _ = self.reserve("task-envelope", "c")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted", out)
+
+    def test_bad_tier_config_fail_closed(self):
+        self.set_config(task_tier="not-a-real-tier")
+        c, out, _ = self.reserve("task-envelope", "a")
+        self.assertTrue(out.startswith("FAIL_CLOSED:config_type:task_tier"), out)
+
+    def test_cap_lt_initial_fail_closed(self):
+        self.set_config(task_envelope_initial=10, task_envelope_cap=5)
+        c, out, _ = self.reserve("task-envelope", "a")
+        self.assertTrue(out.startswith("FAIL_CLOSED:config_type:task_envelope_cap_lt_initial"), out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

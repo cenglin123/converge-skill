@@ -45,10 +45,17 @@ EXIT_BLOCK_BUDGET = 10
 EXIT_BLOCK_BLIND = 11
 EXIT_BLOCK_ULTRAVERGE = 12
 EXIT_BLOCK_TOTAL = 13
+EXIT_BLOCK_TASK_ENVELOPE = 14
 EXIT_MODE_SWITCH = 20
 EXIT_DENY_UNKNOWN = 21
 EXIT_DENY_ILLEGAL = 22
 EXIT_FAIL_CLOSED = 30
+
+# archive_contract.model 是 Round 表示的权威源（invocation-started 的 `round` 字段契约：
+# null 或正整数）；ledger 的 `target_round` 由同一 canonical_round() 归一化产生，不允许
+# 一处写字面 0、一处要求 null（plan Phase1 step2）。budget_gate.py 与 archive_contract 同在
+# scripts/ 目录，脚本入口执行时该目录天然在 sys.path[0] 上，故本导入无需额外路径处理。
+from archive_contract.model import canonical_round  # noqa: E402
 
 DEFAULTS = {
     "max_outer_loops": 5,
@@ -75,9 +82,32 @@ ROLE_CONSUMES = {
     "contract-challenger": "none",
     "contract-finalizer": "none",
     "arbiter": "none",
+    # l2-gate-reviewer：Dynamic Workflows 门控专用角色，对应 refs/quality-gate.md 的
+    # "L2 重量级" Reviewer（该文档只用 "L2 Reviewer" 这一散文名，二者是同一机制的两个
+    # 名字——见 refs/state-schema.md §预算 gate 的角色对照表）。consumes=none：不占用
+    # outer/blind/ultraverge 预算。它绝不能成为终局 owner——不在
+    # archive_contract/model.py 的 REVIEWER_AUTHORITIES 任一列表内，且
+    # capture.record_terminal_decision 在写入前就会拒绝把它登记为 reviewer-verdict
+    # owner（plan Phase1 step1；这是设计选择，不是遗漏：门控"不否决不阻断"）。
     "l2-gate-reviewer": "none",
     "design-reviewer": "none",
+    # task-envelope：跨 spawn/跨角色的任务级总信封（plan §6.1/§6.3），与本表其余角色
+    # 计的 outer/blind/ultraverge/total 是不同维度、并行累加，不冲突、不替换。使用方式：
+    # 每次真实 OCSR/模型调用，在其角色本身的 reserve 之外，另行调用一次
+    # `reserve --role task-envelope`（同一 reservation 机制，scope 名与角色名相同）。
+    # 未配置任务档（config 无 task_tier/task_envelope_cap）时不可用，见 _task_envelope_configured。
+    "task-envelope": "task-envelope",
 }
+
+# 四档任务预算默认值（plan §6.1）：初始额度 = 预期消费区间（到达即 BLOCK，需走 extension）；
+# cap = 一次性授权上限（同 scope 的 extension 不得超过该值，见 validate_extensions）。
+_TASK_TIERS_BASE = {
+    "small":    {"initial": 4,  "cap": 8},
+    "medium":   {"initial": 8,  "cap": 16},
+    "feature":  {"initial": 16, "cap": 24},
+    "critical": {"initial": 20, "cap": 30},
+}
+TASK_TIERS = {**_TASK_TIERS_BASE, "critical/ultraverge": _TASK_TIERS_BASE["critical"]}   # plan §6.1 表头字面档名的别名
 
 SCOPE_PRODUCT = {
     "outer": "round-{n}.md",
@@ -217,15 +247,54 @@ def _reservation_status(events: list[dict]) -> dict[str, dict]:
             }
         elif et in SETTLE_EVENTS and rid in res:
             res[rid]["status"] = et
-            if et == "cancelled":
+            if et in ("cancelled", "spawn_failed"):
                 res[rid]["pre_execution"] = bool(ev.get("pre_execution", False))
     return res
 
 
 def total_reservations_issued(events: list[dict]) -> int:
+    """`total` scope 的单调计数——不含 task-envelope。task-envelope 是独立于 total 的并行
+    累加维度（plan §6.3：不消费也不受 total 硬上限约束），故显式排除，避免 task-envelope
+    的 reserve 调用意外挤占其它角色的 total 预算空间（详见 cmd_reserve 中同一 rationale）。"""
     res = _reservation_status(events)
     return sum(1 for r in res.values()
-               if not (r["status"] == "cancelled" and r["pre_execution"]))
+               if r["consumes"] != "task-envelope"
+               and not (r["status"] == "cancelled" and r["pre_execution"]))
+
+
+def scope_reservations_issued(events: list[dict], scope: str) -> int:
+    """按 consumes 过滤的单调计数，用法与 total_reservations_issued 一致——用于没有
+    round-N.md 文件产物、因而不适用 realized()/pending() 模型的 scope（目前只有
+    task-envelope：它是跨 spawn/跨角色的任务级累加，不对应任何具体文件产物）。"""
+    res = _reservation_status(events)
+    return sum(1 for r in res.values()
+               if r["consumes"] == scope
+               and not (r["status"] == "cancelled" and r["pre_execution"]))
+
+
+def attempted_dispatch(events: list[dict], scope: str | None = None) -> int:
+    """dispatch 尝试总数——含启动前失败/CLI 错误，不含 pre_execution 取消（plan Phase1
+    step4 双计数模型的第一项）。scope=None 时为全局汇总（跨全部 consumes，含 task-envelope）。"""
+    res = _reservation_status(events)
+    return sum(1 for r in res.values()
+               if (scope is None or r["consumes"] == scope)
+               and not (r["status"] == "cancelled" and r["pre_execution"]))
+
+
+def model_invocation(events: list[dict], scope: str | None = None) -> int:
+    """真实模型调用数——spawn_succeeded 全部计入；spawn_failed 仅当 pre_execution=false
+    （即模型确实被调用过，只是调用后失败）才计入。不含任何 pre_execution=true 的失败/取消，
+    也不含仍处于 reserved（尚未 settle）状态的预约（plan Phase1 step4 双计数模型第二项）。"""
+    res = _reservation_status(events)
+    count = 0
+    for r in res.values():
+        if scope is not None and r["consumes"] != scope:
+            continue
+        if r["status"] == "spawn_succeeded":
+            count += 1
+        elif r["status"] == "spawn_failed" and not r["pre_execution"]:
+            count += 1
+    return count
 
 
 def realized_round_numbers(active: Path, scope: str) -> list[int]:
@@ -306,6 +375,12 @@ def validate_extensions(state: dict, events: list[dict]) -> None:
                 raise FailClosed("ext_ceiling_mismatch")
             if not (ext.get("new_ceiling", 0) > ext.get("prior_ceiling", 0)):
                 raise FailClosed("ext_not_increasing")
+            # task-envelope 专属约束：cap（一次性授权上限）是真正的硬顶，extension 也不
+            # 得突破它——outer/blind/ultraverge/total 的 extension 无此上限（只要求单调
+            # 递增），task-envelope 的语义是"§6.2 硬上限是一次性授权边界"，与其它 scope
+            # 不同，需要单独校验（plan Phase1 step5）。
+            if scope == "task-envelope" and ext.get("new_ceiling", 0) > _task_envelope_hard_cap(state):
+                raise FailClosed("ext_task_envelope_exceeds_cap")
             # 链衔接：取代旧记录时，新记录 prior 必须 == 旧记录 new（强制沿链单调递增）
             sup = ext.get("supersedes")
             if sup is not None:
@@ -342,6 +417,8 @@ def ceiling(state: dict, scope: str) -> int:
         return int(cfg(state, "ultraverge_min_reviewers"))
     if scope == "total":
         return default_total_cap(state)
+    if scope == "task-envelope":
+        return _task_envelope_initial(state)
     raise FailClosed(f"unknown_scope:{scope}")
 
 
@@ -352,13 +429,46 @@ def default_total_cap(state: dict) -> int:
     return math.ceil(cfg(state, "total_safety") * base)
 
 
+# ---- 任务档预算（task-envelope，plan §6.1/§6.3）------------------------------
+def _task_envelope_configured(state: dict) -> bool:
+    c = state.get("config", {})
+    return "task_tier" in c or "task_envelope_cap" in c
+
+
+def _task_envelope_initial(state: dict) -> int:
+    """初始额度（预期消费区间，到达即 BLOCK；不是"必须用完"，只是 reserve() 的默认 ceiling，
+    未配置任务档时不可调用——调用方须先检查 _task_envelope_configured()。"""
+    c = state.get("config", {})
+    if "task_envelope_initial" in c:
+        return int(c["task_envelope_initial"])
+    tier = c.get("task_tier")
+    if tier not in TASK_TIERS:
+        raise FailClosed("task_envelope_not_configured")
+    return TASK_TIERS[tier]["initial"]
+
+
+def _task_envelope_hard_cap(state: dict) -> int:
+    """一次性授权上限（§6.2 硬上限）——ceiling() 的默认值不得超过它，extension 也不得
+    超过它（validate_extensions 的 task-envelope 专属校验）。"""
+    c = state.get("config", {})
+    if "task_envelope_cap" in c:
+        return int(c["task_envelope_cap"])
+    tier = c.get("task_tier")
+    if tier not in TASK_TIERS:
+        raise FailClosed("task_envelope_not_configured")
+    return TASK_TIERS[tier]["cap"]
+
+
 # ---- 统一 validator（findings 共同根因）------------------------------------
 TIER_VALUES = {"enforced", "auditable-only"}
-CONSUMES_VALUES = {"outer", "blind", "ultraverge", "none"}
+CONSUMES_VALUES = {"outer", "blind", "ultraverge", "none", "task-envelope"}
+# SCOPE_KEYS：reserved 事件 counts_before/ceilings 的**必填**键集合，未配置任务档时保持不变
+# （A8 向后兼容——旧 ledger/旧调用方完全不受影响）。task-envelope 仅在任务档已配置时作为
+# **额外可选键**出现在这两个 dict 中（见 cmd_reserve），不加入本必填集合。
 SCOPE_KEYS = ("outer", "blind", "ultraverge", "total")
-DECISION_SCOPES = (None, "outer", "blind", "ultraverge", "total")
+DECISION_SCOPES = (None, "outer", "blind", "ultraverge", "total", "task-envelope")
 DECISION_EXACT = {"MODE_SWITCH_REQUIRED"}
-BLOCK_SUFFIXES = {"budget_exhausted", "blind_exhausted", "ultraverge_exhausted", "total_spawn_cap"}
+BLOCK_SUFFIXES = {"budget_exhausted", "blind_exhausted", "ultraverge_exhausted", "total_spawn_cap", "task_envelope_exhausted"}
 DENY_SUFFIXES = {"unknown_role", "illegal_role"}
 
 
@@ -421,12 +531,19 @@ def _validate_event(ev: dict) -> None:
         if consumes in SCOPE_PRODUCT:
             if not _pos_int(ev.get("target_round")):
                 raise FailClosed("event_field:reserved.target_round")
-        elif ev.get("target_round") is not None and not _int(ev.get("target_round")):
+        elif ev.get("target_round") is not None and not _pos_int(ev.get("target_round")):
+            # 与 archive_contract/model.py 的 invocation `round` 契约（null 或正整数）
+            # 统一：Round 0 唯一合法表示是 null，literal 0 一律拒绝（plan Phase1 step2）。
+            # cmd_reserve 通过 canonical_round() 在写入前把调用方传入的 0 归一化为 None，
+            # 故此处只会在有人绕过 CLI 直接注入 ledger 时触发，属防御性 fail-closed。
             raise FailClosed("event_field:reserved.target_round")
         for fld in ("counts_before", "ceilings"):
             d = ev.get(fld)
             if not isinstance(d, dict) or any(not _int(d.get(k)) for k in SCOPE_KEYS):
                 raise FailClosed(f"event_field:reserved.{fld}")
+            # task-envelope 是可选附加键（仅任务档已配置时 cmd_reserve 才写入），若出现须为 int。
+            if "task-envelope" in d and not _int(d["task-envelope"]):
+                raise FailClosed(f"event_field:reserved.{fld}.task-envelope")
         eid = ev.get("extension_id")
         if eid is not None and not _nonempty_str(eid):
             raise FailClosed("event_field:reserved.extension_id")
@@ -444,6 +561,11 @@ def _validate_event(ev: dict) -> None:
             raise FailClosed("event_field:spawn_failed.reservation_id")
         if "reason" in ev and not isinstance(ev["reason"], str):
             raise FailClosed("event_field:spawn_failed.reason")
+        # pre_execution（可选，默认 false）：区分"启动前失败/CLI 参数错误"（true，从未真正
+        # 调用模型）与"真实模型调用后失败"（false）——双计数模型（attempted_dispatch vs
+        # model_invocation，plan Phase1 step4）依赖此字段，语义与 cancelled.pre_execution 对齐。
+        if "pre_execution" in ev and not isinstance(ev["pre_execution"], bool):
+            raise FailClosed("event_field:spawn_failed.pre_execution")
 
     elif et == "cancelled":
         if not _nonempty_str(ev.get("reservation_id")):
@@ -462,7 +584,7 @@ def _validate_event(ev: dict) -> None:
         if scope not in DECISION_SCOPES:
             raise FailClosed("event_field:decision.scope")
         if str(ev.get("verdict", "")).startswith("BLOCK"):
-            if scope not in ("outer", "blind", "ultraverge", "total"):
+            if scope not in ("outer", "blind", "ultraverge", "total", "task-envelope"):
                 raise FailClosed("event_field:decision.block_scope")
             for f in ("observed_usage", "effective_ceiling"):
                 if not _int(ev.get(f)):
@@ -485,6 +607,14 @@ def validate_integrity(active: Path, events: list[dict], state: dict) -> None:
     if "total_safety" in cfgd and (isinstance(cfgd["total_safety"], bool)
                                    or not isinstance(cfgd["total_safety"], (int, float))):
         raise FailClosed("config_type:total_safety")
+    if "task_tier" in cfgd and cfgd["task_tier"] not in TASK_TIERS:
+        raise FailClosed("config_type:task_tier")
+    for k in ("task_envelope_initial", "task_envelope_cap"):
+        if k in cfgd and (isinstance(cfgd[k], bool) or not isinstance(cfgd[k], int) or cfgd[k] < 1):
+            raise FailClosed(f"config_type:{k}")
+    if ("task_envelope_initial" in cfgd and "task_envelope_cap" in cfgd
+            and cfgd["task_envelope_cap"] < cfgd["task_envelope_initial"]):
+        raise FailClosed("config_type:task_envelope_cap_lt_initial")
 
     # 事件类型 + reservation 生命周期
     seen_reserved: set = set()
@@ -572,24 +702,43 @@ def cmd_reserve(args) -> int:
             print("DENY:unknown_role"); return EXIT_DENY_UNKNOWN
         consumes = ROLE_CONSUMES[role]
 
+        # Round 0 单一规范表示：调用方传入的 0 在写入前归一化为 None，与
+        # archive_contract 的 invocation `round` 契约（null 或正整数）保持一致
+        # （plan Phase1 step2）。非法值（负数/非 int）→ fail-closed。
+        try:
+            target_round = canonical_round(args.target_round)
+        except ValueError:
+            print("FAIL_CLOSED:event_field:reserved.target_round"); return EXIT_FAIL_CLOSED
+
         rid = args.reservation_id or _new_id()
         # 重复 reservation_id → fail-closed（finding 1）
         if any(e.get("event") == "reserved" and e.get("reservation_id") == rid for e in events):
             print("FAIL_CLOSED:duplicate_reservation_id"); return EXIT_FAIL_CLOSED
         # 同一 (scope, target_round) 重复活跃预约 → fail-closed（finding 2）
         if consumes in SCOPE_PRODUCT:
-            if (consumes, args.target_round) in active_targets(events):
+            if (consumes, target_round) in active_targets(events):
                 print("FAIL_CLOSED:double_target"); return EXIT_FAIL_CLOSED
 
-        # BLOCK：总量硬上限（单调）
-        total_used = total_reservations_issued(events)
-        total_ceil = ceiling(state, "total")
-        if total_used >= total_ceil:
-            _emit_decision(active, "BLOCK:total_spawn_cap", "total", total_used, total_ceil)
-            print("BLOCK:total_spawn_cap"); return EXIT_BLOCK_TOTAL
+        # BLOCK：总量硬上限（单调）——task-envelope 是与 total 正交的独立维度（plan §6.3），
+        # 不消费也不受 total 硬上限约束，故跳过本检查（避免 task-envelope 的并行 reserve
+        # 意外挤占其它角色的 total 预算空间）。
+        if consumes != "task-envelope":
+            total_used = total_reservations_issued(events)
+            total_ceil = ceiling(state, "total")
+            if total_used >= total_ceil:
+                _emit_decision(active, "BLOCK:total_spawn_cap", "total", total_used, total_ceil)
+                print("BLOCK:total_spawn_cap"); return EXIT_BLOCK_TOTAL
+        else:
+            total_used = total_reservations_issued(events)   # 仅用于下方 ledger 记录，不参与裁决
 
         # BLOCK：按 scope 预算
-        if consumes != "none":
+        if consumes == "task-envelope":
+            usage = scope_reservations_issued(events, "task-envelope")
+            ceil = ceiling(state, "task-envelope")   # 未配置任务档 → FailClosed("task_envelope_not_configured")
+            if usage >= ceil:
+                _emit_decision(active, "BLOCK:task_envelope_exhausted", "task-envelope", usage, ceil)
+                print("BLOCK:task_envelope_exhausted"); return EXIT_BLOCK_TASK_ENVELOPE
+        elif consumes != "none":
             usage = effective_usage(active, events, consumes)
             ceil = ceiling(state, consumes)
             if usage >= ceil:
@@ -602,18 +751,25 @@ def cmd_reserve(args) -> int:
                         "ultraverge": EXIT_BLOCK_ULTRAVERGE}[consumes]
 
         # MODE_SWITCH（低于 BLOCK 优先级）
-        if consumes == "outer" and mode_switch_required(state, args.target_round or 0):
+        if consumes == "outer" and mode_switch_required(state, target_round or 0):
             # MODE_SWITCH 是非 scope 决策 → scope/usage/ceiling 一律 null（v7）
             _emit_decision(active, "MODE_SWITCH_REQUIRED", None, None, None)
             print("MODE_SWITCH_REQUIRED"); return EXIT_MODE_SWITCH
 
         # PROCEED
+        counts_before = {s: effective_usage(active, events, s)
+                         for s in ("outer", "blind", "ultraverge")} | {"total": total_used}
+        ceilings = {s: ceiling(state, s) for s in ("outer", "blind", "ultraverge", "total")}
+        if _task_envelope_configured(state):
+            # task-envelope 只在任务档已配置时才作为**额外可选键**出现（A8：未配置时
+            # ledger 记录与改造前完全一致，见 SCOPE_KEYS 处注释）。
+            counts_before["task-envelope"] = scope_reservations_issued(events, "task-envelope")
+            ceilings["task-envelope"] = ceiling(state, "task-envelope")
         append_ledger(active, {
             "event": "reserved", "reservation_id": rid, "ts": _now(),
-            "target_round": args.target_round, "target_role": role, "consumes": consumes,
-            "counts_before": {s: effective_usage(active, events, s)
-                              for s in ("outer", "blind", "ultraverge")} | {"total": total_used},
-            "ceilings": {s: ceiling(state, s) for s in ("outer", "blind", "ultraverge", "total")},
+            "target_round": target_round, "target_role": role, "consumes": consumes,
+            "counts_before": counts_before,
+            "ceilings": ceilings,
             "extension_id": (active_extension(state, consumes) or {}).get("extension_id")
                              if consumes != "none" else None,
             "tier": args.tier,
@@ -642,7 +798,10 @@ def cmd_settle(args) -> int:
               "reservation_id": args.reservation_id, "ts": _now()}
         if args.result == "succeeded":
             ev["instance_id"] = args.instance_id
-        if args.result == "cancelled":
+        if args.result in ("cancelled", "failed"):
+            # failed 也记 pre_execution（默认 false）：区分"启动前失败/CLI 参数错误"
+            # （从未真正调用模型）与"真实模型调用后失败"，供 attempted_dispatch/
+            # model_invocation 双计数使用（plan Phase1 step4）。
             ev["pre_execution"] = bool(args.pre_execution)
         if args.reason:
             ev["reason"] = args.reason
@@ -691,6 +850,45 @@ def cmd_preflight(args) -> int:
         print(f"WARN:code_heavy:{blocks},{loc}")
     else:
         print("CLEAN")
+    return EXIT_PROCEED
+
+
+def cmd_summary(args) -> int:
+    """可验证汇总（plan Phase1 step4）：从 ledger + state 重新计算，不依赖任何缓存——
+    与本文件其它命令一样每次调用都是幂等的全量重算（条款2）。区分 attempted_dispatch
+    （含启动前失败/CLI 错误）与 model_invocation（真实模型调用），避免"预算数字"语义漂移。"""
+    active = Path(args.active_dir)
+    if not active.is_dir():
+        print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    state = read_state(active)
+    events = read_ledger(active)
+    validate_integrity(active, events, state)
+    scopes: dict[str, dict] = {}
+    for s in ("outer", "blind", "ultraverge"):
+        scopes[s] = {
+            "realized": realized(active, s),
+            "pending": pending(active, events, s),
+            "effective_usage": effective_usage(active, events, s),
+            "ceiling": ceiling(state, s),
+            "attempted_dispatch": attempted_dispatch(events, s),
+            "model_invocation": model_invocation(events, s),
+        }
+    if _task_envelope_configured(state):
+        scopes["task-envelope"] = {
+            "usage": scope_reservations_issued(events, "task-envelope"),
+            "ceiling": ceiling(state, "task-envelope"),
+            "hard_cap": _task_envelope_hard_cap(state),
+            "attempted_dispatch": attempted_dispatch(events, "task-envelope"),
+            "model_invocation": model_invocation(events, "task-envelope"),
+        }
+    out = {
+        "total_reservations_issued": total_reservations_issued(events),
+        "total_ceiling": ceiling(state, "total"),
+        "attempted_dispatch": attempted_dispatch(events, None),
+        "model_invocation": model_invocation(events, None),
+        "scopes": scopes,
+    }
+    print(json.dumps(out, ensure_ascii=False, sort_keys=True))
     return EXIT_PROCEED
 
 
@@ -935,6 +1133,10 @@ def main() -> int:
     pf = sub.add_parser("preflight")
     pf.add_argument("--plan", required=True)
     pf.set_defaults(func=cmd_preflight)
+
+    sm = sub.add_parser("summary")     # 可验证预算汇总（attempted_dispatch/model_invocation 双计数）
+    sm.add_argument("--active-dir", required=True)
+    sm.set_defaults(func=cmd_summary)
 
     bd = sub.add_parser("bind")        # 会话开始时绑定 session→active（cap 派生自 validated state）
     bd.add_argument("--session-id", required=True)

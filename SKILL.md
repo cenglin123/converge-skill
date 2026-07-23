@@ -410,12 +410,16 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
 | `relay_oscillation_interval` | 3 | 传话编排下振荡裁判的触发间隔（轮）。每 N 轮 spawn 一次性裁判 agent，输入仅 relay-ledger |
+| `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容） |
+| `task_envelope_initial` / `task_envelope_cap` | 由 `task_tier` 派生 | 直接覆盖任务档的初始额度/一次性授权上限，无需通过 `task_tier` 四档之一；`cap` 须 `>= initial` |
 
 [^mbr]: 普通 converge 的真实默认为 `1`（`scripts/budget_gate.py` DEFAULTS）。**ultraverge 在初始化时经 config 覆盖回写 `max_blind_rechecks=2`**（写入 `_budget-state.json` 的 config，纯 orchestrator 行为、零代码）。
 
 [^totalcap]: 两组 stock 上限均由同一确定性公式重算：普通（mbr=1）= `ceil(1.5 × 28)` = **42**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 29)` = **44**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。
 
 > **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是预算软停 file-authoritative gate 的核心（不依赖 Orchestrator 记忆计数）。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（enforced tier 为 deferred 目标）。
+>
+> **任务级总信封**（`task_tier`/`task_envelope_initial`/`task_envelope_cap`，consumes=`task-envelope`）是与本表其余参数**不同维度、并行叠加**的粗粒度计量——按一次任务的 OCSR/模型调用总量计量（可跨越多次收敛、多个角色、以及 release executor 等 converge 循环外的调用），不消费、也不受 `max_total_reserved_spawns` 约束。机制细节（BLOCK 语义、与 total 的正交性、`summary` 命令）见 `refs/state-schema.md` §预算 gate「任务档预算 / task-envelope scope」。
 
 ### pre-push hook 环境变量（`scripts/hooks/`）
 
