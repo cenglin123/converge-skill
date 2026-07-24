@@ -486,3 +486,17 @@ Orchestrator 发现 blocking #N 的事实前提与原始材料矛盾
 ### 局限
 
 本机制不能保证 Orchestrator 主动发现 Reviewer 的信息源不忠实——Orchestrator 与 Reviewer 同模型同架构，共享盲区概率不低。其价值在于：(a) 给异议一个合法出口（从无出口的软约束升级为有机制位置的软约束）；(b) 用户介入时有机制背书的位置表达。仲裁阈值（必须指出具体矛盾、可机械核验）防的是启动后变成笼统不服——出口存在 + 出口有闸。
+
+---
+
+## 十、自主循环驱动器（适配层边界）
+
+> 本节是交叉引用——驱动器实现归属调用方适配层，不在 converge SKILL 仓库内。
+
+converge 主循环的自主推进（file handoff → schema 校验 → blocking 生命周期 → delta packet → reserve/settle 包装 → 下一步判定）由调用方适配层承担。当前参考实现为 vault 侧 `ocsr_driver_core.py` + `ocsr_dispatch.py drive` 子命令组，它消费 converge 的下列机制权威源：
+
+- **预算 gate**：`budget_gate.py reserve/settle/summary`（含 `task-envelope` scope）。驱动器在每次 `ingest` 时自动调用 reserve（幂等），settle 由调用方在 spawn 后执行。
+- **结构化协议 schema**：`refs/state-schema.md` §7（executor 输出 JSON / reviewer 输出 JSON）。驱动器按此 schema 做严格校验（缺文件/空文件/不可解析/非 dict 根/类型错误 → fail-closed）。
+- **Archive Contract**：`archive_convergence.py archive/check`。驱动器提供 `drive archive-precheck`（只读 check 包装）和 `drive release-check`（manifest 四项机械检查）。
+
+**驱动器不承担**：语义判定（升级条件 #1/#2）、prompt 内容组装、spawn 决策（保留给调用方经 `dispatch` 子命令执行）。机制权威（预算裁决逻辑、schema 字段定义、归档契约）始终在 converge SKILL 仓库，驱动器是薄消费方——不重复定义、不另立权威源。

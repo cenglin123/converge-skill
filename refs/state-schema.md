@@ -473,3 +473,38 @@ model_invocation(s)    = spawn_succeeded 数 + (spawn_failed 且 pre_execution=f
 裁决优先级：`FAIL_CLOSED`(30) > `DENY`(21/22) > `BLOCK`(10/11/12/13/14) > `MODE_SWITCH_REQUIRED`(20) > `PROCEED`(0)。`max_total_reserved_spawns` 默认 = `ceil(total_safety×[3+max_ultraverge_initial+max_outer_loops×(1+max_inner_loops)+max_blind_rechecks+1])`。exit code 14 = `BLOCK:task_envelope_exhausted`。
 
 > **tier 说明**：上述脚本是 host-independent core（auditable-only 完整可用）。`best-effort guarded`（= hook-blocked auditable-only）的 PreToolUse 总量硬上限 hook 已在 Claude Code 落地（PostToolUse settle 不存在）；其 ledger `tier` 仍为 `auditable-only`，guarded 状态独立存于 binding 的 `mode=best-effort-guarded`。true `enforced`（角色 FSM + 角色不可伪造 + 权限锁定）仍 deferred（升级要件见 `refs/framework-adapters.md` §A.1）。`budget_gate` 的 rule_frequency 触发检测方式：ledger 中出现 `decision` 事件即 triggered。
+
+---
+
+## §结构化协议字段扩展（executor / reviewer 输出 schema）
+
+> 以下字段是 executor 输出 JSON 与 reviewer 输出 JSON 的**可选扩展**——不破坏既有 schema 的向后兼容性。基准 schema 见 converge SKILL.md §7.1（executor）/ §7.2（reviewer）。本节是 converge 官方 schema 的正式补充，与「角色对照表」同节。
+
+### evidence_tier（executor `tests[]` 可选扩展）
+
+executor 输出的 `tests[]` 数组中的每个元素可携带 `evidence_tier` 字段（字符串，可选）：
+
+```
+"evidence_tier": "static" | "isolated_runtime" | "target_like_integration" | "production_browser" | "human_authorization"
+```
+
+五级证据等级升序排列（`static` = 最低，`human_authorization` = 最高）。不标注时默认 `static`（rank 0）。
+
+- 消费方（驱动器 / orchestrator）：按合同断言的 `required_evidence_tier` 逐条比对，`achieved_rank < req_rank` 即未满足前置证据要求。
+- 适用范围：executor 提交 `ready_for_review` 时，驱动器检查是否满足 reviewer 的前置证据等级门禁（harness-first）；未满足即 fail-closed，不转发给 reviewer。
+
+### dispute_topic_id（reviewer `blocking[]` 可选扩展）
+
+reviewer 输出的 `blocking[]` 数组中的每个元素可携带 `dispute_topic_id` 字段（字符串，可选）：
+
+```
+"dispute_topic_id": "<非空字符串>"
+```
+
+用于跨轮追踪同一争议。reviewer 填写此字段表示本条 blocking 与之前某轮的 blocking 是同一议题的延续。
+
+- 驱动器消费方式：按 `dispute_topic_id`（非空时优先）或 `id` 维护 `blocking_key`，对每个 key 追踪 `consecutive_open_rounds` 和 `recurrence_count`。
+- 升级条件联动：同一 `dispute_topic_id` 连续 ≥2 轮未关闭（`consecutive_open_rounds >= 2`）→ 自动标记 `suspect_harness_or_contract`；同级缺陷（同 severity）连续 ≥2 轮复发 → 标记 `recurring_defect`。两者均触发升级 orchestrator。
+- reviewer **不填**此字段时，驱动器按 `id` 做同轮唯一标识，不跨轮追踪（`consecutive_open_rounds` 恒为 1）。
+
+> `dispute_topic_id` 与 `id` 的关系：`id` 是单轮内 blocking 的唯一标识（必填，同轮去重），`dispute_topic_id` 是跨轮的争议追踪 key（可选，填了才跨轮计数）。两者不互斥——reviewer 可同时填两者。
