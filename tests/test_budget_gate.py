@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 GATE = Path(__file__).resolve().parent.parent / "scripts" / "budget_gate.py"
+sys.path.insert(0, str(GATE.parent))
 
 
 def run(*args, cwd=None, input=None, env=None):
@@ -783,6 +784,55 @@ class TestTaskEnvelope(Base):
         self.set_config(task_envelope_initial=10, task_envelope_cap=5)
         c, out, _ = self.reserve("task-envelope", "a")
         self.assertTrue(out.startswith("FAIL_CLOSED:config_type:task_envelope_cap_lt_initial"), out)
+
+
+class TestRootFixedFilesUseLFNewlines(Base):
+    """plan Phase 5 step 5 (newline policy): gate-ledger.jsonl and _budget-state.json are
+    root-fixed files the Archive Contract hashes at archive time — they must stay byte-for-
+    byte the same as what Git (`.gitattributes: * text=auto eol=lf`) checks out, or a later
+    `check`/`check-git-ref` re-verification reports content-mismatch on Windows, where text-
+    mode file writes translate '\\n' to os.linesep ('\\r\\n')."""
+
+    def test_gate_ledger_written_via_cli_has_no_crlf(self):
+        self.reserve("outer-reviewer", "r1", rnd=1)
+        self.settle("r1", "succeeded", instance_id="i1")
+        data = (self.active / "gate-ledger.jsonl").read_bytes()
+        self.assertNotIn(b"\r\n", data)
+        self.assertIn(b"\n", data)
+
+    def test_budget_state_written_via_cli_has_no_crlf(self):
+        run("ingest-verdict", "--active-dir", str(self.active),
+            "--target-round", "1", "--verdict", "阻断需修复", "--severities", "structural")
+        data = (self.active / "_budget-state.json").read_bytes()
+        self.assertNotIn(b"\r\n", data)
+
+    def test_append_ledger_and_write_state_force_lf_at_the_python_level(self):
+        import importlib
+        budget_gate = importlib.import_module("budget_gate")
+        with tempfile.TemporaryDirectory() as td:
+            active = Path(td)
+            budget_gate.append_ledger(active, {"event": "reserved", "reservation_id": "x"})
+            self.assertNotIn(b"\r\n", (active / "gate-ledger.jsonl").read_bytes())
+            budget_gate.write_state(active, {"config": {}, "extensions": [], "fsm": {"mode": "standard", "severities": {}}})
+            self.assertNotIn(b"\r\n", (active / "_budget-state.json").read_bytes())
+
+
+class TestScopeProductRootAllowlist(unittest.TestCase):
+    """plan Phase 5 step 3 (root allowlist unification): every SCOPE_PRODUCT template this
+    module generates must be accepted by the Archive Contract's root allowlist, or the
+    generator and the archiver have silently diverged (the original defect: uv-init-N.md /
+    blind-recheck-N.md rejected as root-clutter). The two modules cannot share a single
+    import (archive_contract.model.validate_ledger imports budget_gate, so the reverse import
+    would cycle) — this cross-module test is the single-source-of-truth enforcement instead."""
+
+    def test_every_scope_product_template_is_root_allowed(self):
+        import importlib
+        budget_gate = importlib.import_module("budget_gate")
+        model = importlib.import_module("archive_contract.model")
+        for template in budget_gate.SCOPE_PRODUCT.values():
+            for n in (1, 2, 10, 123):
+                name = template.format(n=n)
+                self.assertTrue(model.is_root_allowed_name(name), name)
 
 
 if __name__ == "__main__":

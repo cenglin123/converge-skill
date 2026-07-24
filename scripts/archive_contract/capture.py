@@ -13,7 +13,7 @@ from typing import Any
 
 from .model import (
     ARCHIVE_TOTAL_LIMIT, ArchiveError, EVIDENCE_LEVELS, EVIDENCE_MODES, FAILURE_REASONS, RESOLUTION_REASONS,
-    RESOLUTION_SOURCES, SCHEMA_ID, SCHEMA_VERSION, TERMINAL_STATUSES, canonical_json_bytes,
+    RESOLUTION_SOURCES, SCHEMA_ID, SCHEMA_VERSION, SECRET_NAMES, TERMINAL_STATUSES, canonical_json_bytes,
     ROOT_FIXED, ROUND_RE, ensure_safe_root, ensure_safe_tree, normalize_relative, sha256_size, strict_json_bytes,
     validate_event,
     validate_identifier,
@@ -24,7 +24,6 @@ from .model import (
 
 DEFAULT_FILE_LIMIT = 16 * 1024 * 1024
 DEFAULT_TOTAL_LIMIT = 64 * 1024 * 1024
-SECRET_NAMES = frozenset({".env", ".netrc", "id_rsa", "id_ed25519", "credentials", "credentials.json"})
 LEDGER_FILENAME = "gate-ledger.jsonl"
 
 

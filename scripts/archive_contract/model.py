@@ -31,16 +31,61 @@ RESOLUTION_REASONS = frozenset({
     "backend-does-not-expose", "receipt-missing", "inherited-concrete-model-hidden",
     "invocation-failed-before-resolution",
 })
+# Shared authority for common-secret basename refusal — used both at capture time
+# (capture.py `_read_regular_file`/`capture_artifact`) and, since Phase 5's auxiliary-evidence
+# import (see `EVIDENCE_RESERVED_SUBDIRS`/`project_manifest`), at archive-time for any
+# non-event-derived file swept in from `evidence/`. Single source so the two call sites cannot
+# silently diverge on what counts as an obvious secret.
+SECRET_NAMES = frozenset({".env", ".netrc", "id_rsa", "id_ed25519", "credentials", "credentials.json"})
+# Reserved `evidence/` top-level segments: only these carry event-derived, provenance-bearing
+# content (`events/` = the append-only event log itself; `invocations/`, `artifacts/`,
+# `revisions/` = blobs whose identity is owned by a specific event's evidence reference, see
+# `validate_evidence_ref`). Any other top-level segment under `evidence/` is eligible as
+# "auxiliary evidence" (plan Phase 5 addendum) — imported, hashed, and disclosed in the
+# manifest's `auxiliary_evidence` section, but never claims provenance and never participates
+# in event-graph validation. Because membership in this reserved set routes a path into the
+# strict `allowed_blobs` comparison instead of the auxiliary bucket, an attacker/generator
+# cannot use an auxiliary file to "shadow" a reserved subpath — any path whose top segment
+# collides with one of these names is compared against the exact event-derived closure and
+# fails `evidence-orphan` the same as before, it is never silently accepted as auxiliary.
+EVIDENCE_RESERVED_SUBDIRS = frozenset({"events", "invocations", "artifacts", "revisions"})
 ROOT_FIXED = frozenset({
     "INDEX.md", "manifest.json", "plan.md", "contract.md", "attempts.md",
     "retrospective.md", "design-review.md", "_orchestrator-state.md",
     "gate-ledger.jsonl", "_budget-state.json",
+    # Vault-side dispatch adapter's fixed ledger name (CONVERGE_LEDGER_NAME in
+    # .meta/scripts/ocsr_dispatch.py). Literal, not templated — one fixed basename,
+    # unlike the round-numbered generator products below.
+    "ocsr-dispatch-ledger.jsonl",
 })
 ROUND_RE = re.compile(r"round-[1-9][0-9]*\.md\Z")
+# Canonical root-record patterns for `budget_gate.SCOPE_PRODUCT` generator output
+# (`uv-init-{n}.md` / `blind-recheck-{n}.md`). Kept here as the single allowlist
+# authority; `tests/test_budget_gate.py` cross-checks that every SCOPE_PRODUCT
+# template instantiation matches one of these patterns, so the two modules cannot
+# silently diverge (budget_gate.py cannot import this module without a cycle, since
+# this module's ledger validation imports budget_gate).
+UV_INIT_RE = re.compile(r"uv-init-[1-9][0-9]*(-inner-[1-9][0-9]*)?\.md\Z")
+BLIND_RECHECK_RE = re.compile(r"blind-recheck-[1-9][0-9]*\.md\Z")
 HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
 EVENT_NAME_RE = re.compile(r"([0-9]{8})-([0-9a-f-]{36})\.json\Z")
 SAFE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+SAFE_ID_UNICODE_MAX_LEN = 150
 REVISION_ID_RE = re.compile(r"r[1-9][0-9]*\Z")
+
+
+def is_root_allowed_name(name: str) -> bool:
+    """Single-source root allowlist check, shared by `project_manifest`'s root-clutter
+    guard and (indirectly, via the same patterns) archive-time line-ending normalization.
+    A name is permitted at archive root when it is one of the fixed `ROOT_FIXED` files, an
+    outer-loop `round-N.md`, or one of the two SCOPE_PRODUCT generator conventions
+    (`uv-init-N[.md]` / `blind-recheck-N.md`)."""
+    return bool(
+        name in ROOT_FIXED
+        or ROUND_RE.fullmatch(name)
+        or UV_INIT_RE.fullmatch(name)
+        or BLIND_RECHECK_RE.fullmatch(name)
+    )
 WINDOWS_RESERVED = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))})
 REVIEWER_AUTHORITIES = {
     "fresh": frozenset({"reviewer", "outer-reviewer", "ultraverge-initial"}),
@@ -208,9 +253,34 @@ def normalize_relative(value: str) -> str:
     return pure.as_posix()
 
 
-def validate_identifier(value: Any, label: str = "identifier") -> str:
-    if not isinstance(value, str) or not SAFE_ID_RE.fullmatch(value):
-        raise ArchiveError("identifier-invalid", f"{label} must be an ASCII-safe basename.", str(value) if value is not None else None)
+def validate_identifier(value: Any, label: str = "identifier", *, charset: str = "ascii") -> str:
+    """Validate a filesystem-safe basename identifier (slug, artifact_id, ...).
+
+    `charset="ascii"` (default) keeps the original strict `[A-Za-z0-9][A-Za-z0-9._-]*`
+    shape — used for `artifact_id` and anywhere no non-ASCII need has been established.
+    `charset="unicode-safe"` additionally accepts any Unicode letter/digit (via
+    `str.isalnum()`, which is True for CJK and most other scripts but False for
+    whitespace, path separators, punctuation, symbols, and Unicode format/control
+    characters such as bidi overrides or zero-width joiners) — used for `slug`, so this
+    vault's established Chinese-slug convention for `docs/plans`/`.converge` objects is
+    not rejected. Both variants still reject path separators, Windows device names, and
+    trailing dot/space, and both require NFC-normalized input (no combining-mark or
+    normalization ambiguity)."""
+    if charset not in ("ascii", "unicode-safe"):
+        raise ValueError(f"unsupported identifier charset: {charset}")
+    if not isinstance(value, str) or not value:
+        raise ArchiveError("identifier-invalid", f"{label} must be a non-empty safe basename.", str(value) if value is not None else None)
+    if charset == "ascii":
+        ok = bool(SAFE_ID_RE.fullmatch(value))
+    else:
+        ok = (
+            len(value) <= SAFE_ID_UNICODE_MAX_LEN
+            and value[0].isalnum()
+            and all(ch.isalnum() or ch in "._-" for ch in value)
+            and unicodedata.normalize("NFC", value) == value
+        )
+    if not ok:
+        raise ArchiveError("identifier-invalid", f"{label} must be a safe basename (letters/digits from any script, plus '.', '_', '-', not leading).", value)
     if value.split(".", 1)[0].upper() in WINDOWS_RESERVED or value.endswith((".", " ")):
         raise ArchiveError("identifier-invalid", f"{label} uses a reserved or ambiguous basename.", value)
     return value
@@ -515,13 +585,19 @@ def validate_locator(locator: Any) -> None:
             raise ArchiveError("locator-secret", "External display locator must be redacted and non-resolvable.")
 
 
-def validate_ledger(root: Path, events: list[dict[str, Any]]) -> None:
+def validate_ledger(root: Path, events: list[dict[str, Any]], *,
+                     acknowledged_orphan_reservations: frozenset[str] = frozenset()) -> list[str]:
+    """Returns a sorted list of degradation strings for explicitly acknowledged orphan
+    reservations (see the `ledger-invocation-orphan` handling below); empty when nothing
+    was acknowledged. Every other integrity failure still raises `ArchiveError` — this
+    function's default (`acknowledged_orphan_reservations=frozenset()`) reproduces the
+    prior unconditional fail-closed behavior exactly."""
     path = root / "gate-ledger.jsonl"
     spawns = [e for e in events if e["event_type"] == "invocation-started" and e["invocation_kind"] == "spawn"]
     if not path.exists():
         if spawns:
             raise ArchiveError("ledger-missing", "Every Spawn requires the canonical reservation ledger.", "gate-ledger.jsonl")
-        return
+        return []
     ledger: list[dict[str, Any]] = []
     for number, line in enumerate(path.read_bytes().splitlines(), 1):
         try:
@@ -564,11 +640,26 @@ def validate_ledger(root: Path, events: list[dict[str, Any]]) -> None:
             raise ArchiveError("ledger-role-conflict", "Ledger role conflicts with invocation owner fact.", "gate-ledger.jsonl")
         if reserves[rid].get("target_round") != invocation["round"]:
             raise ArchiveError("ledger-round-conflict", "Ledger round conflicts with invocation owner fact.", "gate-ledger.jsonl")
+    orphan_degradations: list[str] = []
+    actually_orphaned: set[str] = set()
     for rid in reserves:
         if rid not in settles:
             raise ArchiveError("ledger-open", "Ledger contains an unsettled reservation.", "gate-ledger.jsonl")
         if rid not in by_reservation:
-            raise ArchiveError("ledger-invocation-orphan", "Ledger reservation has no Spawn invocation.", "gate-ledger.jsonl")
+            actually_orphaned.add(rid)
+            if rid in acknowledged_orphan_reservations:
+                # Explicit, caller-declared degradation (opt-in only — see
+                # `archive` CLI's `--declare-orphan-reservation`). The event stream stays
+                # untouched (no invocation-started backfill); this only records, at the
+                # manifest level, that a settled reservation's Spawn invocation was never
+                # captured — an honest disclosure of a recording gap, not a fabricated fact.
+                orphan_degradations.append(f"ledger:orphan-reservation:{rid}")
+            else:
+                raise ArchiveError("ledger-invocation-orphan", "Ledger reservation has no Spawn invocation.", "gate-ledger.jsonl")
+    unused_acknowledgements = set(acknowledged_orphan_reservations) - actually_orphaned
+    if unused_acknowledgements:
+        raise ArchiveError("ledger-orphan-acknowledgement-invalid",
+                            "Declared orphan reservation is not actually orphaned.", "gate-ledger.jsonl")
     terminals = {e["started_event_id"]: e for e in events if e["event_type"] == "invocation-terminal"}
     instances: set[str] = set()
     for rid, started_event in by_reservation.items():
@@ -588,16 +679,59 @@ def validate_ledger(root: Path, events: list[dict[str, Any]]) -> None:
             instances.add(instance)
         elif terminal.get("instance_id") is not None and settlement.get("instance_id") not in (None, terminal.get("instance_id")):
             raise ArchiveError("ledger-instance-conflict", "Failed/cancelled Spawn instance conflicts with the ledger.", "gate-ledger.jsonl")
+    return sorted(orphan_degradations)
 
 
-def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any] | None = None) -> dict[str, Any]:
+def find_orphan_reservations(root: Path) -> list[str]:
+    """Read-only diagnostic: which settled ledger reservations have no matching Spawn
+    invocation-started event (candidates for `archive --declare-orphan-reservation`). Best
+    effort and lenient by design — malformed ledger lines are skipped rather than raised, since
+    this is an operator aid for deciding what to acknowledge, not part of the fail-closed
+    validation path (`validate_ledger` remains the sole strict authority)."""
+    root = Path(root)
+    ledger_path = root / "gate-ledger.jsonl"
+    if not ledger_path.exists():
+        return []
+    reserves: dict[str, dict[str, Any]] = {}
+    settles: dict[str, dict[str, Any]] = {}
+    for line in ledger_path.read_bytes().splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = strict_json_bytes(line)
+        except Exception:
+            continue
+        if not isinstance(item, dict) or "event" not in item:
+            continue
+        rid = item.get("reservation_id")
+        if not rid:
+            continue
+        if item["event"] == "reserved":
+            reserves[rid] = item
+        elif item["event"] in ("spawn_succeeded", "spawn_failed", "cancelled"):
+            settles[rid] = item
+    started_rids: set[str] = set()
+    try:
+        for event in load_events(root):
+            if event.get("event_type") == "invocation-started" and event.get("invocation_kind") == "spawn" and event.get("reservation_id"):
+                started_rids.add(event["reservation_id"])
+    except ArchiveError:
+        pass
+    return sorted(rid for rid in reserves if rid in settles and rid not in started_rids)
+
+
+def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any] | None = None,
+                      acknowledged_orphan_reservations: Iterable[str] = ()) -> dict[str, Any]:
+    ack = frozenset(acknowledged_orphan_reservations)
+    if any(not isinstance(rid, str) or not rid for rid in ack):
+        raise ArchiveError("orphan-acknowledgement-invalid", "Acknowledged orphan reservation ids must be non-empty strings.", "gate-ledger.jsonl")
     events = load_events(root)
-    validate_event_graph(events)
-    validate_ledger(root, events)
+    graph_degradations = validate_event_graph(events)
+    ledger_degradations = validate_ledger(root, events, acknowledged_orphan_reservations=ack)
     records = []
     for path in sorted(root.iterdir(), key=lambda p: p.name.casefold()):
         if path.is_file() and path.name not in ("INDEX.md", "manifest.json"):
-            if path.name not in ROOT_FIXED and not ROUND_RE.fullmatch(path.name):
+            if not is_root_allowed_name(path.name):
                 raise ArchiveError("root-clutter", "Root file is outside the canonical allowlist.", path.name)
             data = path.read_bytes()
             digest, size = sha256_size(data)
@@ -660,12 +794,19 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
             raise ArchiveError("revision-malformed", "Revision owner manifest is missing or malformed.", rel) from exc
         cursor = old_manifest.get("parent_revision")
     blobs = []
+    auxiliary_evidence = []
     evidence_root = root / "evidence"
     if evidence_root.exists():
-        actual_blobs = {
-            path.relative_to(root).as_posix() for path in evidence_root.rglob("*")
-            if path.is_file() and path.parent != evidence_root / "events"
-        }
+        reserved_files: list[Path] = []
+        auxiliary_files: list[Path] = []
+        for path in evidence_root.rglob("*"):
+            if not path.is_file():
+                continue
+            top = path.relative_to(evidence_root).parts[0]
+            if top == "events":
+                continue  # event log itself; tracked via `event_refs`, never a blob
+            (reserved_files if top in EVIDENCE_RESERVED_SUBDIRS else auxiliary_files).append(path)
+        actual_blobs = {path.relative_to(root).as_posix() for path in reserved_files}
         if actual_blobs != allowed_blobs:
             extra, missing = sorted(actual_blobs - allowed_blobs), sorted(allowed_blobs - actual_blobs)
             problem = extra[0] if extra else missing[0]
@@ -675,17 +816,37 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
             data = path.read_bytes()
             digest, size = sha256_size(data)
             blobs.append({"path": rel, "sha256": digest, "size": size})
+        # Auxiliary evidence (plan Phase 5 addendum, orchestrator-directed extension): any file
+        # under `evidence/` whose top segment is not one of the reserved, event-derived
+        # subdirectories. Imported and disclosed by default (no opt-in flag) — this is a
+        # capability grant matching "the archiver must not reject a legitimate generator's
+        # established product" (the same philosophy as step 3's root allowlist unification),
+        # not a validation relaxation: nothing that used to pass now passes differently, and
+        # everything imported is hashed and listed, never silently dropped. It still goes
+        # through every existing path-safety check (`ensure_safe_tree`'s symlink/reparse/
+        # device-name/Unicode-collision guards run over the whole tree unconditionally) and,
+        # defensively, the same common-secret basename refusal `capture_artifact`/
+        # `_read_regular_file` already apply at capture time — reused here rather than
+        # reinvented, so an obvious credential file cannot slip in through this newer, broader
+        # import path just because it bypasses the narrower capture-time API.
+        for path in sorted(auxiliary_files, key=lambda p: p.relative_to(root).as_posix().casefold()):
+            rel = path.relative_to(root).as_posix()
+            if path.name.casefold() in SECRET_NAMES:
+                raise ArchiveError("auxiliary-evidence-secret-refused", "Common secret files are refused by default.", rel)
+            data = path.read_bytes()
+            digest, size = sha256_size(data)
+            auxiliary_evidence.append({"path": rel, "sha256": digest, "size": size})
     degradations = sorted({
         f"model-provenance:{e['evidence_level']}" for e in events
         if e["event_type"] == "invocation-terminal" and e["evidence_level"] != "observed"
     } | {
         f"artifact:{e['artifact_id']}:{e['reproduction_capability']}" for e in events
         if e["event_type"] == "artifact-captured" and e["reproduction_capability"] != "snapshot"
-    })
+    } | set(graph_degradations) | set(ledger_degradations))
     if os.name == "nt":
         degradations.append("permissions:acl-confidentiality-not-verified")
         degradations.sort()
-    return {
+    result = {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "revision_id": revision_id,
@@ -703,9 +864,25 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
         "risks": ["same-writer-rewrite-undetectable"],
         "source_resolution": "disabled",
     }
+    if ack:
+        # Only present when at least one orphan reservation was explicitly acknowledged —
+        # omitted (rather than an empty list) in the overwhelmingly common default case so
+        # every archive predating this field, and every archive that never uses the opt-in
+        # `--declare-orphan-reservation` escape hatch, keeps byte-identical manifest shape.
+        # Schema version is not bumped for this addition: it is purely additive and
+        # self-consistently derived (`validate_archive` reads this same key back out of the
+        # stored manifest before recomputing `project_manifest`), so it never breaks
+        # `manifest-projection-mismatch` re-validation of pre-existing schema 1.0 archives.
+        result["acknowledged_orphan_reservations"] = sorted(ack)
+    if auxiliary_evidence:
+        # Same omit-when-empty convention as `acknowledged_orphan_reservations` above: keeps
+        # every archive with no auxiliary evidence byte-identical to pre-Phase-5 manifests, no
+        # schema version bump needed.
+        result["auxiliary_evidence"] = sorted(auxiliary_evidence, key=lambda item: item["path"].casefold())
+    return result
 
 
-def validate_event_graph(events: list[dict[str, Any]]) -> None:
+def validate_event_graph(events: list[dict[str, Any]]) -> list[str]:
     by_id = {e["event_id"]: e for e in events}
     started_by_invocation: dict[str, dict[str, Any]] = {}
     terminals: set[str] = set()
@@ -753,12 +930,30 @@ def validate_event_graph(events: list[dict[str, Any]]) -> None:
             raise ArchiveError("continue-instance-conflict", "Continue must bind the same instance as its Spawn parent.", "evidence/events")
     decisions = [e for e in events if e["event_type"] == "terminal-decision"]
     previous = None
-    for decision in decisions:
+    graph_degradations: list[str] = []
+    for index, decision in enumerate(decisions):
         if decision.get("supersedes_decision_event_id") != previous:
             raise ArchiveError("decision-chain", "Terminal decisions must form one append-only supersession chain.", "evidence/events")
         previous = decision["event_id"]
+        is_final = index == len(decisions) - 1
         if decision["decision_type"] == "reviewer-verdict":
-            validate_reviewer_verdict_authority(events, decision)
+            # Chain integrity (the `supersedes_decision_event_id` check above) and the final,
+            # non-superseded decision's authority are validated at full strength unconditionally.
+            # A decision that a *later* decision has already superseded no longer determines
+            # `final_decision` (see `project_manifest`'s `final_ref = decisions[-1]`) — so an
+            # invalid `reviewer_event_id` ref on a superseded entry can never again make the
+            # archive assert an unauthorized owner. Requiring it to still resolve would mean a
+            # single mis-recorded historical decision permanently fail-closes the archive with
+            # no compliant repair path other than superseding it — exactly the defect this
+            # relaxation removes. The failure is not hidden: it is surfaced as an auditable
+            # `degradations` entry (rendered in INDEX.md) instead of raising.
+            if is_final:
+                validate_reviewer_verdict_authority(events, decision)
+            else:
+                try:
+                    validate_reviewer_verdict_authority(events, decision)
+                except ArchiveError as exc:
+                    graph_degradations.append(f"decision:superseded-ref-unverified:{decision['event_id']}:{exc.code}")
         else:
             prior = [e for e in events if e["sequence"] < decision["sequence"]]
             message = by_id.get(decision["source_ref"])
@@ -773,6 +968,7 @@ def validate_event_graph(events: list[dict[str, Any]]) -> None:
             })
             if decision["presented_degradations"] != actual:
                 raise ArchiveError("user-decision-degradations", "User decision must present exactly the degradations present at decision time.", "evidence/events")
+    return sorted(graph_degradations)
 
 
 def _verify_evidence_bytes(root: Path, events: list[dict[str, Any]]) -> None:
@@ -868,7 +1064,10 @@ def _validate_revision(root: Path, manifest: dict[str, Any]) -> None:
 
 def _declared_file_refs(manifest: dict[str, Any]) -> dict[str, tuple[str, int]]:
     refs: dict[str, tuple[str, int]] = {}
-    for collection in (manifest.get("records"), manifest.get("events"), manifest.get("blobs")):
+    # `auxiliary_evidence` may be entirely absent (omit-when-empty convention) — `or []`
+    # normalizes that to an empty collection rather than tripping the type check below.
+    for collection in (manifest.get("records"), manifest.get("events"), manifest.get("blobs"),
+                       manifest.get("auxiliary_evidence") or []):
         if not isinstance(collection, list):
             raise ArchiveError("manifest-schema", "Manifest record/event collections must be arrays.", "manifest.json")
         for item in collection:
@@ -884,6 +1083,13 @@ def _declared_file_refs(manifest: dict[str, Any]) -> dict[str, tuple[str, int]]:
 
 
 def validate_archive(root: Path, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+    # Resolve once, up front, and reuse the resolved root everywhere below — `ensure_safe_tree`
+    # always returns absolute resolved file paths internally, so comparing them against an
+    # unresolved (possibly relative, e.g. from a CLI caller passing a relative `root`) `Path`
+    # via `.relative_to()` raises "... is not in the subpath of ..." even though the archive
+    # itself is perfectly valid. This was the "Windows relative path subpath 误报" bug: it
+    # reproduces on any OS, not only Windows, whenever `root` is passed as a relative path.
+    root = ensure_safe_root(Path(root))
     ensure_safe_tree(root)
     if manifest is None:
         try:
@@ -902,14 +1108,16 @@ def validate_archive(root: Path, manifest: dict[str, Any] | None = None) -> dict
         data = (root / rel).read_bytes()
         if sha256_size(data) != (digest, size):
             raise ArchiveError("content-mismatch", "Committed content hash or byte size differs.", rel)
+    acknowledged = frozenset(manifest.get("acknowledged_orphan_reservations") or ())
     events = load_events(root)
     validate_event_graph(events)
     _verify_evidence_bytes(root, events)
-    validate_ledger(root, events)
+    validate_ledger(root, events, acknowledged_orphan_reservations=acknowledged)
     _validate_markdown_links(root, manifest["records"])
     _validate_decision_cross_refs(root, manifest)
     _validate_revision(root, manifest)
-    projected = project_manifest(root, manifest["revision_id"], manifest.get("parent_revision"))
+    projected = project_manifest(root, manifest["revision_id"], manifest.get("parent_revision"),
+                                  acknowledged_orphan_reservations=acknowledged)
     if projected != manifest:
         raise ArchiveError("manifest-projection-mismatch", "Manifest differs from immutable owner facts.", "manifest.json")
     if (root / "INDEX.md").read_bytes() != render_index_bytes(manifest):
@@ -946,6 +1154,10 @@ def render_index_bytes(manifest: dict[str, Any]) -> bytes:
     artifacts = "\n".join(
         f"- `{item['artifact_id']}@{item['revision_id']}` mode={item['evidence_mode']}; capability={item['reproduction_capability']}; locator={json.dumps(item['source_locator'], ensure_ascii=False, sort_keys=True)}; sha256={item['sha256']}"
         for item in manifest.get("artifacts", [])
+    ) or "- none"
+    auxiliary_evidence = "\n".join(
+        f"- [{item['path']}]({item['path']}) sha256={item['sha256']} size={item['size']}"
+        for item in manifest.get("auxiliary_evidence") or []
     ) or "- none"
     risks = "\n".join(f"- {item}" for item in manifest.get("risks", [])) or "- none"
     records = {item["path"] for item in manifest.get("records", [])}
@@ -994,6 +1206,13 @@ def render_index_bytes(manifest: dict[str, Any]) -> bytes:
 ## Artifact Provenance
 
 {artifacts}
+
+## Auxiliary Evidence (non-event-derived)
+
+Imported and hash-verified, but not part of the event graph and not carrying any provenance
+claim — see `EVIDENCE_RESERVED_SUBDIRS` in the Archive Contract for what *is* event-derived.
+
+{auxiliary_evidence}
 
 ## Residual Risks
 

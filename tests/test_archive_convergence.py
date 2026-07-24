@@ -565,14 +565,20 @@ class ArchiveContractTests(unittest.TestCase):
             validate_event(event)
         self.assertEqual(caught.exception.code, "event-fields")
 
-    def test_b4_orphan_blob_is_not_projected_as_owner_fact(self):
-        from archive_contract.model import ArchiveError, project_manifest
+    def test_b4_orphan_blob_is_imported_as_auxiliary_evidence_not_an_owner_fact(self):
+        # Behavior deliberately changed by the Phase 5 auxiliary-evidence addendum
+        # (orchestrator-directed extension, "契约端扩展"): a file under `evidence/` whose top
+        # segment is not one of the reserved event-derived subdirectories (events/,
+        # invocations/, artifacts/, revisions/) is no longer a fatal `evidence-orphan` — it is
+        # imported, hashed, and disclosed as `auxiliary_evidence`, but it still never becomes
+        # an event-owned fact (not in `blobs`, not referenced by any invocation/artifact).
+        from archive_contract.model import project_manifest
 
         events = self.active / "evidence" / "events"; events.mkdir(parents=True)
         orphan = self.active / "evidence" / "orphan.txt"; orphan.write_text("orphan", encoding="utf-8")
-        with self.assertRaises(ArchiveError) as caught:
-            project_manifest(self.active)
-        self.assertEqual(caught.exception.code, "evidence-orphan")
+        manifest = project_manifest(self.active)
+        self.assertEqual(manifest["blobs"], [])
+        self.assertEqual([item["path"] for item in manifest.get("auxiliary_evidence", [])], ["evidence/orphan.txt"])
 
     def test_b5_concurrent_complete_creates_exactly_one_terminal(self):
         from archive_contract.capture import begin_invocation, complete_invocation
@@ -652,8 +658,9 @@ class ArchiveContractTests(unittest.TestCase):
         with mock.patch.object(transaction, "_write_journal", injected):
             with self.assertRaises(OSError):
                 transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
-        result = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        result, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
         self.assertEqual(result, done / "case")
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
         self.assertFalse(self.active.exists())
         self.assertFalse(any((self.root / "active").glob(".archive-*.journal.json")))
 
@@ -856,6 +863,615 @@ class ArchiveContractTests(unittest.TestCase):
                 review_kind="fresh", verdict="executable", verdict_output_ref=terminal["event_id"],
                 supersedes_decision_event_id=None))
         return result
+
+    # ---- Phase 5: Archive Contract / Windows-OneDrive reliability -----------------------
+
+    # -- (a) non-ASCII slug charset ------------------------------------------------------
+
+    def test_p5_unicode_slug_archives_successfully(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        slug = "20260724-OCSR-converge薄编排"
+        (self.root / "active" / "case").rename(self.root / "active" / slug)
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, slug, archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        self.assertEqual(target, done / slug)
+        self.assertTrue(check_view(target)["valid"])
+
+    def test_p5_unicode_slug_still_rejects_separators_device_names_and_trailing_dot(self):
+        from archive_contract.model import ArchiveError, validate_identifier
+
+        for bad in ("a/b", "a\\b", "CON", "con.md", "薄.", "薄 ", "a:b", "​薄"):
+            with self.assertRaises(ArchiveError, msg=bad):
+                validate_identifier(bad, "slug", charset="unicode-safe")
+        validate_identifier("20260724-OCSR-converge薄编排与成本控制修复", "slug", charset="unicode-safe")
+
+    def test_p5_artifact_id_charset_stays_ascii_only(self):
+        from archive_contract.model import ArchiveError, validate_identifier
+
+        validate_identifier("legacy-reference-materials", "artifact_id")
+        with self.assertRaises(ArchiveError):
+            validate_identifier("薄编排", "artifact_id")
+
+    # -- (b) supersession chain relaxation for superseded reviewer-verdict decisions ----
+
+    def test_p5_final_reviewer_verdict_bad_ref_still_fails_closed(self):
+        from archive_contract.model import ArchiveError, validate_event_graph
+
+        events = self._minimal_event_graph(role="reviewer", include_decision=False)
+        start, terminal = events
+        bad_final = self._event("terminal-decision", 3, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:02+00:00", reviewer_event_id=start["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=start["event_id"],
+            supersedes_decision_event_id=None)
+        with self.assertRaises(ArchiveError) as caught:
+            validate_event_graph(events + [bad_final])
+        self.assertEqual(caught.exception.code, "decision-reviewer-ref")
+
+    def test_p5_superseded_reviewer_verdict_bad_ref_downgrades_to_degradation(self):
+        from archive_contract.model import validate_event_graph
+
+        events = self._minimal_event_graph(role="reviewer", include_decision=False)
+        start, terminal = events
+        bad = self._event("terminal-decision", 3, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:02+00:00", reviewer_event_id=start["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=start["event_id"],
+            supersedes_decision_event_id=None)
+        good = self._event("terminal-decision", 4, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:03+00:00", reviewer_event_id=terminal["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=terminal["event_id"],
+            supersedes_decision_event_id=bad["event_id"])
+        degradations = validate_event_graph(events + [bad, good])
+        self.assertTrue(any(d.startswith(f"decision:superseded-ref-unverified:{bad['event_id']}:") for d in degradations))
+
+    def test_p5_decision_chain_integrity_still_enforced_regardless_of_ref_validity(self):
+        from archive_contract.model import ArchiveError, validate_event_graph
+
+        events = self._minimal_event_graph(role="reviewer", include_decision=False)
+        start, terminal = events
+        bad = self._event("terminal-decision", 3, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:02+00:00", reviewer_event_id=start["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=start["event_id"],
+            supersedes_decision_event_id=None)
+        good = self._event("terminal-decision", 4, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:03+00:00", reviewer_event_id=terminal["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=terminal["event_id"],
+            supersedes_decision_event_id="00000000-0000-4000-8000-999999999999")
+        with self.assertRaises(ArchiveError) as caught:
+            validate_event_graph(events + [bad, good])
+        self.assertEqual(caught.exception.code, "decision-chain")
+
+    def test_p5_archive_succeeds_end_to_end_with_superseded_bad_ref_decision(self):
+        from archive_contract.capture import begin_invocation, complete_invocation, append_event, record_terminal_decision
+        from archive_contract import transaction
+        import archive_convergence
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id="r1")
+        terminal = complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"executable")
+        # Written via append_event directly (bypassing record_terminal_decision's write-time
+        # gate) to simulate a bad ref that landed through a non-capture.py write path — e.g.
+        # legacy migration tooling, matching the mis-recorded historical incident this fix
+        # targets.
+        bad = append_event(self.active, {
+            "event_type": "terminal-decision", "generated_at": "2026-07-24T00:00:00+00:00",
+            "decision_type": "reviewer-verdict", "reviewer_event_id": started["event_id"],
+            "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": started["event_id"],
+            "supersedes_decision_event_id": None,
+        })
+        good = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+            "supersedes_decision_event_id": bad["event_id"],
+        })
+        marker = f"terminal_decision_event_id: {good['event_id']}\nterminal_decision_value: executable\n"
+        (self.active / "round-1.md").write_text(marker, encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text(marker, encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        manifest = json.loads((target / "manifest.json").read_bytes())
+        self.assertTrue(any(d.startswith(f"decision:superseded-ref-unverified:{bad['event_id']}:") for d in manifest["degradations"]))
+        self.assertEqual(manifest["final_decision"]["event_id"], good["event_id"])
+
+    # -- (c) explicit opt-in orphan-reservation degraded archive -------------------------
+
+    def test_p5_orphan_reservation_fails_closed_by_default(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import ArchiveError, load_events, validate_ledger
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="review", round_number=1, attempt=1, reservation_id="r1")
+        complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok")
+        self._append_ledger_pair("orphan-r1", 2, "inst-x")
+        with self.assertRaises(ArchiveError) as caught:
+            validate_ledger(self.active, load_events(self.active))
+        self.assertEqual(caught.exception.code, "ledger-invocation-orphan")
+
+    def test_p5_orphan_reservation_declared_becomes_degradation(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import load_events, validate_ledger
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="review", round_number=1, attempt=1, reservation_id="r1")
+        complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok")
+        self._append_ledger_pair("orphan-r1", 2, "inst-x")
+        degradations = validate_ledger(self.active, load_events(self.active),
+            acknowledged_orphan_reservations=frozenset({"orphan-r1"}))
+        self.assertEqual(degradations, ["ledger:orphan-reservation:orphan-r1"])
+
+    def test_p5_orphan_acknowledgement_of_non_orphan_rejected(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import ArchiveError, load_events, validate_ledger
+
+        self._close_review_for_transaction()
+        with self.assertRaises(ArchiveError) as caught:
+            validate_ledger(self.active, load_events(self.active),
+                acknowledged_orphan_reservations=frozenset({"r1"}))
+        self.assertEqual(caught.exception.code, "ledger-orphan-acknowledgement-invalid")
+
+    def test_p5_find_orphan_reservations_lists_only_true_orphans(self):
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import find_orphan_reservations
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="review", round_number=1, attempt=1, reservation_id="r1")
+        complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok")
+        self._append_ledger_pair("orphan-r1", 2, "inst-x")
+        self.assertEqual(find_orphan_reservations(self.active), ["orphan-r1"])
+
+    def test_p5_acknowledged_orphan_reservations_omitted_from_manifest_when_empty(self):
+        self._close_review_for_transaction()
+        from archive_contract.model import project_manifest
+
+        manifest = project_manifest(self.active)
+        self.assertNotIn("acknowledged_orphan_reservations", manifest)
+
+    def test_p5_archive_cli_declare_orphan_reservation_end_to_end(self):
+        import archive_convergence
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id="r1")
+        terminal = complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"executable")
+        decision = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+        })
+        marker = f"terminal_decision_event_id: {decision['event_id']}\nterminal_decision_value: executable\n"
+        (self.active / "round-1.md").write_text(marker, encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text(marker, encoding="utf-8", newline="\n")
+        self._append_ledger_pair("orphan-r1", 2, "inst-x")
+        done = self.root / "done"; done.mkdir()
+        rc = archive_convergence.main(["archive", str(self.root / "active"), str(done), "case"])
+        self.assertEqual(rc, 3)
+        self.assertFalse((done / "case").exists())
+        rc = archive_convergence.main([
+            "archive", str(self.root / "active"), str(done), "case",
+            "--declare-orphan-reservation", "orphan-r1",
+        ])
+        self.assertEqual(rc, 0)
+        manifest = json.loads((done / "case" / "manifest.json").read_bytes())
+        self.assertEqual(manifest.get("acknowledged_orphan_reservations"), ["orphan-r1"])
+        self.assertIn("ledger:orphan-reservation:orphan-r1", manifest["degradations"])
+
+    # -- (d) root allowlist unification ---------------------------------------------------
+
+    def test_p5_root_allowlist_accepts_scope_product_and_ocsr_ledger_files(self):
+        from archive_contract import transaction
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "uv-init-1.md").write_text("initial review\n", encoding="utf-8", newline="\n")
+        (self.active / "uv-init-1-inner-1.md").write_text("inner review\n", encoding="utf-8", newline="\n")
+        (self.active / "blind-recheck-1.md").write_text("blind review\n", encoding="utf-8", newline="\n")
+        (self.active / "ocsr-dispatch-ledger.jsonl").write_text('{"a":1}\n', encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        manifest = json.loads((target / "manifest.json").read_bytes())
+        names = {r["path"] for r in manifest["records"]}
+        self.assertTrue({"uv-init-1.md", "uv-init-1-inner-1.md", "blind-recheck-1.md",
+                          "ocsr-dispatch-ledger.jsonl"} <= names)
+
+    def test_p5_root_allowlist_still_rejects_unknown_root_file(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "random-notes.md").write_text("nope\n", encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(caught.exception.code, "root-clutter")
+
+    def test_p5_is_root_allowed_name_matches_budget_gate_scope_product_templates(self):
+        """Cross-module consistency check standing in for a shared import (budget_gate.py
+        cannot import archive_contract.model without a cycle, since model.validate_ledger
+        imports budget_gate) — every SCOPE_PRODUCT template instantiation must satisfy the
+        archive root allowlist, or the two modules have silently diverged."""
+        import budget_gate
+        from archive_contract.model import is_root_allowed_name
+
+        for template in budget_gate.SCOPE_PRODUCT.values():
+            for n in (1, 2, 10, 123):
+                name = template.format(n=n)
+                self.assertTrue(is_root_allowed_name(name), name)
+
+    # -- archive() cleanup-pending distinguishable status (step 2) -----------------------
+
+    def test_p5_archive_returns_cleanup_pending_when_only_backup_removal_fails(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        original_rmtree = transaction.shutil.rmtree
+        calls = {"n": 0}
+        def flaky_rmtree(path, *a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError(2, "Access is denied", None, 5)
+            return original_rmtree(path, *a, **kw)
+        with mock.patch.object(transaction.shutil, "rmtree", side_effect=flaky_rmtree):
+            target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_CLEANUP_PENDING)
+        self.assertTrue(check_view(target)["valid"])
+        self.assertTrue(any((self.root / "active").glob(".archive-*.journal.json")))
+        target2, status2 = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(target2, target)
+        self.assertEqual(status2, transaction.STATUS_COMMITTED)
+        self.assertFalse(any((self.root / "active").glob(".archive-*.journal.json")))
+
+    # -- Windows relative-path subpath false positive (step 4) ---------------------------
+
+    def test_p5_check_relative_root_path_does_not_misfire(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        cwd = os.getcwd()
+        try:
+            os.chdir(str(done))
+            view = check_view(Path("case"))
+            self.assertTrue(view["valid"], view["diagnostics"])
+        finally:
+            os.chdir(cwd)
+
+    # -- newline / CRLF policy (step 5) ---------------------------------------------------
+
+    def test_p5_root_records_normalized_to_lf_before_hashing(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        data = (self.active / "round-1.md").read_bytes()
+        (self.active / "round-1.md").write_bytes(data.replace(b"\n", b"\r\n"))
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        committed = (target / "round-1.md").read_bytes()
+        self.assertNotIn(b"\r\n", committed)
+        self.assertTrue(check_view(target)["valid"])
+
+    def test_p5_evidence_blobs_are_not_line_ending_normalized(self):
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+        from archive_contract import transaction
+        import archive_convergence
+
+        self._append_ledger_pair("r1", 1, "inst-1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id="r1")
+        payload = b"line1\r\nline2\r\n"
+        terminal = complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="inst-1", receipt="r", settlement_ref="gate-ledger.jsonl:r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=payload, evidence_mode="exact")
+        decision = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+        })
+        marker = f"terminal_decision_event_id: {decision['event_id']}\nterminal_decision_value: executable\n"
+        (self.active / "round-1.md").write_text(marker, encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text(marker, encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        blob_path = next((target / "evidence" / "invocations").rglob("output.bin"))
+        self.assertEqual(blob_path.read_bytes(), payload)
+
+    def test_p5_check_git_ref_reverifies_from_git_commit(self):
+        import archive_convergence
+        from archive_contract import transaction
+
+        self._close_review_for_transaction()
+        done_root = self.root / ".converge" / "done"
+        done_root.mkdir(parents=True)
+        target, status = transaction.archive(self.root / "active", done_root, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True, check=True)
+        git("init", "-q")
+        git("config", "user.email", "test@example.com")
+        git("config", "user.name", "test")
+        # Match this repo's own .gitattributes convention (`* text=auto eol=lf`) — without it,
+        # a throwaway repo falls back to whatever `core.autocrlf` the host's system-level Git
+        # config declares (commonly true on Windows installs), which would make `git archive`
+        # re-introduce CRLF independently of anything this test is trying to verify.
+        (self.root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8", newline="\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", "archive case")
+        rc = archive_convergence.main(["check-git-ref", str(self.root), "case", "--format", "json"])
+        self.assertEqual(rc, 0)
+
+    # -- ACL/ReadOnly/reparse precise-path safe removal (step 6) --------------------------
+
+    def test_p5_safe_remove_tree_rejects_shallow_path(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+
+        shallow = Path(self.root.anchor)
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.safe_remove_tree(shallow)
+        self.assertEqual(caught.exception.code, "cleanup-root-guard")
+
+    def test_p5_safe_remove_tree_rejects_unexpected_parent(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+
+        victim = self.root / "active" / "case"
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.safe_remove_tree(victim, expected_parent=self.root)
+        self.assertEqual(caught.exception.code, "cleanup-path-unsafe")
+        self.assertTrue(victim.exists())
+
+    def test_p5_safe_remove_tree_removes_readonly_file_via_retry(self):
+        from archive_contract import transaction
+        import stat as _stat
+
+        victim = self.root / "active" / "case"
+        ro_file = victim / "readonly.md"
+        ro_file.write_text("x", encoding="utf-8")
+        os.chmod(ro_file, _stat.S_IREAD)
+        transaction.safe_remove_tree(victim, expected_parent=self.root / "active")
+        self.assertFalse(victim.exists())
+
+    def test_p5_safe_remove_tree_unlinks_real_junction_without_touching_target(self):
+        from archive_contract import transaction
+
+        target_dir = self.root / "junction-target"
+        target_dir.mkdir()
+        (target_dir / "keep.md").write_text("keep me\n", encoding="utf-8")
+        link = self.root / "active" / "junction-link"
+        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target_dir)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            self.skipTest(f"mklink /J unavailable in this environment: {result.stderr or result.stdout}")
+        self.assertTrue(link.exists())
+        transaction.safe_remove_tree(link, expected_parent=self.root / "active")
+        self.assertFalse(link.exists())
+        self.assertTrue((target_dir / "keep.md").exists())
+
+    # -- OneDrive/reparse workaround: detection + local staging (step 1) -----------------
+
+    def test_p5_probe_delete_blocked_false_for_normal_directory(self):
+        from archive_contract import transaction
+
+        self.assertFalse(transaction._probe_delete_blocked(self.root))
+
+    def test_p5_probe_delete_blocked_true_on_injected_winerror5(self):
+        from archive_contract import transaction
+
+        real_rmdir = Path.rmdir
+        def fake_rmdir(self_path):
+            if self_path.name.startswith(".archive-probe-"):
+                raise OSError(2, "Access is denied", None, 5)
+            return real_rmdir(self_path)
+        with mock.patch.object(Path, "rmdir", fake_rmdir):
+            self.assertTrue(transaction._probe_delete_blocked(self.root))
+
+    def test_p5_onedrive_workaround_needed_detects_reparse_attribute_via_injected_adapter(self):
+        from archive_contract import transaction
+        import types
+
+        real_lstat = Path.lstat
+        def fake_lstat(self_path):
+            if self_path == self.root:
+                return types.SimpleNamespace(st_file_attributes=0x400)
+            return real_lstat(self_path)
+        with mock.patch.object(Path, "lstat", fake_lstat):
+            self.assertTrue(transaction.onedrive_workaround_needed(self.root, self.root, probe=False))
+
+    def test_p5_archive_reliable_defaults_to_plain_archive_when_not_reparse_blocked(self):
+        from archive_contract import transaction
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive_reliable(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        self.assertFalse(any((self.root / "active").glob(".archive-*.onedrive-journal.json")))
+
+    def test_p5_archive_reliable_routes_through_local_staging_when_forced(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive_reliable(self.root / "active", done, "case",
+            archive_convergence._prepare, workaround=True)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        self.assertEqual(target, done / "case")
+        self.assertFalse(self.active.exists())
+        self.assertTrue(check_view(target)["valid"])
+
+    def test_p5_archive_reliable_idempotent_when_source_already_gone(self):
+        from archive_contract import transaction
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive_reliable(self.root / "active", done, "case",
+            archive_convergence._prepare, workaround=True)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        target2, status2 = transaction.archive_reliable(self.root / "active", done, "case",
+            archive_convergence._prepare, workaround=True)
+        self.assertEqual(status2, transaction.STATUS_COMMITTED)
+        self.assertEqual(target2, target)
+
+    def test_p5_archive_reliable_done_conflict_when_no_journal_but_both_copies_exist(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        (done / "case").mkdir()
+        (done / "case" / "foreign.txt").write_text("not ours\n", encoding="utf-8")
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.archive_reliable(self.root / "active", done, "case", archive_convergence._prepare,
+                workaround=True)
+        self.assertEqual(caught.exception.code, "done-conflict")
+
+    def test_p5_archive_reliable_cleanup_pending_then_idempotent_retry(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        done = self.root / "done"; done.mkdir()
+        original = transaction.safe_remove_tree
+        calls = {"n": 0}
+        def flaky(path, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError(2, "Access is denied", None, 5)
+            return original(path, **kw)
+        with mock.patch.object(transaction, "safe_remove_tree", side_effect=flaky):
+            target, status = transaction.archive_reliable(self.root / "active", done, "case",
+                archive_convergence._prepare, workaround=True)
+        self.assertEqual(status, transaction.STATUS_CLEANUP_PENDING)
+        self.assertTrue(self.active.exists())
+        self.assertTrue(check_view(target)["valid"])
+        target2, status2 = transaction.archive_reliable(self.root / "active", done, "case",
+            archive_convergence._prepare, workaround=True)
+        self.assertEqual(status2, transaction.STATUS_COMMITTED)
+        self.assertFalse(self.active.exists())
+
+    # ---- Phase 5 addendum: auxiliary (non-event-derived) evidence import ----------------
+    # Orchestrator裁决 2026-07-24："契约端扩展"——evidence/ 下非保留子路径的文件默认导入并
+    # 披露（不是放宽校验，是"归档器不应拒绝合法生成器的既定产物"哲学的延伸，见 step 3）。
+
+    def test_p5b_auxiliary_evidence_imported_and_disclosed(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "evidence").mkdir(exist_ok=True)
+        (self.active / "evidence" / "phase3-report.md").write_text("# report\n", encoding="utf-8", newline="\n")
+        (self.active / "evidence" / "notes").mkdir(parents=True, exist_ok=True)
+        (self.active / "evidence" / "notes" / "sub.md").write_text("nested\n", encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        manifest = json.loads((target / "manifest.json").read_bytes())
+        paths = {item["path"] for item in manifest.get("auxiliary_evidence", [])}
+        self.assertEqual(paths, {"evidence/phase3-report.md", "evidence/notes/sub.md"})
+        # not projected as an owner fact — absent from blobs/invocations
+        self.assertNotIn("evidence/phase3-report.md", {b["path"] for b in manifest["blobs"]})
+        index = (target / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("Auxiliary Evidence", index)
+        self.assertIn("non-event-derived", index)
+        self.assertIn("evidence/phase3-report.md", index)
+        self.assertTrue(check_view(target)["valid"])
+
+    def test_p5b_auxiliary_file_cannot_shadow_reserved_subdir_name(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "evidence" / "artifacts").mkdir(parents=True, exist_ok=True)
+        (self.active / "evidence" / "artifacts" / "not-a-real-artifact.txt").write_text("x", encoding="utf-8")
+        done = self.root / "done"; done.mkdir()
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(caught.exception.code, "evidence-orphan")
+
+    def test_p5b_auxiliary_evidence_refuses_secret_basenames(self):
+        from archive_contract import transaction
+        from archive_contract.model import ArchiveError
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "evidence").mkdir(exist_ok=True)
+        (self.active / "evidence" / ".env").write_text("SECRET=1\n", encoding="utf-8")
+        done = self.root / "done"; done.mkdir()
+        with self.assertRaises(ArchiveError) as caught:
+            transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(caught.exception.code, "auxiliary-evidence-secret-refused")
+
+    def test_p5b_check_detects_auxiliary_evidence_hash_drift(self):
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+        import archive_convergence
+
+        self._close_review_for_transaction()
+        (self.active / "evidence").mkdir(exist_ok=True)
+        (self.active / "evidence" / "phase3-report.md").write_text("original\n", encoding="utf-8", newline="\n")
+        done = self.root / "done"; done.mkdir()
+        target, status = transaction.archive(self.root / "active", done, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        self.assertTrue(check_view(target)["valid"])
+        (target / "evidence" / "phase3-report.md").write_bytes(b"tampered\n")
+        view = check_view(target)
+        self.assertFalse(view["valid"])
+        self.assertEqual(view["diagnostics"][0]["code"], "content-mismatch")
+
+    def test_p5b_auxiliary_evidence_omitted_from_manifest_when_absent(self):
+        from archive_contract.model import project_manifest
+
+        self._close_review_for_transaction()
+        manifest = project_manifest(self.active)
+        self.assertNotIn("auxiliary_evidence", manifest)
+
+    def test_p5b_secret_names_shared_between_capture_and_model(self):
+        from archive_contract import capture, model
+
+        self.assertIs(capture.SECRET_NAMES, model.SECRET_NAMES)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import io
 import json
 import subprocess
@@ -37,7 +38,28 @@ def _bootstrap_import(staging: Path) -> None:
     capture.bootstrap_import_legacy(staging)
 
 
-def _prepare(staging: Path) -> None:
+def _normalize_line_endings(staging: Path) -> None:
+    """Normalize CRLF -> LF in flat root-level records before archive-time hashing (plan
+    Phase 5 step 5), so the manifest hashes the exact bytes Git will store/checkout under this
+    repo's `.gitattributes` (`* text=auto eol=lf`) convention. Only touches the same root
+    allowlist `model.is_root_allowed_name` accepts (round-N.md, uv-init-N.md,
+    blind-recheck-N.md, plan.md/contract.md/attempts.md/..., gate-ledger.jsonl,
+    _budget-state.json, ocsr-dispatch-ledger.jsonl) — never `evidence/` blobs, which are
+    byte-exact captures whose identity was already fixed at capture time and must not be
+    rewritten here. Safe for JSON records too: valid JSON forbids raw, unescaped CR/LF bytes
+    inside string values, so any literal `\\r\\n` found in a well-formed root JSON file can only
+    be a line separator the writer produced, never semantic content."""
+    for path in sorted(staging.iterdir()):
+        if not path.is_file() or not model.is_root_allowed_name(path.name):
+            continue
+        data = path.read_bytes()
+        normalized = data.replace(b"\r\n", b"\n")
+        if normalized != data:
+            path.write_bytes(normalized)
+
+
+def _prepare(staging: Path, *, acknowledged_orphan_reservations: frozenset[str] = frozenset()) -> None:
+    _normalize_line_endings(staging)
     _bootstrap_import(staging)
     reopen_state = staging / ".reopen-state.json"
     revision_id, parent = "r1", None
@@ -49,11 +71,32 @@ def _prepare(staging: Path) -> None:
             "sha256": state["parent_sha256"],
         }
         reopen_state.unlink()
-    manifest = model.project_manifest(staging, revision_id=revision_id, parent=parent)
+    manifest = model.project_manifest(staging, revision_id=revision_id, parent=parent,
+                                       acknowledged_orphan_reservations=acknowledged_orphan_reservations)
     if not manifest["final_verdict_ref"]:
         raise ArchiveError("final-decision-missing", "Archive requires exactly one closed terminal decision.", "evidence/events")
     (staging / "manifest.json").write_bytes(model.canonical_json_bytes(manifest))
     (staging / "INDEX.md").write_bytes(presentation.render_index(manifest))
+
+
+def _materialize_and_check(repo: Path, treeish: str, rel_dir: str) -> dict:
+    """Extract `rel_dir` from `treeish` (a Git commit-ish or tree object) via `git archive`
+    into an isolated temp directory and run `check_view` against the materialized copy — this
+    is how a caller re-verifies archive hashes from the Git index/a commit rather than the live
+    working tree (plan Phase 5 step 5). Shared by `check-push-range` (pre-push hook, a base..head
+    diff range) and `check-git-ref` (ad hoc, single ref or the staged index)."""
+    proc = subprocess.run(["git", "archive", "--format=tar", treeish, rel_dir], cwd=repo,
+        capture_output=True, check=True)
+    with tempfile.TemporaryDirectory() as td, tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as archive:
+        root = Path(td).resolve()
+        for member in archive.getmembers():
+            target = (root / member.name).resolve()
+            try: target.relative_to(root)
+            except ValueError as exc: raise ArchiveError("git-archive-escape", "Git archive member escapes materialization root.") from exc
+            if not (member.isfile() or member.isdir()):
+                raise ArchiveError("git-archive-filetype", "Git archive contains a non-file entry.", member.name)
+        archive.extractall(root)
+        return presentation.check_view(root / rel_dir)
 
 
 def _check_push_range(repo: Path, base: str, head: str) -> list[dict]:
@@ -66,22 +109,11 @@ def _check_push_range(repo: Path, base: str, head: str) -> list[dict]:
     for raw in changed:
         if raw.startswith(b".converge/done/"):
             slug = raw.decode("utf-8", errors="strict").split("/", 3)[2]
-            model.validate_identifier(slug, "slug"); slugs.add(slug)
+            model.validate_identifier(slug, "slug", charset="unicode-safe"); slugs.add(slug)
     failures = []
     for slug in sorted(slugs, key=str.casefold):
-        proc = subprocess.run(["git", "archive", "--format=tar", head, f".converge/done/{slug}"],
-            cwd=repo, capture_output=True, check=True)
-        with tempfile.TemporaryDirectory() as td, tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:") as archive:
-            root = Path(td).resolve()
-            for member in archive.getmembers():
-                target = (root / member.name).resolve()
-                try: target.relative_to(root)
-                except ValueError as exc: raise ArchiveError("git-archive-escape", "Git archive member escapes materialization root.") from exc
-                if not (member.isfile() or member.isdir()):
-                    raise ArchiveError("git-archive-filetype", "Git archive contains a non-file entry.", member.name)
-            archive.extractall(root)
-            view = presentation.check_view(root / ".converge" / "done" / slug)
-            if not view["valid"]: failures.append(view)
+        view = _materialize_and_check(repo, head, f".converge/done/{slug}")
+        if not view["valid"]: failures.append(view)
     return failures
 
 
@@ -128,6 +160,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     archive_p = sub.add_parser("archive")
     archive_p.add_argument("active_root", type=Path); archive_p.add_argument("done_root", type=Path); archive_p.add_argument("slug")
+    archive_p.add_argument("--declare-orphan-reservation", action="append", default=[], metavar="RESERVATION_ID",
+        help="Explicit opt-in: acknowledge a settled gate-ledger reservation that has no Spawn invocation-started "
+             "event as a disclosed degradation, instead of fail-closed ledger-invocation-orphan. Repeatable. See "
+             "`list-orphan-reservations` to find candidates. Default: none (unchanged fail-closed behavior).")
+    archive_p.add_argument("--local-staging", choices=("auto", "always", "never"), default="auto",
+        help="OneDrive/reparse workaround selection (plan Phase 5 step 1): 'auto' (default) probes the roots and "
+             "routes through a local temp workspace only when needed; 'always' forces it; 'never' forces the "
+             "plain in-place transaction.")
     reopen_p = sub.add_parser("reopen")
     reopen_p.add_argument("active_root", type=Path); reopen_p.add_argument("done_root", type=Path); reopen_p.add_argument("slug")
     check = sub.add_parser("check"); check.add_argument("root", type=Path); check.add_argument("--format", choices=("human", "json"), default="human")
@@ -136,6 +176,17 @@ def build_parser() -> argparse.ArgumentParser:
     changed.add_argument("done_root", type=Path)
     push = sub.add_parser("check-push-range", aliases=("--check-push-range",))
     push.add_argument("repo", type=Path); push.add_argument("base"); push.add_argument("head")
+    check_ref = sub.add_parser("check-git-ref",
+        help="Re-verify manifest hashes from the Git index or a commit, not the live working tree "
+             "(plan Phase 5 step 5) — extracts `.converge/done/<slug>` via `git archive` and re-runs check.")
+    check_ref.add_argument("repo", type=Path); check_ref.add_argument("slug")
+    check_ref.add_argument("--ref", default="HEAD", help="Commit-ish to check (default HEAD); ignored with --from-index.")
+    check_ref.add_argument("--from-index", action="store_true", help="Check the staged Git index (`git write-tree`) instead of --ref.")
+    check_ref.add_argument("--format", choices=("human", "json"), default="human")
+    orphans = sub.add_parser("list-orphan-reservations",
+        help="Read-only diagnostic: settled gate-ledger reservations with no matching Spawn invocation-started "
+             "event — candidates for `archive --declare-orphan-reservation`.")
+    orphans.add_argument("root", type=Path); orphans.add_argument("--format", choices=("human", "json"), default="human")
     return parser
 
 
@@ -173,7 +224,12 @@ def main(argv=None) -> int:
             _output(capture.record_user_message(args.root, host_message_id=args.host_message_id,
                 user_quote=args.user_quote), "json")
         elif args.command == "archive":
-            _output({"archived": str(transaction.archive(args.active_root, args.done_root, args.slug, _prepare))}, "json")
+            prepare = functools.partial(_prepare,
+                acknowledged_orphan_reservations=frozenset(args.declare_orphan_reservation))
+            workaround = {"auto": None, "always": True, "never": False}[args.local_staging]
+            target, status = transaction.archive_reliable(args.active_root, args.done_root, args.slug, prepare,
+                workaround=workaround)
+            _output({"archived": str(target), "status": status}, "json")
         elif args.command == "reopen":
             _output({"reopened": str(transaction.reopen(args.active_root, args.done_root, args.slug))}, "json")
         elif args.command == "check":
@@ -192,7 +248,7 @@ def main(argv=None) -> int:
                 prefix = ".converge/done/"
                 if path.startswith(prefix):
                     slug = path[len(prefix):].split("/", 1)[0]
-                    model.validate_identifier(slug, "slug")
+                    model.validate_identifier(slug, "slug", charset="unicode-safe")
                     slugs.add(slug)
             failures = []
             for slug in sorted(slugs, key=str.casefold):
@@ -207,6 +263,22 @@ def main(argv=None) -> int:
             if failures:
                 _output({"valid": False, "archives": failures}, "json")
                 return 2
+        elif args.command == "check-git-ref":
+            model.validate_identifier(args.slug, "slug", charset="unicode-safe")
+            if args.from_index:
+                treeish = subprocess.run(["git", "write-tree"], cwd=args.repo, capture_output=True,
+                    check=True, text=True).stdout.strip()
+            else:
+                treeish = args.ref
+            view = _materialize_and_check(args.repo, treeish, f".converge/done/{args.slug}")
+            _output(view if args.format == "json" else presentation.human_check(view), args.format)
+            return 0 if view["valid"] else 2
+        elif args.command == "list-orphan-reservations":
+            orphans = model.find_orphan_reservations(args.root)
+            if args.format == "json":
+                _output({"root": str(args.root), "orphan_reservations": orphans}, "json")
+            else:
+                print("\n".join(orphans) if orphans else "none")
         return 0
     except ArchiveError as exc:
         _output({"valid": False, "diagnostics": [exc.diagnostic()]}, "json")

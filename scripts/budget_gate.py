@@ -169,7 +169,12 @@ def read_ledger(active: Path) -> list[dict]:
 
 
 def append_ledger(active: Path, event: dict) -> None:
-    with _ledger_path(active).open("a", encoding="utf-8") as f:
+    # newline="\n" pins the line terminator regardless of platform default (os.linesep is
+    # "\r\n" on Windows) — gate-ledger.jsonl is a root-fixed file the Archive Contract hashes,
+    # and must stay byte-identical to what Git (`.gitattributes: * text=auto eol=lf`) checks
+    # out, or a later `check`/`check-git-ref` re-verification reports content-mismatch (plan
+    # Phase 5 step 5's newline policy).
+    with _ledger_path(active).open("a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
@@ -194,8 +199,10 @@ def read_state(active: Path) -> dict:
 
 
 def write_state(active: Path, state: dict) -> None:
+    # newline="\n": same LF-pinning rationale as append_ledger above — _budget-state.json is
+    # also a root-fixed, manifest-hashed file.
     _state_path(active).write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
     )
 
 
