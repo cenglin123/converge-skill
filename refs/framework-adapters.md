@@ -96,6 +96,44 @@ observed 仅用于宿主提供可直接观察且绑定本次 invocation 的字�
 1. **Orchestrator 手动驱动**（默认）：Orchestrator 在主循环中逐轮 Spawn Reviewer / Executor，这是 converge 的标准执行方式，无功能损失。
 2. **Prompt 内嵌循环**：给 `task` subagent 的 prompt 中直接写入循环指令（如"重复以下步骤直到条件满足：先检查 X，若未满足则修改 Y，再检查 X"），让 subagent 在单次调用内自主迭代。适用于 inner loop 加速，但 subagent 内部无法 Spawn 独立 Reviewer（缺乏对抗式保证），retrospective 中需标注 `inner_loop: prompt_embedded`。
 
+### OCSR 作为 opencode Spawn 实现（治理钩子接线）
+
+OCSR（`scripts/ocsr_dispatch.py`，ocsr SKILL.md §三）是本机 `opencode run` 的驱动器，支持跨厂商异构模型、fresh-context 对抗评审、批量并行派发。当 OCSR 作为 converge 的 Spawn 后端时，每次 Spawn 都必须纳入 converge 的事件流（Archive Contract v1 的 `begin-invocation`/`complete-invocation`/`recover-invocation`）与预算门控（`budget_gate reserve/settle`），否则 `archive_convergence.py archive` fail-closed（`events-missing` —— OCSR 派发链路未调用该协议）。
+
+converge 仓库侧提供 **`scripts/ocsr_spawn_adapter.py`**（薄适配层，~32KB stdlib-only）包装 `ocsr_dispatch.py dispatch`，把每次 Spawn 原子化为五步：
+
+```
+reserve → begin-invocation → ocsr_dispatch dispatch → complete/recover-invocation → settle
+```
+
+**CLI 表面**（详见 `design.md` §3.1）：
+
+```bash
+python scripts/ocsr_spawn_adapter.py dispatch \
+  --converge-active <active-dir> --converge-scripts <scripts-dir> \
+  --ocsr-dispatch <ocsr_dispatch.py path> \
+  --role <outer-reviewer|blind-reviewer|ultraverge-initial|executor|...> \
+  --phase <phase-name> --round <N|0> --attempt <N> \
+  --prompt <abs-path> --model <provider/model> --label <ocsr-label> \
+  --output-dir <dir> --output-name <filename> \
+  [--watch] [--timeout <min>] [--reserved-reservation-id <rid>]
+```
+
+**关键属性**：
+
+- **provenance 诚实降级**：OCSR 派发的 `opencode run` 当前不在产物中暴露 per-invocation 的 `provider/model` 字段，故 complete-invocation 使用 `evidence_level=configured + resolution_source=cli_argument + resolution_reason_code=backend-does-not-expose`（`archive_contract/model.py:PROVENANCE_MATRIX` 下 strictest legal honest choice）。`--instance-id`（ocsr `batch_id`）和 `--receipt`（`ocsr-dispatch-ledger.jsonl:<rid>`）作为非约束性关联句柄保留，但 **不** 升格 configured → host-reported；如果后续 opencode `--format json` 暴露绑定本次 invocation 的 tool_response `provider/model` 字段，可以升级。
+- **角色映射直接对齐**：适配层用到的 6 个角色子集（outer-reviewer / blind-reviewer / ultraverge-initial / executor / arbiter / design-reviewer）在 `budget_gate.ROLE_CONSUMES` 与 `ocsr_dispatch.ROLE_VALUES` 中语义一致，无需翻译。
+- **失败路径正确触发**：看门狗超时 → `recover-invocation(timeout)` + gate `settle(failed, pre_execution=false)`；launcher 错误 → `recover-invocation(failed)` + gate settle（`pre_execution=true`）；路径碰撞 → `failed`。
+- **"edit X" 类任务的 sentinel 模式**：当 converge executor 的真实交付是"修改既有文件 + 写 attempts.md"而非产出单一新文件时，`--output-name` 需指向一个 sentinel 文件（如 `done.marker`），prompt 显式让 executor 在完成所有工作后写入该 sentinel。否则 ocsr watcher 等不到期望产物，适配层触发失败路径（recover-invocation + settle failed）——即使 executor 实际完成了修改。这是 faithful recording（archive Contract 捕获真实事件），调用方需知晓此约定。
+- **config-init 辅助**：`ocsr_spawn_adapter.py config-init --mode ultraverge` 写入初始 `_budget-state.json`（自动覆盖 `max_blind_rechecks=2`），供 orchestrator 在第一个 reserve 前初始化。
+- **ledger 双写无重复计费**：`gate-ledger.jsonl`（converge 预算决策）+ `ocsr-dispatch-ledger.jsonl`（ocsr 派发事实），两账本语义独立。budget_gate 的 `model_invocation` 计数只从 gate-ledger 派生。
+
+**测试覆盖**（14 tests 全绿，`tests/test_ocsr_spawn_adapter.py`）：happy path / fail-launcher (pre_execution=true) / fail-timeout (pre_execution=false) / unknown-role DENY / outer-reviewer scope 消耗 / event-graph closure (model.validate_event_graph) / config-init 6 cases / per-scope BLOCK (5 outer 填满后第 6 次 BLOCK) / summary attempted vs model_invocation 区分。
+
+**架构定位**：适配层是 **converge 仓库侧的客户代码**——ocsr 保持框架无关（`ocsr_dispatch.py` 不做预算/事件编排判断，呼应 ocsr SKILL.md §三 "脚本不做编排判断"），converge 是 ocsr 的客户之一。本适配层与 `archive_contract` 同仓库，可直接 import model 做 schema 校验。
+
+详细对接设计见 `.converge/active/20260725-ocsr-converge-integration/design.md`（adapter-layer 决策、provenance 矩阵引用、失败注入测试、验收锚点）。端到端 dogfood 验证（`.converge/done/20260725-dogfood-adapter-usage/`，`archive` committed + `check` valid-v1 + sequence 1-7 连续 + 零孤儿 reservation）已通过。
+
 ## A.3 codex (OpenAI Codex CLI)
 
 优先按能力探测适配。若当前 Codex 环境暴露 `multi_agent_v1`，使用原生多 agent adapter：
