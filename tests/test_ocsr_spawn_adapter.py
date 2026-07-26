@@ -524,6 +524,67 @@ class TestExtractInstanceId(unittest.TestCase):
         val = _extract_ocsr_instance_id(self.ledger, "label", "m/m", "p.txt")
         self.assertTrue(val.startswith("ocsr-unknown-"))
 
+    # ── Correlation-key-first matching (Task B) ────────────────────
+
+    def test_extract_by_correlation_key_primary(self):
+        """converge_invocation_id match returns that batch_id."""
+        self.ledger.write_text(
+            json.dumps({"event": "launched", "label": "other", "model": "o/m",
+                        "prompt_file": "/other.txt", "batch_id": "b-001",
+                        "converge_invocation_id": "cid-789"}) + "\n",
+            encoding="utf-8",
+        )
+        val = _extract_ocsr_instance_id(
+            self.ledger, "label", "m/m", "p.txt",
+            converge_invocation_id="cid-789",
+        )
+        self.assertEqual(val, "b-001")
+
+    def test_fallback_to_tuple_when_no_correlation_match(self):
+        """Ledger has rows but none match converge_invocation_id → tuple fallback."""
+        self.ledger.write_text(
+            json.dumps({"event": "launched", "label": "target-label",
+                        "model": "t/m", "prompt_file": "/p.txt",
+                        "batch_id": "b-002",
+                        "converge_invocation_id": "other-cid"}) + "\n",
+            encoding="utf-8",
+        )
+        val = _extract_ocsr_instance_id(
+            self.ledger, "target-label", "t/m", "/p.txt",
+            converge_invocation_id="requested-cid",
+        )
+        # converge_invocation_id is non-empty, no row matches "requested-cid".
+        # Should fall through to legacy (label, model, prompt_file) tuple match.
+        self.assertEqual(val, "b-002")
+
+    def test_legacy_ledger_no_correlation_key_field(self):
+        """Legacy ledger rows lack converge_invocation_id entirely → tuple fallback works when called without key."""
+        self.ledger.write_text(
+            json.dumps({"event": "launched", "label": "target",
+                        "model": "t/m", "prompt_file": "/p.txt",
+                        "batch_id": "b-003"}) + "\n",
+            encoding="utf-8",
+        )
+        val = _extract_ocsr_instance_id(
+            self.ledger, "target", "t/m", "/p.txt",
+        )
+        self.assertEqual(val, "b-003")
+
+    def test_degraded_fallback_when_no_match(self):
+        """Correlation key unmatched but (label, model, prompt) tuple matches → b-004."""
+        self.ledger.write_text(
+            json.dumps({"event": "launched", "label": "target",
+                        "model": "t/m", "prompt_file": "/p.txt",
+                        "batch_id": "b-004"}) + "\n",
+            encoding="utf-8",
+        )
+        val = _extract_ocsr_instance_id(
+            self.ledger, "target", "t/m", "/p.txt",
+            converge_invocation_id="nonexistent-cid",
+        )
+        # Correlation key unmatched → tuple fallback matches same label/model/prompt
+        self.assertEqual(val, "b-004")
+
 
 class TestFailCollisionAndFallthrough(AdapterBase):
     """S5: fail-collision (rc=3) and generic fallthrough (unknown rc)."""

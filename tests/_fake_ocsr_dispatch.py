@@ -48,6 +48,14 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / args.output_pattern
 
+    # Extract converge-invocation-id from --meta (mirrors real ocsr behavior)
+    converge_invocation_id = ""
+    for kv in args.meta:
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            if k.strip() == "converge-invocation-id":
+                converge_invocation_id = v.strip()
+
     batch_id = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     work_root = Path(args.work_dir or os.environ.get("TEMP", "/tmp"))
     work_dir = work_root / f"ocsr_dispatch_{batch_id}" / label.replace("/", "-").replace(" ", "_")
@@ -57,7 +65,7 @@ def main() -> int:
     if args.ledger_dir:
         ledger = Path(args.ledger_dir) / "ocsr-dispatch-ledger.jsonl"
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        launched_row = {
+        launched_row: dict[str, object] = {
             "ts": datetime.datetime.now().astimezone().isoformat(),
             "event": "launched",
             "batch_id": batch_id,
@@ -68,6 +76,8 @@ def main() -> int:
             "expected_output": str(output_path),
             "work_dir": str(work_dir),
         }
+        if converge_invocation_id:
+            launched_row["converge_invocation_id"] = converge_invocation_id
         with ledger.open("a", encoding="utf-8") as f:
             f.write(json.dumps(launched_row, ensure_ascii=False) + "\n")
 
@@ -85,7 +95,7 @@ def main() -> int:
         # Write landed row
         if args.ledger_dir:
             ledger = Path(args.ledger_dir) / "ocsr-dispatch-ledger.jsonl"
-            landed_row = {
+            landed_row: dict[str, object] = {
                 "ts": datetime.datetime.now().astimezone().isoformat(),
                 "event": "landed",
                 "batch_id": batch_id,
@@ -95,6 +105,8 @@ def main() -> int:
                 "bytes": output_path.stat().st_size,
                 "wall_min": 0.1,
             }
+            if converge_invocation_id:
+                landed_row["converge_invocation_id"] = converge_invocation_id
             with ledger.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(landed_row, ensure_ascii=False) + "\n")
         if args.progress:

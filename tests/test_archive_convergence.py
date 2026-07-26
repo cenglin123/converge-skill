@@ -1473,6 +1473,126 @@ class ArchiveContractTests(unittest.TestCase):
 
         self.assertIs(capture.SECRET_NAMES, model.SECRET_NAMES)
 
+    # ── Task C: task-envelope orphan exclusion ─────────────────────
+
+    def test_task_envelope_not_flagged_as_orphan(self):
+        """task-envelope reservation with no Spawn must pass validate_ledger."""
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import load_events, validate_ledger
+
+        # First create a valid spawn+event pair so load_events works
+        self._append_ledger_pair("valid-r1", 1, "valid-inst")
+        started = begin_invocation(self.active, invocation_kind="spawn",
+            role="outer-reviewer", phase="review", round_number=1, attempt=1,
+            reservation_id="valid-r1")
+        complete_invocation(self.active, started["invocation_id"],
+            terminal_status="succeeded", instance_id="valid-inst", receipt="r",
+            settlement_ref="gate-ledger.jsonl:valid-r1",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok")
+
+        # Now add a task-envelope orphan (role=task-envelope → consumes=task-envelope per budget_gate)
+        te_reserve = {
+            "event": "reserved", "reservation_id": "te-r1",
+            "ts": "2026-07-26T00:00:02+00:00",
+            "target_round": None, "target_role": "task-envelope", "consumes": "task-envelope",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        te_settle = {"event": "spawn_failed", "reservation_id": "te-r1",
+                      "ts": "2026-07-26T00:00:03+00:00"}
+        with open(self.active / "gate-ledger.jsonl", "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(te_reserve) + "\n" + json.dumps(te_settle) + "\n")
+        validate_ledger(self.active, load_events(self.active))  # must not raise
+
+    def test_regular_reservation_still_orphan_detected(self):
+        """Regular (non-task-envelope) reservation with no Spawn still fails."""
+        from archive_contract.capture import begin_invocation, complete_invocation
+        from archive_contract.model import ArchiveError, load_events, validate_ledger
+
+        # First create a valid spawn+event pair
+        self._append_ledger_pair("valid-r2", 1, "valid-inst-2")
+        started = begin_invocation(self.active, invocation_kind="spawn",
+            role="outer-reviewer", phase="review", round_number=1, attempt=1,
+            reservation_id="valid-r2")
+        complete_invocation(self.active, started["invocation_id"],
+            terminal_status="succeeded", instance_id="valid-inst-2", receipt="r2",
+            settlement_ref="gate-ledger.jsonl:valid-r2",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"ok")
+
+        # Now add a regular orphan — must be detected
+        reg_reserve = {
+            "event": "reserved", "reservation_id": "reg-r1",
+            "ts": "2026-07-26T00:00:02+00:00",
+            "target_round": 1, "target_role": "outer-reviewer", "consumes": "outer",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        reg_settle = {"event": "spawn_failed", "reservation_id": "reg-r1",
+                      "ts": "2026-07-26T00:00:03+00:00"}
+        with open(self.active / "gate-ledger.jsonl", "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(reg_reserve) + "\n" + json.dumps(reg_settle) + "\n")
+        with self.assertRaises(ArchiveError) as caught:
+            validate_ledger(self.active, load_events(self.active))
+        self.assertEqual(caught.exception.code, "ledger-invocation-orphan")
+
+    def test_find_orphan_reservations_excludes_task_envelope(self):
+        """find_orphan_reservations must not return task-envelope orphans."""
+        from archive_contract.model import find_orphan_reservations
+
+        te_reserve = {
+            "event": "reserved", "reservation_id": "te-r2",
+            "ts": "2026-07-26T00:00:00+00:00",
+            "target_round": None, "target_role": "task-envelope", "consumes": "task-envelope",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        reg_reserve = {
+            "event": "reserved", "reservation_id": "reg-r2",
+            "ts": "2026-07-26T00:00:01+00:00",
+            "target_round": 1, "target_role": "outer-reviewer", "consumes": "outer",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        te_settle = {"event": "spawn_failed", "reservation_id": "te-r2",
+                     "ts": "2026-07-26T00:00:02+00:00"}
+        reg_settle = {"event": "spawn_failed", "reservation_id": "reg-r2",
+                      "ts": "2026-07-26T00:00:03+00:00"}
+        (self.active / "gate-ledger.jsonl").write_text(
+            json.dumps(te_reserve) + "\n" + json.dumps(te_settle) + "\n"
+            + json.dumps(reg_reserve) + "\n" + json.dumps(reg_settle) + "\n",
+            encoding="utf-8", newline="\n",
+        )
+        orphans = find_orphan_reservations(self.active)
+        self.assertNotIn("te-r2", orphans)
+        self.assertIn("reg-r2", orphans)
+
+    def test_find_orphan_reservations_includes_regular_orphans(self):
+        """find_orphan_reservations still returns regular orphans."""
+        from archive_contract.model import find_orphan_reservations
+
+        reserve = {
+            "event": "reserved", "reservation_id": "orphan-reg",
+            "ts": "2026-07-26T00:00:00+00:00",
+            "target_round": 1, "target_role": "blind-reviewer", "consumes": "blind",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        settle = {"event": "spawn_failed", "reservation_id": "orphan-reg",
+                  "ts": "2026-07-26T00:00:01+00:00"}
+        (self.active / "gate-ledger.jsonl").write_text(
+            json.dumps(reserve) + "\n" + json.dumps(settle) + "\n",
+            encoding="utf-8", newline="\n",
+        )
+        orphans = find_orphan_reservations(self.active)
+        self.assertIn("orphan-reg", orphans)
+
 
 if __name__ == "__main__":
     unittest.main()
