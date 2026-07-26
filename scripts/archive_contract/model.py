@@ -645,6 +645,8 @@ def validate_ledger(root: Path, events: list[dict[str, Any]], *,
     for rid in reserves:
         if rid not in settles:
             raise ArchiveError("ledger-open", "Ledger contains an unsettled reservation.", "gate-ledger.jsonl")
+        if reserves[rid].get("consumes") == "task-envelope":
+            continue
         if rid not in by_reservation:
             actually_orphaned.add(rid)
             if rid in acknowledged_orphan_reservations:
@@ -717,7 +719,12 @@ def find_orphan_reservations(root: Path) -> list[str]:
                 started_rids.add(event["reservation_id"])
     except ArchiveError:
         pass
-    return sorted(rid for rid in reserves if rid in settles and rid not in started_rids)
+    return sorted(
+        rid for rid in reserves
+        if rid in settles
+        and rid not in started_rids
+        and reserves.get(rid, {}).get("consumes") != "task-envelope"
+    )
 
 
 def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any] | None = None,

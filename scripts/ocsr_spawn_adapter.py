@@ -182,9 +182,17 @@ def _archive_recover(archive_script: Path, active_dir: Path, invocation_id: str,
 
 
 def _extract_ocsr_instance_id(ledger_path: Path, label: str, model: str,
-                              prompt_file: str) -> str:
+                              prompt_file: str,
+                              converge_invocation_id: str | None = None) -> str:
     """Read ocsr-dispatch-ledger.jsonl and return the batch_id of the most recent
-    `launched` event matching (label, model, prompt_file).
+    `launched` event.
+
+    Matching priority:
+      1. If `converge_invocation_id` is non-empty, scan for launched events
+         where `row.get("converge_invocation_id") == converge_invocation_id`
+         and return the batch_id from the most recent match.
+      2. Legacy fallback: match by (label, model, prompt_file) tuple.
+      3. Final fallback: return `ocsr-unknown-<uuid8>`.
 
     Per design.md §3.3, this batch_id is used as the archive Contract
     `--instance-id` value — a non-constraining correlation handle (evidence_level
@@ -198,7 +206,8 @@ def _extract_ocsr_instance_id(ledger_path: Path, label: str, model: str,
     fallback = f"ocsr-unknown-{uuid.uuid4().hex[:8]}"
     if not ledger_path.is_file():
         return fallback
-    matches: list[tuple[str, str]] = []  # (ts, batch_id)
+    corr_match: tuple[str, str] | None = None  # (ts, batch_id)
+    tuple_match: tuple[str, str] | None = None  # (ts, batch_id)
     try:
         for line in ledger_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -210,17 +219,25 @@ def _extract_ocsr_instance_id(ledger_path: Path, label: str, model: str,
                 continue
             if row.get("event") != "launched":
                 continue
+            ts = row.get("ts", "")
+            bid = row.get("batch_id") or fallback
+            # Priority 1: correlation-key-first matching
+            if converge_invocation_id:
+                if row.get("converge_invocation_id") == converge_invocation_id:
+                    if corr_match is None or ts > corr_match[0]:
+                        corr_match = (ts, bid)
+            # Priority 2: legacy tuple fallback (always tried)
             if (row.get("label") == label and row.get("model") == model
                     and row.get("prompt_file") == prompt_file):
-                ts = row.get("ts", "")
-                bid = row.get("batch_id") or fallback
-                matches.append((ts, bid))
+                if tuple_match is None or ts > tuple_match[0]:
+                    tuple_match = (ts, bid)
     except OSError:
         return fallback
-    if not matches:
-        return fallback
-    matches.sort()
-    return matches[-1][1]
+    if corr_match:
+        return corr_match[1]
+    if tuple_match:
+        return tuple_match[1]
+    return fallback
 
 
 def _detect_opencode_version() -> str:
@@ -441,7 +458,8 @@ def cmd_dispatch(args) -> int:
     # Step 4: complete or recover based on whether product landed
     ledger_path = active_dir / "ocsr-dispatch-ledger.jsonl"
     instance_id = _extract_ocsr_instance_id(
-        ledger_path, args.label, args.model, str(prompt_path))
+        ledger_path, args.label, args.model, str(prompt_path),
+        converge_invocation_id=invocation_id)
     receipt = f"ocsr-dispatch-ledger.jsonl:{reservation_id}"
 
     if output_path.is_file() and output_path.stat().st_size > 0:
