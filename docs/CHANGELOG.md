@@ -2,6 +2,46 @@
 
 本文件按时间倒序记录已完成且影响后续维护的变更。
 
+## 2026-08-11
+
+### fix: `EventLock` 在 Windows 上一次瞬时删除失败即永久自锁
+
+一直被当作「测试 flake」的 `test_concurrent_begin_never_corrupts_sequence`（全量套件约 1/3 概率挂），查明是 `EventLock` 的真实缺陷，测试只是症状。
+
+#### 机制
+
+Windows 上删除**正被别人打开**的文件会失败（`WinError 32`）。竞争失败的一方在 `__enter__` 里恰好要 `self.path.read_bytes()` 读 owner 记录——于是持锁方 `__exit__` 的 `unlink` 会被瞬时挡下。而 `__exit__` 只吞 `FileNotFoundError`。
+
+实测 400 轮（一个读线程 + 反复取锁）：
+
+```
+第 1 轮      unlink 抛 PermissionError，从 `with` 块里穿出来 —— 而事件此时已经落盘
+第 2..400 轮 锁文件带着本进程 pid 残留 → liveness 永远答 "alive"
+             → 后续 399 次获取全部 lock-conflict
+```
+
+两层危害，后者更重：
+
+1. **一次成功的 append 被调用方读成失败**（异常在事件写完之后才抛出）；
+2. **该 root 的事件锁在本进程余生里报废**——一次瞬时冲突就够了。
+
+#### 修法
+
+- **锁释放绝不抛异常**：`_unlink_with_retry()` 短暂退避重试；最终失败也只留残骸、不外抛。残骸有两条自愈路径：本进程内由 `__enter__` 的 self-pid 分支回收，进程退出后由 `_owner_process_liveness` 判 dead 回收。
+- **进程内持有登记**（`_HELD_LOCKS`）：让 `__enter__` 能分辨「pid 是我、且进程内确有实例持锁」（真冲突）与「pid 是我、却没人持锁」（残骸，回收）。
+- **`__enter__` 的三处回收也走同一个重试**。只修 `__exit__` 时全量套件仍偶发失败、指纹一样——漏的正是这三处；它们删的是别人的残骸，同样会撞上并发读取者。
+- **先登记再写内容**：`O_EXCL` 成功即已独占。若把登记放在 `fsync` 之后，中间那段窗口里本进程另一线程会看到「pid 是我、却没人持锁」，判成残骸把文件删掉——**两个写者同时进入临界区**，正是 sequence 会被写重的那种损坏。登记后到可用前若失败，自行清理并撤销登记。
+
+#### 验证
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 400 轮取锁：OSError 穿出 `with` | 1 | **0** |
+| 400 轮取锁：虚假 `lock-conflict` | 399 | **0** |
+| 全量套件连跑 | 约 1/3 失败 | **20 次 0 失败** |
+
+新增回归测试 `test_lock_release_survives_a_concurrent_reader_and_never_wedges`：并发读线程 + 200 轮取锁，断言无 OSError 穿出、无虚假 conflict、结束后无残留锁文件。**有鉴别力**——把修复 stash 掉即失败于 `PermissionError`。
+
 ## 2026-08-10
 
 ### chore: `20260725-ocsr-converge-integration` 按 legacy 归入 `done/`——`active/` 清空

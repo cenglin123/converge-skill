@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import stat
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,41 +52,115 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# 本进程当前真正持有的锁文件（key 为规范化后的路径）。
+#
+# 存在的理由是 Windows：删除一个正被别人打开的文件会失败（`WinError 32`），而竞争失败
+# 的一方在 `__enter__` 里恰好要 `read_bytes()` 读 owner 记录。于是 `__exit__` 的 unlink
+# 可能被瞬时挡下，留下一个**记着本进程 pid 的锁文件**——此后 `_owner_process_liveness`
+# 永远答 "alive"，该 root 的事件锁在本进程余生里彻底卡死（实测：一次瞬时冲突之后，
+# 后续 399 次获取全部 `lock-conflict`）。
+#
+# 有了这张表，`__enter__` 就能分辨「pid 是我，且进程内确有实例持锁」（真冲突）与
+# 「pid 是我，但没人持锁」（残骸，可回收）。
+_HELD_LOCKS: set[str] = set()
+_HELD_GUARD = threading.Lock()
+_UNLINK_ATTEMPTS = 50
+_UNLINK_BACKOFF_SEC = 0.01
+
+
 class EventLock:
     def __init__(self, root: Path):
         self.path = root / ".archive-event.lock"
         self.fd: int | None = None
+        self._key = os.path.normcase(os.path.abspath(self.path))
+
+    def _claim(self) -> None:
+        with _HELD_GUARD:
+            _HELD_LOCKS.add(self._key)
+
+    def _release(self) -> None:
+        with _HELD_GUARD:
+            _HELD_LOCKS.discard(self._key)
+
+    def _held_in_this_process(self) -> bool:
+        with _HELD_GUARD:
+            return self._key in _HELD_LOCKS
 
     def __enter__(self):
         for _ in range(2):
             try:
                 self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.write(self.fd, canonical_json_bytes({"pid": os.getpid(), "nonce": uuid.uuid4().hex, "started_at": _now()}))
-                os.fsync(self.fd)
-                return self
             except FileExistsError as exc:
                 try:
                     owner = strict_json_bytes(self.path.read_bytes())
                     pid = owner.get("pid") if isinstance(owner, dict) else None
                     if not isinstance(pid, int) or pid < 1:
                         raise ArchiveError("lock-owner-invalid", "Event lock owner record is malformed.", self.path.name) from exc
+                    if pid == os.getpid() and not self._held_in_this_process():
+                        # 本进程的 pid，却没有任何实例在持有它——只可能是 __exit__ 的
+                        # unlink 被共享冲突挡下留的残骸。回收它，不然会永久自锁。
+                        self._unlink_with_retry()
+                        continue
                     liveness = _owner_process_liveness(pid)
                     if liveness == "dead":
-                        self.path.unlink(missing_ok=True)
+                        self._unlink_with_retry()
                         continue
                 except FileNotFoundError:
-                    self.path.unlink(missing_ok=True)
+                    self._unlink_with_retry()
                     continue
                 raise ArchiveError("lock-conflict", "Another live archive writer owns the event lock.", self.path.name) from exc
+            # `O_EXCL` 成功即已独占，所以**先登记再写内容**：若把登记放在 fsync 之后，
+            # 中间那段窗口里本进程另一线程会看到「pid 是我、却没人持锁」，判成残骸把
+            # 文件删掉——两个写者同时进入临界区，正是 sequence 会被写重的那种损坏。
+            self._claim()
+            try:
+                os.write(self.fd, canonical_json_bytes({"pid": os.getpid(), "nonce": uuid.uuid4().hex, "started_at": _now()}))
+                os.fsync(self.fd)
+            except BaseException:
+                # 登记之后、可用之前失败：必须自己清干净，否则登记会一直挂着，
+                # 后续 `__enter__` 认不出这是残骸（`_held_in_this_process` 恒为真）。
+                os.close(self.fd)
+                self.fd = None
+                self._unlink_with_retry()
+                self._release()
+                raise
+            return self
         raise ArchiveError("lock-conflict", "Event lock recovery could not acquire ownership.", self.path.name)
 
     def __exit__(self, exc_type, exc, tb):
         if self.fd is not None:
             os.close(self.fd)
+            self.fd = None
         try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+            self._unlink_with_retry()
+        finally:
+            # 无论删没删掉都要交还进程内所有权：删不掉时留下的是残骸，
+            # 下一次 `__enter__` 必须能把它认出来并回收。
+            self._release()
+
+    def _unlink_with_retry(self) -> None:
+        """删除锁文件；短暂重试，且**绝不向外抛**。
+
+        `__exit__` 用它：走到那里事件已经落盘了，若把一个瞬时的共享冲突抛出去，一次
+        成功的 append 会被调用方读成失败——比留个残骸糟得多。残骸有两条自愈路径：
+        本进程内由 `__enter__` 的 self-pid 分支回收，进程退出后由
+        `_owner_process_liveness` 判 dead 回收。
+
+        `__enter__` 的三处回收也用它：那三处删的是**别人留下的残骸**，同样可能撞上
+        并发读取者而抛 `WinError 32`，抛出去就变成从 `with` 语句里穿出来的 OSError。
+        （只修 `__exit__` 时全量套件仍偶发失败，指纹一样，漏的就是这三处。）
+        """
+        for attempt in range(_UNLINK_ATTEMPTS):
+            try:
+                self.path.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                # Windows：文件被并发读取者打开时不可删除。读取窗口只有微秒级，退避重试。
+                if attempt == _UNLINK_ATTEMPTS - 1:
+                    return
+                time.sleep(_UNLINK_BACKOFF_SEC)
 
 
 def _read_existing(root: Path) -> list[dict[str, Any]]:
