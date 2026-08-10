@@ -185,6 +185,16 @@ record-user-message → record-terminal-decision → stamp-decision-markers → 
 
 **诚实边界**：运行器**不是安全沙箱**——`hook` 步骤执行 spec 声明的任意 argv。spec 及其调用的命令必须当作可信输入（ocsr `refs/run-spec.md` 已就此订正过一次虚假声称）。
 
+**一处仍然存在的缺口（2026-08-10 登记，非待办）**：`validate_event_graph` 对
+`reviewer-verdict` 有「已被超越者降级为可审计条目」的宽免，对 `user-decision` **没有**。
+因此若一条 `presented_degradations` 或 `source_ref` 有误的 `user-decision` 真的进了事件图，
+归档将永久 fail-closed，**且「追加一条正确的决策去超越它」这条合规修复路径不通**
+（已实测）。上述写入前拒绝把这种情形从常态降为异常（只剩 `append_event` 直写、
+bootstrap 导入、本次变更之前的旧归档三条路径），但没有消除它。
+对应的放宽提案经两位跨族独立评审后**未获通过**：先例放掉的恰恰是
+`reviewer_event_id` 这个**身份**字段，因此「放元数据、保身份」这条界线未被论证。
+要放就得连 `source_ref` 一起放以对齐先例，要保就得给出区分判据——两者都还没做。
+
 端到端验证：`tests/test_terminal_chain_spec.py`（5 条）用**真实 ocsr 运行器**跑通模板，产出真实归档并独立 `check` 为 `valid-v1`；全程零模型调用。ocsr 检出位置由 `OCSR_SKILL_DIR` 指定，缺失即 skip——converge 不硬依赖它的路径。
 
 ## A.3 codex (OpenAI Codex CLI)
