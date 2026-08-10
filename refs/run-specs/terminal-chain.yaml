@@ -1,0 +1,96 @@
+# converge 终局链路 —— OCSR 确定性步骤运行器 spec 模板
+#
+# 用法：填好 `vars`，然后
+#     python <ocsr>/scripts/ocsr_dispatch.py run --spec terminal-chain.yaml --validate
+#     python <ocsr>/scripts/ocsr_dispatch.py run --spec terminal-chain.yaml
+#
+# 覆盖范围：**只有终局这一段**——从「用户说了那句话」到「归档并通过 check」。
+# 多轮主循环（reviewer / executor 的 spawn、verdict 裁决、盲审）不在此模板内：
+# 那一段的每一步都要 agent 判断，正是运行器**不该**接管的部分。
+#
+# 为什么偏偏是这一段：它是失败率最高的一段，而且**完全没有判断**。
+# 两次归档失败（ocsr `20260809` 的 decision-chain、`20260810` 的 user-decision-degradations）
+# 全部落在这里，全部是把机器能算的值交给人手填。
+#
+# 本模板不填任何可导出的值：
+#   supersedes_decision_event_id / presented_degradations → record-terminal-decision 自行导出
+#   accepted_state                                       → 由 decision_kind 蕴含
+#   terminal_decision_event_id / _value 两个 marker      → stamp-decision-markers 导出
+#   source_ref                                           → 由上一步的输出捕获流入（见 record-decision）
+# 唯一需要人写的是 `vars` 里那句**用户原话**——那本来就不是能导出的东西。
+
+version: 1
+
+run:
+  id: converge-terminal-chain
+  # runner 独占的工作目录，只用来放 journal（本模板无 dispatch 步骤，不产出产物）。
+  workdir: .converge/tmp/terminal-chain
+
+vars:
+  # ── 必填 ──────────────────────────────────────────────────────────
+  cli: <user-home>/.claude/skills/converge/scripts/archive_convergence.py
+  # 注意两者的层级不同，这是 archive_convergence 的既有约定，不是笔误：
+  #   记录类子命令收的是**收敛目录本身**（active_root/slug）
+  #   `archive` 收的是 active_root 与 done_root 两个**父目录**加一个 slug
+  # 所以这里只声明父目录与 slug，收敛目录由 `{{vars.active_root}}/{{vars.slug}}` 拼出，
+  # 免得同一个路径写两遍写岔。
+  active_root: .converge/active
+  done: .converge/done
+  slug: <slug>
+  # 用户原话，逐字。record-user-message 与 record-terminal-decision 必须收到同一串字符，
+  # 否则 `user-decision-source` fail-closed —— 所以它只写一次，两处都引用这个变量。
+  quote: <用户原话，逐字>
+  host_message_id: <宿主消息 id>
+  # accept-terminal-b（渐近通过）或 accept-terminal-c（主观接受）
+  decision_kind: accept-terminal-c
+
+steps:
+  # 1 ── 把用户原话登记为 canonical user-message，并捕获它的 event_id。
+  #      终局决策必须绑定一条在先的 user-message（`user-decision-source`），
+  #      绑定用的是这个 UUID —— 由捕获流入下一步，不经人手。
+  - id: record-quote
+    type: hook
+    run: [python, "{{vars.cli}}", record-user-message, "{{vars.active_root}}/{{vars.slug}}",
+          --host-message-id, "{{vars.host_message_id}}",
+          --user-quote, "{{vars.quote}}"]
+    expect: '"event_id":\s*"(?P<event_id>[0-9a-fA-F-]{36})"'
+    next: record-decision
+
+  # 2 ── 记录终局决策。只给「作者才知道」的字段；
+  #      supersedes / presented_degradations / accepted_state 全部由 CLI 从事件图导出。
+  - id: record-decision
+    type: hook
+    run: [python, "{{vars.cli}}", record-terminal-decision, "{{vars.active_root}}/{{vars.slug}}",
+          --decision-type, user-decision,
+          --decision-kind, "{{vars.decision_kind}}",
+          --user-quote, "{{vars.quote}}",
+          --source-ref, "{{steps.record-quote.capture.event_id}}"]
+    next: stamp
+
+  # 3 ── 把决策 id / value 盖进 retrospective.md 与最后一个 round-N.md。
+  #      `archive` 会逐字比对这两个 marker；手抄 UUID 是同一类搬运，所以同样导出。
+  - id: stamp
+    type: hook
+    run: [python, "{{vars.cli}}", stamp-decision-markers, "{{vars.active_root}}/{{vars.slug}}"]
+    next: archive
+
+  # 4 ── 原子归档。失败即停机，现场保留（契约违反 fail-closed）。
+  - id: archive
+    type: hook
+    run: [python, "{{vars.cli}}", archive, "{{vars.active_root}}", "{{vars.done}}", "{{vars.slug}}"]
+    next: verify
+
+  # 5 ── 归档不是自证的：独立跑一次 check，并断言它真的写出了 manifest。
+  #      「不采信完成声明、只信文件系统证据」在这里同样适用。
+  - id: verify
+    type: hook
+    run: [python, "{{vars.cli}}", check, "{{vars.done}}/{{vars.slug}}", --format, json]
+    expect: '"valid":\s*true'
+    next: verify-manifest
+
+  - id: verify-manifest
+    type: assert
+    assert:
+      file_exists: "{{vars.done}}/{{vars.slug}}/manifest.json"
+      non_empty: true
+      matches: '"schema_version"'

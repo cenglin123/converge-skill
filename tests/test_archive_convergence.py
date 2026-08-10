@@ -1594,5 +1594,174 @@ class ArchiveContractTests(unittest.TestCase):
         self.assertIn("orphan-reg", orphans)
 
 
+class DerivedDecisionFieldTests(unittest.TestCase):
+    """S9b: the two graph-derived terminal-decision fields are filled in, not typed.
+
+    Both fields are functions of the event graph, and both produced an unrepairable
+    archive failure when hand-written (ocsr `20260809` → `decision-chain`,
+    `20260810` → `user-decision-degradations`).
+    """
+
+    # Fixture borrowed, not inherited: `ArchiveContractTests` is itself a test container,
+    # so subclassing it would silently re-run its ~95 tests under this class's name.
+    setUp = ArchiveContractTests.setUp
+    _append_ledger_pair = ArchiveContractTests._append_ledger_pair
+
+    def _one_invocation(self, rid="r1", instance="i1"):
+        """One closed spawn with `configured` provenance — i.e. one real degradation."""
+        from archive_contract.capture import begin_invocation, complete_invocation
+
+        self._append_ledger_pair(rid, 1, instance)
+        start = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id=rid)
+        return complete_invocation(self.active, start["invocation_id"],
+            terminal_status="succeeded", instance_id=instance, receipt=f"p-{rid}",
+            settlement_ref=f"gate-ledger.jsonl:{rid}",
+            evidence_level="configured", resolution_source="cli_argument",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"v")
+
+    def _user_message(self, quote="够了，就这样"):
+        from archive_contract.capture import record_user_message
+
+        return record_user_message(self.active, host_message_id="m1", user_quote=quote)
+
+    def test_supersedes_is_filled_in_when_omitted(self):
+        from archive_contract.capture import record_terminal_decision
+
+        terminal = self._one_invocation()
+        first = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "v1", "verdict_output_ref": terminal["event_id"],
+        })
+        self.assertIsNone(first["supersedes_decision_event_id"],
+                          "the first decision has no predecessor to supersede")
+        second = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+            "review_kind": "fresh", "verdict": "v2", "verdict_output_ref": terminal["event_id"],
+        })
+        self.assertEqual(second["supersedes_decision_event_id"], first["event_id"],
+                         "a later decision must chain to the previous one without being told")
+
+    def test_supersedes_null_on_second_decision_is_rejected_at_write_time(self):
+        """The exact `20260809` failure: two decisions both claiming no predecessor.
+
+        It used to be written happily and only fail-close at `archive` time, by which
+        point appending cannot repair it.
+        """
+        from archive_contract.capture import record_terminal_decision
+        from archive_contract.model import ArchiveError
+
+        terminal = self._one_invocation()
+        base = {"decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+                "review_kind": "fresh", "verdict_output_ref": terminal["event_id"]}
+        record_terminal_decision(self.active, {**base, "verdict": "v1"})
+        with self.assertRaises(ArchiveError) as caught:
+            record_terminal_decision(self.active, {
+                **base, "verdict": "v2", "supersedes_decision_event_id": None})
+        self.assertEqual(caught.exception.code, "decision-derived-field-conflict")
+        events = sorted((self.active / "evidence" / "events").glob("*.json"))
+        # invocation-started + invocation-terminal + the one accepted decision.
+        self.assertEqual(len(events), 3, "the rejected decision must not reach the disk")
+
+    def test_presented_degradations_is_filled_in_when_omitted(self):
+        from archive_contract.capture import record_terminal_decision
+
+        self._one_invocation()
+        message = self._user_message()
+        decision = record_terminal_decision(self.active, {
+            "decision_type": "user-decision", "decision_kind": "accept-terminal-c",
+            "user_quote": message["user_quote"], "source_ref": message["event_id"],
+            "accepted_state": "accepted-stop",
+        })
+        self.assertEqual(decision["presented_degradations"], ["model-provenance:configured"])
+
+    def test_prose_presented_degradations_is_rejected_at_write_time(self):
+        """The exact `20260810` failure: a hand-authored prose list instead of the derived set."""
+        from archive_contract.capture import record_terminal_decision
+        from archive_contract.model import ArchiveError
+
+        self._one_invocation()
+        message = self._user_message()
+        with self.assertRaises(ArchiveError) as caught:
+            record_terminal_decision(self.active, {
+                "decision_type": "user-decision", "decision_kind": "accept-terminal-c",
+                "user_quote": message["user_quote"], "source_ref": message["event_id"],
+                "accepted_state": "accepted-stop",
+                "presented_degradations": ["模型来源仅为 configured 级", "归档证据为 metadata-only"],
+            })
+        self.assertEqual(caught.exception.code, "decision-derived-field-conflict")
+
+    def test_derivation_reads_the_same_snapshot_the_sequence_comes_from(self):
+        """The derivation must happen inside the event lock.
+
+        Deriving from a snapshot read before the lock would leave a window in which another
+        append changes the answer between derivation and write. Asserted structurally: the
+        `prepare` hook is invoked while the lock is held.
+        """
+        from archive_contract import capture
+
+        held = []
+        real_lock_enter = capture.EventLock.__enter__
+        real_lock_exit = capture.EventLock.__exit__
+
+        def enter(self_lock):
+            result = real_lock_enter(self_lock)
+            held.append("in")
+            return result
+
+        def exit_(self_lock, *exc):
+            held.append("out")
+            return real_lock_exit(self_lock, *exc)
+
+        terminal = self._one_invocation()
+        observed = []
+        real_prepare = capture._prepare_terminal_decision
+
+        def spy(fields, existing):
+            observed.append(held.count("in") - held.count("out"))
+            return real_prepare(fields, existing)
+
+        with mock.patch.object(capture.EventLock, "__enter__", enter), \
+             mock.patch.object(capture.EventLock, "__exit__", exit_), \
+             mock.patch.object(capture, "_prepare_terminal_decision", spy):
+            capture.record_terminal_decision(self.active, {
+                "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+                "review_kind": "fresh", "verdict": "v1", "verdict_output_ref": terminal["event_id"],
+            })
+        self.assertEqual(observed, [1], "prepare must run with the event lock held")
+
+    def test_cli_typed_flags_replace_the_json_blob(self):
+        import archive_convergence
+
+        self._one_invocation()
+        message = self._user_message()
+        rc = archive_convergence.main([
+            "record-terminal-decision", str(self.active),
+            "--decision-type", "user-decision",
+            "--decision-kind", "accept-terminal-c",
+            "--user-quote", message["user_quote"],
+            "--source-ref", message["event_id"],
+        ])
+        self.assertEqual(rc, 0)
+        events = sorted((self.active / "evidence" / "events").glob("*.json"))
+        decision = json.loads(events[-1].read_text(encoding="utf-8"))
+        self.assertEqual(decision["event_type"], "terminal-decision")
+        # accepted_state is implied by decision_kind and was not typed.
+        self.assertEqual(decision["accepted_state"], "accepted-stop")
+        self.assertEqual(decision["presented_degradations"], ["model-provenance:configured"])
+        self.assertIsNone(decision["supersedes_decision_event_id"])
+
+    def test_cli_derive_decision_fields_is_read_only(self):
+        import archive_convergence
+
+        self._one_invocation()
+        before = sorted(p.name for p in (self.active / "evidence" / "events").glob("*.json"))
+        rc = archive_convergence.main([
+            "derive-decision-fields", str(self.active), "--decision-type", "user-decision"])
+        self.assertEqual(rc, 0)
+        after = sorted(p.name for p in (self.active / "evidence" / "events").glob("*.json"))
+        self.assertEqual(before, after, "a diagnostic must not append events")
+
+
 if __name__ == "__main__":
     unittest.main()

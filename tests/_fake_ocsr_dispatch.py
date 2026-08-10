@@ -133,6 +133,14 @@ def main() -> int:
         # Simulate path collision (exit 3)
         return 3
 
+    if mode == "collide-but-landed":
+        # Path collision (exit 3) *with* this worker's own product on disk. Per the ocsr
+        # exit-code contract, rc=3 means the batch overwrote pre-existing files — the
+        # product landing says nothing about whether something else was clobbered. This
+        # is the case where "product exists" alone would wrongly read as success.
+        output_path.write_text("fake-product-content\n", encoding="utf-8")
+        return 3
+
     print(f"[fake] unknown FAKE_OCSR_MODE: {mode}", file=sys.stderr)
     return 99
 

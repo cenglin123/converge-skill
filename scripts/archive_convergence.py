@@ -27,6 +27,79 @@ def _json_object(value: str):
     return result
 
 
+_DECISION_FLAGS = ("decision_type", "reviewer_event_id", "review_kind", "verdict", "verdict_output_ref",
+                   "decision_kind", "user_quote", "source_ref", "accepted_state")
+
+
+def _decision_fields(args) -> dict:
+    """Merge `--data` with the typed flags into the terminal-decision field dict.
+
+    Typed flags win over `--data` so a caller migrating off the JSON blob can override one
+    field at a time. `accepted_state` is filled from `decision_kind` when omitted — it is a
+    pure function of it (`model.DECISION_ACCEPTED_STATE`), so requiring it to be typed only
+    creates another chance to type it wrong. The two *graph*-derived fields
+    (`supersedes_decision_event_id`, `presented_degradations`) are deliberately absent here:
+    they are filled inside the event lock by `capture.record_terminal_decision`.
+    """
+    fields = dict(args.data or {})
+    for name in _DECISION_FLAGS:
+        value = getattr(args, name, None)
+        if value is not None:
+            fields[name] = value
+    if fields.get("decision_type") == "user-decision" and "accepted_state" not in fields:
+        implied = model.DECISION_ACCEPTED_STATE.get(fields.get("decision_kind"))
+        if implied is not None:
+            fields["accepted_state"] = implied
+    if not fields:
+        raise ArchiveError("decision-input-empty",
+                           "record-terminal-decision needs --data or the typed flags.", "evidence/events")
+    return fields
+
+
+_MARKER_KEYS = ("terminal_decision_event_id", "terminal_decision_value")
+
+
+def _stamp_decision_markers(root: Path, files: list[str] | None) -> dict:
+    """Write the final decision's id/value markers into the canonical Markdown.
+
+    `_validate_decision_cross_refs` requires the final `round-N.md` and `retrospective.md`
+    to quote the manifest's `final_decision` id and value verbatim. That id is a UUID minted
+    when the decision event is written — copying it into two files by hand is the same class
+    of carry that `record-terminal-decision`'s derived fields removed, so it gets the same
+    treatment: derived here, never typed.
+
+    Default targets are `retrospective.md` plus the highest-numbered `round-N.md` present —
+    exactly the two files the validator checks. Existing marker lines are replaced in place
+    (not duplicated), and writes are LF-pinned to match `.gitattributes: * text=auto eol=lf`.
+    """
+    root = Path(root)
+    decision = model.final_decision_summary(capture.read_events(root))
+    if decision is None:
+        raise ArchiveError("final-decision-missing",
+                           "No terminal decision to stamp; record one first.", "evidence/events")
+    values = {"terminal_decision_event_id": decision["event_id"],
+              "terminal_decision_value": decision["value"]}
+    if files:
+        targets = [root / name for name in files]
+    else:
+        rounds = sorted((p for p in root.glob("round-*.md") if model.ROUND_RE.fullmatch(p.name)),
+                        key=lambda p: int(p.name[6:-3]))
+        targets = [root / "retrospective.md"] + ([rounds[-1]] if rounds else [])
+    stamped = []
+    for path in targets:
+        if not path.is_file():
+            raise ArchiveError("decision-summary-missing",
+                               "Cannot stamp a file that does not exist.", path.name)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        kept = [ln for ln in lines if not any(ln.startswith(f"{k}: ") for k in _MARKER_KEYS)]
+        while kept and not kept[-1].strip():
+            kept.pop()
+        kept += [f"{k}: {values[k]}" for k in _MARKER_KEYS]
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8", newline="\n")
+        stamped.append(path.name)
+    return {"stamped": stamped, **values}
+
+
 def _output(value, fmt: str) -> None:
     if fmt == "json":
         sys.stdout.buffer.write(presentation.json_bytes(value))
@@ -150,8 +223,37 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--failure-detail")
     recover.add_argument("--instance-id"); recover.add_argument("--settlement-ref")
 
-    decision = sub.add_parser("record-terminal-decision")
-    decision.add_argument("root", type=Path); decision.add_argument("--data", type=_json_object, required=True)
+    decision = sub.add_parser("record-terminal-decision",
+        help="Record a terminal decision. Prefer the typed flags over --data: hand-assembling "
+             "the whole event as a JSON literal is itself an error surface, and it is the one "
+             "this command's two field-level archive failures came through.")
+    decision.add_argument("root", type=Path)
+    decision.add_argument("--data", type=_json_object,
+        help="Raw event fields as a JSON object (legacy form). Merged under the typed flags; "
+             "the typed flags win on conflict.")
+    decision.add_argument("--decision-type", choices=("reviewer-verdict", "user-decision"))
+    # reviewer-verdict fields
+    decision.add_argument("--reviewer-event-id"); decision.add_argument("--review-kind", choices=("fresh", "blank-slate"))
+    decision.add_argument("--verdict"); decision.add_argument("--verdict-output-ref")
+    # user-decision fields
+    decision.add_argument("--decision-kind", choices=tuple(model.DECISION_ACCEPTED_STATE))
+    decision.add_argument("--user-quote"); decision.add_argument("--source-ref")
+    decision.add_argument("--accepted-state",
+        help="Optional; defaults to the state implied by --decision-kind, which fully determines it.")
+    derive = sub.add_parser("derive-decision-fields",
+        help="Read-only: print the terminal-decision fields derived from the current event graph "
+             "(supersedes_decision_event_id, and presented_degradations for a user-decision). "
+             "These are filled in automatically at record time — this is for pre-flight review.")
+    derive.add_argument("root", type=Path)
+    derive.add_argument("--decision-type", choices=("reviewer-verdict", "user-decision"), default="user-decision")
+    derive.add_argument("--format", choices=("human", "json"), default="json")
+    stamp = sub.add_parser("stamp-decision-markers",
+        help="Write the final decision's id/value markers into retrospective.md and the last "
+             "round-N.md — the cross-references `archive` requires. Derived, never typed.")
+    stamp.add_argument("root", type=Path)
+    stamp.add_argument("--file", action="append", dest="files", metavar="NAME",
+        help="Override the default targets (repeatable, root-relative).")
+    stamp.add_argument("--format", choices=("human", "json"), default="json")
     design = sub.add_parser("record-design-review-completion")
     design.add_argument("root", type=Path); design.add_argument("--invocation-event-id", required=True)
     design.add_argument("--status", required=True); design.add_argument("--highlights-ref", required=True)
@@ -216,7 +318,12 @@ def main(argv=None) -> int:
                 failure_reason_code=args.failure_reason_code, failure_detail=args.failure_detail,
                 instance_id=args.instance_id, settlement_ref=args.settlement_ref), "json")
         elif args.command == "record-terminal-decision":
-            _output(capture.record_terminal_decision(args.root, args.data), "json")
+            _output(capture.record_terminal_decision(args.root, _decision_fields(args)), "json")
+        elif args.command == "derive-decision-fields":
+            _output(capture.derive_decision_fields(
+                capture.read_events(args.root), args.decision_type), args.format)
+        elif args.command == "stamp-decision-markers":
+            _output(_stamp_decision_markers(args.root, args.files), args.format)
         elif args.command == "record-design-review-completion":
             _output(capture.record_design_review_completion(args.root, invocation_event_id=args.invocation_event_id,
                 completion_status=args.status, highlights_ref=args.highlights_ref), "json")
