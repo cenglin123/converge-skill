@@ -1,0 +1,29 @@
+{
+  "config": {
+    "max_blind_rechecks": 2
+  },
+  "extensions": [],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {
+      "2": [
+        "architectural",
+        "architectural",
+        "architectural",
+        "structural",
+        "architectural",
+        "structural",
+        "structural"
+      ],
+      "3": [
+        "architectural",
+        "architectural",
+        "architectural",
+        "structural",
+        "architectural",
+        "structural",
+        "structural"
+      ]
+    }
+  }
+}

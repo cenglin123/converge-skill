@@ -131,9 +131,21 @@ converge/
     └── antipatterns.md            # 反模式注册表（compiled 产物，status 由 distill 维护）
 ```
 
-> `.converge/` 是运行期证据（active/ 收敛现场、done/ 归档），**不入库**——体量大且逐次产生。
-> `docs/` 相反：它是开发侧的长期记录，2026-08-10 起纳入版本控制（此前被 gitignore，
-> 且自成一个无远端的嵌套仓库，等于「看起来受控、实际断电就没」）。
+`.converge/` 的三个子目录**分别对待**（2026-08-10 起）：
+
+| 目录 | 入库 | 理由 |
+|---|---|---|
+| `.converge/done/` | **是** | 已归档的收敛证据。内容寻址、可用 `check` 机械复验，是这套治理机制唯一的事后凭据 |
+| `.converge/active/` | 否 | 在飞的收敛现场，随时变化 |
+| `.converge/tmp/` | 否 | 临时产物 |
+
+`docs/` 同样入库——它是开发侧的长期记录，且 `CONSTITUTION.md` 第四部要求的计划文件就在里面。
+
+> **`.gitattributes` 里的 `.converge/done/** -text` 是必需的，不是装饰。**
+> 归档的 manifest 按字节记录 sha256 + size；`* text=auto eol=lf` 的换行归一化会改字节。
+> 实测去掉那行，`done/` 下 14 个 CRLF 文件的索引字节即与工作树不一致。
+> 用 `archive_convergence.py check-git-ref <repo> <slug> --from-index` 可以直接
+> **从 git 索引**复验哈希，而不是只验工作树。
 
 ## 验证
 

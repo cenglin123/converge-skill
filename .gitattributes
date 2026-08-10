@@ -1,1 +1,8 @@
 * text=auto eol=lf
+
+# 归档是内容寻址的：manifest 按字节记录 sha256 + size，换行归一化会改字节。
+# 实测：去掉下面这行，`.converge/done/` 下 14 个 CRLF 文件的索引字节与工作树不一致
+# （它们全在 legacy 归档里，无 manifest，所以没有任何东西会报错——静默改写证据）。
+# 一旦某个带 manifest 的归档含 CRLF 字节，同样的归一化会直接让 `check` 变成
+# content-mismatch。整棵 done/ 关掉文本处理。
+.converge/done/** -text

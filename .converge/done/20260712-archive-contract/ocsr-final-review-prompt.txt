@@ -1,0 +1,69 @@
+You are the single fresh OCSR final reviewer for Converge Archive Contract v1. You have no access to the prior convergence discussion and must make an independent judgment.
+
+【任务】
+Audit the landed Archive Contract v1 implementation. Completion means: run the allowed deterministic checks safely, examine the full code/spec alignment, and write a structured verdict to the exact output path. Do not trust implementation reports or passing test counts by themselves.
+
+【输入】
+Read only these paths under <user-home>\.agents\skills\converge:
+1. .converge\active\20260712-archive-contract\plan.md
+2. SKILL.md
+3. refs\state-schema.md
+4. refs\orchestrator-guide.md
+5. refs\framework-adapters.md
+6. scripts\archive_convergence.py
+7. scripts\archive_contract\__init__.py
+8. scripts\archive_contract\model.py
+9. scripts\archive_contract\capture.py
+10. scripts\archive_contract\transaction.py
+11. scripts\archive_contract\presentation.py
+12. scripts\hooks\pre-push
+13. scripts\hooks\stale-check.py
+14. tests\test_archive_convergence.py
+15. tests\test_budget_gate.py
+16. docs\problems\bugfix\convergence-archive-auditability.md
+17. .gitattributes
+
+Do not read attempts.md, round logs, prior reviewer reports, landing reports, or retrospective. Do not access any other repository or user path.
+
+【安全前置】
+Before running Python tests, statically verify that implementation code contains no `os.kill(pid, 0)`, `TerminateProcess`, or equivalent destructive liveness probe. If such a call exists, do not run tests; report blocking immediately.
+When running tests use `python -B` so no __pycache__ is produced. Deterministic checks must be read-only and non-destructive. Never run git reset/restore/checkout/clean/commit/push, never modify inputs, never trigger a real remote push.
+
+【审查范围】
+Evaluate, with adversarial examples where useful:
+- active/evidence path containment, ancestor symlink/reparse handling, authorization-before-read, and rejection with zero side effects;
+- append-only invocation lifecycle, exact event schema, stable ArchiveError diagnostics, Spawn reservation/settlement bidirectional closure, Continue same-instance, Reviewer/user terminal authority;
+- requested/resolved model provenance tagged union and honest degradation;
+- owner-derived manifest/blob closure, artifact locator and evidence modes;
+- archive/reopen journal durability, idempotent recovery, lock-owner liveness without process termination;
+- schema dispatch and legacy read-only behavior;
+- INDEX audit journey, full revision/artifact/model/degradation projection, stable code/summary/path/next_action diagnostics;
+- pre-push range correctness and path safety, stale-check shared journal parsing;
+- documentation and bugfix claims versus actual tests.
+
+Threat model boundary: this system guarantees cooperative crash recovery and archive-time internal consistency. It does NOT claim to resist a hostile same-privilege writer who can rewrite the archive, ledger, Git history, and code together. Do not demand signatures, services, databases, or hostile-same-writer defenses.
+
+Platform-specific Windows objects that cannot be created without privilege may be an explicit capability degradation, but must not be claimed as physically tested.
+
+【允许的命令】
+- `rg` / read-only file inspection
+- `python -B -m unittest discover -s tests -p test_archive_convergence.py`
+- `python -B -m unittest discover -s tests -p test_*.py`
+- `git diff --check`, `git status --short`, `git check-ignore`, and other read-only git inspection
+- temporary fixtures only under the OS temporary directory; remove them before exit
+
+【输出】
+Write the report only to:
+<user-home>\.agents\skills\converge\.converge\active\20260712-archive-contract\ocsr-final-review.md
+
+Use UTF-8 without BOM and LF. Do not rely on stdout. Do not modify any input or write anywhere else.
+
+【格式】
+Start with YAML containing:
+reviewer_model, verdict (可执行|阻断需修复|需重新设计), deterministic_check, blocking_issues, suggestion_issues, rubric_scores.
+Each blocking issue must include id, severity, exact location, reproducible evidence, and required fix. Then include concise sections: deterministic evidence, threat-model honesty, audit-journey assessment, and files/tools used.
+
+【执行证据】
+In the final response list the output path, byte size, tool types used, and test exit/result. Missing/non-empty report evidence means execution failure.
+
+Current date risk anchor: 2026-07-12. Preserve confirmed names exactly; mark uncertainty instead of guessing.

@@ -172,7 +172,27 @@ def _materialize_and_check(repo: Path, treeish: str, rel_dir: str) -> dict:
         return presentation.check_view(root / rel_dir)
 
 
-def _check_push_range(repo: Path, base: str, head: str) -> list[dict]:
+def _check_push_range(repo: Path, base: str, head: str, *, allow_legacy: bool = False) -> list[dict]:
+    """Re-verify every `.converge/done/<slug>` touched in base..head, from the pushed tree.
+
+    `allow_legacy` distinguishes two things this check used to conflate:
+
+      * **contract violated** — a manifest exists and the bytes/graph disagree with it.
+        Always blocks. This is the tampering the hook exists to catch.
+      * **no contract to verify** (`legacy-unverifiable`) — the archive predates Archive
+        Contract v1 and has no manifest at all. There is nothing to tamper-detect.
+
+    Without the distinction, a pre-contract archive can never be put under version control:
+    its first commit is also its last, because the push is rejected and no amount of
+    correcting can produce a manifest for evidence that must not be rewritten in place
+    (`check_archive`'s own next_action says exactly that: "do not rewrite legacy archives").
+    That is a missing compliant path, not a policy we chose.
+
+    The exemption is **opt-in at the call site**, not baked in here — the default stays
+    fail-closed, and `scripts/hooks/pre-push` declares it explicitly. Same shape as
+    `archive --declare-orphan-reservation`. Exempted slugs are returned so the caller can
+    print them: an exemption nobody sees is indistinguishable from a check that never ran.
+    """
     zero = "0" * 40
     if base == zero:
         base = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -183,11 +203,17 @@ def _check_push_range(repo: Path, base: str, head: str) -> list[dict]:
         if raw.startswith(b".converge/done/"):
             slug = raw.decode("utf-8", errors="strict").split("/", 3)[2]
             model.validate_identifier(slug, "slug", charset="unicode-safe"); slugs.add(slug)
-    failures = []
+    failures, exempted = [], []
     for slug in sorted(slugs, key=str.casefold):
         view = _materialize_and_check(repo, head, f".converge/done/{slug}")
-        if not view["valid"]: failures.append(view)
-    return failures
+        if view["valid"]:
+            continue
+        codes = {d.get("code") for d in view["diagnostics"]}
+        if allow_legacy and codes == {"legacy-unverifiable"}:
+            exempted.append(slug)
+            continue
+        failures.append(view)
+    return failures, exempted
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -278,6 +304,10 @@ def build_parser() -> argparse.ArgumentParser:
     changed.add_argument("done_root", type=Path)
     push = sub.add_parser("check-push-range", aliases=("--check-push-range",))
     push.add_argument("repo", type=Path); push.add_argument("base"); push.add_argument("head")
+    push.add_argument("--allow-legacy", action="store_true",
+        help="Do not block on archives whose ONLY diagnostic is `legacy-unverifiable` (no manifest "
+             "exists, so there is nothing to tamper-check). Contract violations still block. "
+             "Exempted slugs are printed to stderr. Default: off (unchanged fail-closed behavior).")
     check_ref = sub.add_parser("check-git-ref",
         help="Re-verify manifest hashes from the Git index or a commit, not the live working tree "
              "(plan Phase 5 step 5) — extracts `.converge/done/<slug>` via `git archive` and re-runs check.")
@@ -366,7 +396,12 @@ def main(argv=None) -> int:
                 _output({"valid": False, "archives": failures}, "json")
                 return 2
         elif args.command in ("check-push-range", "--check-push-range"):
-            failures = _check_push_range(args.repo, args.base, args.head)
+            failures, exempted = _check_push_range(args.repo, args.base, args.head,
+                                                   allow_legacy=args.allow_legacy)
+            if exempted:
+                print(f"[check-push-range] legacy-unverifiable, 无 manifest 可校验，已按 "
+                      f"--allow-legacy 放行 {len(exempted)} 个: {', '.join(exempted)}",
+                      file=sys.stderr)
             if failures:
                 _output({"valid": False, "archives": failures}, "json")
                 return 2

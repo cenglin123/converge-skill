@@ -1,3 +1,4 @@
-.converge/
+.converge/active/
+.converge/tmp/
 __pycache__/
 *.pyc

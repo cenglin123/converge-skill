@@ -1,0 +1,10 @@
+{
+  "config": {
+    "max_blind_rechecks": 2
+  },
+  "extensions": [],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {}
+  }
+}
