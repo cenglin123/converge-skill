@@ -1,0 +1,27 @@
+你是 converge 循环中的 Executor（全新上下文）。仓库：<user-home>/.agents/skills/converge。该仓库刚完成 OCSR↔converge 对接（新文件 scripts/ocsr_spawn_adapter.py + tests/test_ocsr_spawn_adapter.py，168 tests 全绿）。评审留下 6 条 implementation 级 suggestion，你按下列规格全部修复，不做规格外改动，不碰 .converge/ 目录。
+
+## 待修项
+
+- **S3（一行代码）**：适配层在 complete-invocation 子 CLI 失败时的错误消息缺少 invocation_id，重试不便。找到对应错误输出处（搜索 "complete" 相关的 _err / 错误返回），把 invocation_id 加入错误消息。
+- **S4（一行文本）**：适配层 docstring（文件开头，约第 13 行）"begin 后任何异常都尝试 recover"措辞误导——complete 失败路径不 recover 是 by design。修正该句为准确描述（如"begin 后 dispatch 阶段的异常都尝试 recover；complete 自身的失败不 recover（by design，避免重复终态）"）。
+- **S6（注释）**：第 437 行附近 cancelled 分支为 dead code（forward-looking 但未触发）。加一行注释说明其为 forward-looking 保留分支（不删代码）。
+- **S1（3 个测试）**：`--reserved-reservation-id` bypass 路径无测试。读适配层源码理解该参数语义（跳过 reserve、复用既有 reservation），在 tests/test_ocsr_spawn_adapter.py 追加 3 个单元测试（风格与现有测试一致，可复用 tests/_fake_ocsr_dispatch.py shim）。
+- **S2（2-3 个测试）**：`_extract_ocsr_instance_id` 边界（ledger 缺失/空/batch_id 缺失等）无单元测试，补上。
+- **S5（2 个测试）**：fail-collision（dispatch rc=3 路径碰撞）与 generic fallthrough（未知 rc）未测试，补上。
+
+## 工作方式
+
+1. 先读 scripts/ocsr_spawn_adapter.py 与 tests/test_ocsr_spawn_adapter.py、tests/_fake_ocsr_dispatch.py 全文，理解现有结构与测试风格
+2. 逐条修复 S1-S6，保持现有代码风格（stdlib only、类型标注、中文注释）
+3. 运行 `python -m pytest tests/ -q`（仓库根），必须全绿（168 + 新增 ~10 = ~178）
+
+## 输出
+
+把报告用 Write 工具写入：<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/deferred-fix-report.md
+内容：逐项说明改了什么（文件+位置）、测试尾部输出原文、未完成的项（如实说）。不要依赖 stdout 回传。
+
+## 边界
+
+- 只允许修改 scripts/ocsr_spawn_adapter.py 和 tests/test_ocsr_spawn_adapter.py（如需可微调 tests/_fake_ocsr_dispatch.py 支持新测试）
+- 禁止 git 操作；禁止改其他文件
+- 你的知识截止可能早于今天（2026-07-25）；不确定的术语标 [UNCERTAIN]

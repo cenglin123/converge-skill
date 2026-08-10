@@ -1,0 +1,105 @@
+You are a plan/design reviewer in an iterative convergence loop. This is Round 1.
+
+## Required reading (in order, all absolute paths)
+
+1. **Artifact under review** (the design you are evaluating):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/design.md`
+
+2. **Plan** (the upstream plan this design must serve):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/plan.md`
+
+3. **Orchestrator brief** (role boundaries, escalation protocol):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/orchestrator-brief.md`
+
+4. **Converge SKILL definition** (rules source):
+   `<user-home>/.agents/skills/converge/SKILL.md`
+
+5. **Converge framework adapters ref** (provenance matrix, opencode backend row):
+   `<user-home>/.agents/skills/converge/refs/framework-adapters.md`
+
+6. **Source code you must independently verify the design's claims against** (do not trust the design doc's citations — open and check):
+   - `<user-home>/.agents/skills/converge/scripts/archive_convergence.py` (CLI facade: begin/complete/recover-invocation)
+   - `<user-home>/.agents/skills/converge/scripts/archive_contract/capture.py` (event capture: begin_invocation requires reservation_id for spawn; complete_invocation auto-generates settlement_ref)
+   - `<user-home>/.agents/skills/converge/scripts/archive_contract/model.py` (PROVENANCE_MATRIX, EVIDENCE_LEVELS, RESOLUTION_SOURCES, RESOLUTION_REASONS, REVIEWER_AUTHORITIES, ROOT_FIXED, canonical_round)
+   - `<user-home>/.agents/skills/converge/scripts/budget_gate.py` (reserve/settle/ROLE_CONSUMES, EXIT codes)
+   - `<user-home>/.agents/skills/ocsr/scripts/ocsr_dispatch.py` (cmd_dispatch, _watch_loop, _append_dispatch_ledger, ROLE_VALUES, CONVERGE_LEDGER_NAME)
+   - `<user-home>/.agents/skills/ocsr/SKILL.md` (§三 "脚本不做编排判断"; §七 嵌套派发失账陷阱; provenance 规则)
+
+7. **Reviewer discipline** (your constraints):
+   `<user-home>/.agents/skills/converge/refs/reviewer-discipline.md`
+
+## Context
+
+This is **Phase 0 of a multi-phase implementation**. The artifact is a **design document** (not yet code). Your verdict decides whether the orchestrator may proceed to Phase 1 (event-flow wiring code).
+
+The orchestrator that wrote the design is **glm-5.2**. You are **xiaomi/mimo-v2.5-pro** — a different model family. Your value is independent cross-check; do not anchor on the design's conclusions.
+
+Smoke test already passed (nested `opencode run` from inside opencode via ocsr_dispatch.py works, 0.2min wall, no DB lock) — you may take that as established.
+
+## Your task
+
+Identify blocking issues in the design. Output verdict + structured issue list.
+
+Focus areas (in priority order):
+
+1. **Source-code claim verification (highest priority)**: The design cites specific source files/line numbers/behavior (e.g., "`begin_invocation` requires `reservation_id` for spawn (capture.py:214)", "ROLE_CONSUMES and ROLE_VALUES are fully aligned", "ROOT_FIXED already contains `ocsr-dispatch-ledger.jsonl`"). Open those files and verify each load-bearing claim is true. **Any citation that misrepresents the source = blocking issue (severity: implementation, attribution: plan_defect).**
+
+2. **Provenance honesty check**: §3.3 of the design picks `evidence_level=host-reported`, `resolution_source=host_receipt`, `resolution_reason_code=receipt-missing`, and uses ocsr `batch_id` as `--instance-id`. Cross-check against `refs/framework-adapters.md §Archive Contract provenance 采集` opencode row and `PROVENANCE_MATRIX` in model.py. Is this combination legal? Is it the strictest honest choice, or is it over-claiming (should be `configured` instead)? Is `batch_id` acceptable as instance receipt anchor, or does it violate `instance_id` semantics?
+
+3. **Decision rationale (adapter vs builtin flag)**: §2.2 of the design picks adapter layer B. Is the evidence chain concrete and verifiable? Are there rejected alternatives whose dismissal is too quick?
+
+4. **Failure-path completeness**: §3.2 happy/failed/timeout paths. Does it cover every outcome ocsr_dispatch.py can produce (per `_watch_loop`: landed, error_file, exit_code non-zero, DB-lock auto-retry, watchdog timeout)? Does the `pre_execution` flag (capture.py / budget_gate.py) get set correctly in each branch?
+
+5. **Archive Contract compliance**: Will the proposed event flow actually let `archive` return success and `check` return valid-v1? Trace through `validate_event_graph` (in model.py) mentally: every spawn has a started+terminal pair? settlement_ref cross-checks? `final_verdict_ref` mechanism intact?
+
+6. **Non-goals & scope creep**: Does the design stay inside plan's non-goals (no ocsr/converge merge, no nested-cost attribution, no archive-contract semantic changes)?
+
+7. **Design antipatterns** (Round 1 only checks design-layer): consult `<user-home>/.agents/skills/converge/refs/antipatterns.md` for `status: active` entries; flag any in `antipattern_observations`.
+
+## Output format (YAML in markdown code block, write to the output path)
+
+Write your review to:
+`<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/review-design-round-1.md`
+
+Use this exact YAML structure inside a markdown code block (plus any prose before/after you find useful, but the YAML block must be parseable):
+
+```yaml
+round: 1
+verdict: <可执行 | 阻断需修复 | 需重新设计>
+deterministic_check: skipped
+deterministic_check_skip_reason: design doc, no code to run; claims verified by source-code reading
+blocking_issues:
+  - id: 1
+    description: |
+      <single-paragraph plain language>
+    attribution: <plan_defect | executor_limit>
+    severity: <conceptual | architectural | structural | implementation>
+    plan_amendment_required: <true | false>
+    location: <design section reference or N/A>
+    rubric_gap: <true | false>
+suggestion_issues:
+  - description: ...
+antipattern_observations:
+  - round_referenced: 1
+    type: <from antipatterns.md id enum>
+    evidence: |
+      <quote from design.md>
+contract_amendment_required: <true | false>
+```
+
+## Boundary & forbidden actions
+
+- Read-only review. Do NOT modify design.md, plan.md, source files, or any file outside your output path.
+- Do NOT run any code (this is a design review; verify claims by reading source, not by execution).
+- Do NOT trust the design's citations at face value — open the cited file and check.
+- Your output path is the only file you may write.
+- Today's date is 2026-07-25. Your knowledge cutoff may be earlier — do not "correct" any version numbers or paths in the design; if uncertain, mark [UNCERTAIN].
+
+## Execution evidence
+
+Your final reply must include:
+- Output file absolute path + byte size + first 5 lines of YAML block (to prove you actually wrote it).
+- Count of source files you opened (should be ≥5 of the 7 listed).
+- One-sentence summary of your verdict.
+
+A response that does not write the file, or that only summarizes without the YAML block, is a execution failure (per OCSR §五 "报告幻觉").

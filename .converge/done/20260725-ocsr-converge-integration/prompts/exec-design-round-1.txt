@@ -1,0 +1,103 @@
+You are a design-doc executor in an iterative convergence loop. This is Round 1.
+
+## Required reading (in order, absolute paths)
+
+1. **Artifact to modify** (the design you will edit):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/design.md`
+
+2. **This round's reviewer output** (the issues you must fix):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/review-design-round-1.md`
+
+3. **Executor discipline**:
+   `<user-home>/.agents/skills/converge/refs/executor-discipline.md`
+
+## Your task
+
+Fix **every blocking issue** in the reviewer output. For this round there is exactly one (id=1), plus four suggestion issues you should also address (they are small, concrete, and improve correctness/clarity).
+
+### Blocking issue 1 (mandatory fix)
+
+§3.3 of design.md proposes:
+- `evidence_level=host-reported`
+- `resolution_source=host_receipt`
+- `resolution_reason_code=receipt-missing`
+- omits `resolved_provider/resolved_model/resolved_family`
+
+This is illegal per `archive_contract/model.py:PROVENANCE_MATRIX` and would fail at `complete-invocation` (lines 500-508 of model.py):
+- `host-reported` reasons = `frozenset({None})` only → `receipt-missing` rejected
+- `host-reported` requires concrete `resolved_provider + (resolved_model|resolved_family)` AND bound host receipt
+
+**Fix (reviewer-specified, mandatory)**: change §3.3 to use `configured + cli_argument + backend-does-not-expose`:
+- `evidence_level=configured`
+- `resolution_source=cli_argument`
+- `resolution_reason_code=backend-does-not-expose`
+- **omit** `resolved_provider/resolved_model/resolved_family` (configured cannot carry them, per model.py:498)
+- Keep `--instance-id` as ocsr `batch_id` and `--receipt "ocsr-dispatch-ledger.jsonl:<rid>"` as receipt anchor (these are still useful correlation handles even though they don't elevate evidence level — explain this in the doc)
+- Add explicit reference to `model.py:494-513` showing why this combination is the strictest legal honest choice
+- Add a "what would let us upgrade to host-reported later" note (e.g., "if opencode `--format json` exposes per-invocation `provider/model` fields bound to this tool response, we could elevate to host-reported with `host_evidence_ref=invocation:<invocation_id>:tool-response`")
+
+### Suggestion issues (also fix — they are small)
+
+1. **§3.1 CLI missing params**: Add `--backend` (default `opencode`) and `--backend-version` (default auto-detect via `opencode --version`) to the CLI surface in §3.1, since §3.2's complete-invocation call references them.
+
+2. **§3.2 missing record-terminal-decision step**: Add a §3.2 note that the **orchestrator** (not the adapter) must call `archive_convergence.py record-terminal-decision` after the final fresh reviewer Spawn terminal completes (when converge reaches 终止-a/b/c). The adapter's job is per-spawn lifecycle; the terminal-decision is the converge-level closing fact. Cite `archive_convergence.py:76-77` ("final-decision-missing" check) and `record-terminal-decision` subcommand.
+
+3. **§3.2 pre_execution default clarity**: In the failure-path table, explicitly note `pre_execution=false` is the default for any path where ocsr Start-Process succeeded (model was invoked). Only `Start-Process` itself failing (cmd_dispatch returns before launching pwsh) gets `pre_execution=true`.
+
+4. **§2.2 overclaim**: Change "ROLE_CONSUMES 和 ROLE_VALUES **完全对齐**" to "本适配层用到的 6 个角色（outer-reviewer / blind-reviewer / ultraverge-initial / executor / arbiter / design-reviewer）在 budget_gate.ROLE_CONSUMES 与 ocsr_dispatch.ROLE_VALUES 中**子集一致**——两边的全集不同（ROLE_CONSUMES 还有 contract-proposer/challenger/finalizer 和 l2-gate-reviewer；ROLE_VALUES 还有 reviewer / release-executor），但适配层只使用两边共有且 consumes 语义一致的角色，无需翻译。"
+
+## Output format
+
+Modify design.md **in place** (use the Edit/Write tool). After all fixes, append a new section at the end:
+
+```markdown
+## Revision Log
+
+### Round 1 fix (2026-07-25)
+- Blocking #1: §3.3 provenance changed host-reported→configured per PROVENANCE_MATRIX constraint. Added model.py:494-513 reference.
+- Suggestion #1: §3.1 added --backend, --backend-version params.
+- Suggestion #2: §3.2 added orchestrator record-terminal-decision step note.
+- Suggestion #3: §3.2 failure-path table made pre_execution default explicit.
+- Suggestion #4: §2.2 ROLE_VALUES alignment claim scoped to adapter subset.
+```
+
+Then write your attempt log to:
+`<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/executor-round-1-attempt.md`
+
+With this YAML (one entry per issue):
+
+```yaml
+issue_id: <1 or suggestion-N>
+approach: <one-sentence fix summary>
+rejected_alternatives: <considered and ruled out, or 「无」>
+upstream_scope_check: <upstream decisions affected, or 「无」>
+diff: <hash or before/after snippet>
+attempt_log_entry: |
+  ## Round 1 attempt · issue <id>
+  - reviewer_backend: xiaomi/mimo-v2.5-pro
+  - Issue: <reviewer's original wording, quoted>
+  - Issue 归因（reviewer 判定）: plan_defect
+  - plan_amendment_required: false
+  - Approach: <one-sentence>
+  - Rejected alternatives: <or 「无」>
+  - Upstream scope check: <or 「无」>
+  - Diff: <hash | inline>
+  - R1 verdict: <leave blank for orchestrator to fill>
+```
+
+## Boundary & forbidden actions
+
+- You may ONLY modify `design.md` and write `executor-round-1-attempt.md`. No other files.
+- Do NOT run any code (this is design-doc editing, not implementation).
+- Do NOT use git commands (no commit, no add, no reset, no diff to staged).
+- Do NOT "improve" the design beyond the listed issues — Occam's razor.
+- Today is 2026-07-25; do not "correct" version numbers or paths.
+
+## Execution evidence
+
+Your final reply must contain:
+- design.md byte size before and after your edits.
+- executor-round-1-attempt.md byte size.
+- Confirmation that all 5 issues (1 blocking + 4 suggestion) were addressed, with one-line-per-issue summary.
+
+Missing any of these = execution failure (per OCSR §五 报告幻觉).
