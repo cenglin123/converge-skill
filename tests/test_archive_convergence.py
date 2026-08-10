@@ -623,6 +623,60 @@ class ArchiveContractTests(unittest.TestCase):
         self.assertIn('"--name-only", "-z"', cli)
         self.assertIn('"git", "archive"', cli)
 
+    def test_allow_legacy_exempts_only_missing_manifests_not_violations(self):
+        """`--allow-legacy` 必须只放行「没有 manifest 可校验」，不得放行契约违反。
+
+        这是把 done/ 纳入版本控制时才暴露的：pre-push 的 check-push-range 原先把
+        `legacy-unverifiable`（压根没有 manifest）和「manifest 存在但对不上」同等
+        当作失败，于是 pre-contract 归档**永远无法被提交**——推送必被拒，而修复它
+        又需要重写归档本身（`check_archive` 自己的 next_action 明说不许）。
+        缺的是合规路径，不是刻意的策略。
+        """
+        import archive_convergence
+
+        legacy = {"diagnostics": [{"code": "legacy-unverifiable"}], "valid": False}
+        violated = {"diagnostics": [{"code": "content-mismatch"}], "valid": False}
+        mixed = {"diagnostics": [{"code": "legacy-unverifiable"},
+                                 {"code": "content-mismatch"}], "valid": False}
+        good = {"diagnostics": [], "valid": True}
+        views = {"a-legacy": legacy, "b-violated": violated, "c-mixed": mixed, "d-good": good}
+
+        with mock.patch.object(archive_convergence, "_materialize_and_check",
+                               side_effect=lambda repo, head, rel: views[rel.split("/")[-1]]), \
+             mock.patch.object(archive_convergence.subprocess, "run") as run:
+            run.return_value = mock.Mock(stdout=b"\0".join(
+                b".converge/done/" + s.encode() + b"/x.md" for s in views))
+            strict_fail, strict_ex = archive_convergence._check_push_range(
+                Path("."), "0" * 40, "HEAD", allow_legacy=False)
+            lax_fail, lax_ex = archive_convergence._check_push_range(
+                Path("."), "0" * 40, "HEAD", allow_legacy=True)
+
+        # 默认不变：三个不 valid 的全部阻断。
+        self.assertEqual(len(strict_fail), 3)
+        self.assertEqual(strict_ex, [])
+        # 放行后：只有纯 legacy 的那个被豁免且被记名；
+        # 契约违反、以及「legacy 之外还有别的问题」的混合情形仍然阻断。
+        self.assertEqual(lax_ex, ["a-legacy"])
+        # 契约违反、以及「除 legacy 外还有别的诊断」的混合情形都仍在失败列表里。
+        self.assertEqual(len(lax_fail), 2)
+        blocked_codes = [frozenset(d["code"] for d in v["diagnostics"]) for v in lax_fail]
+        self.assertIn(frozenset({"content-mismatch"}), blocked_codes)
+        self.assertIn(frozenset({"legacy-unverifiable", "content-mismatch"}), blocked_codes,
+                      "混合诊断不得因为含 legacy 就被整条放行")
+
+    def test_pre_push_hook_declares_the_legacy_exemption_at_the_call_site(self):
+        """豁免必须写在调用点，而不是烧进检查器——检查器默认仍 fail-closed。"""
+        hook = (SCRIPTS / "hooks" / "pre-push").read_text(encoding="utf-8")
+        invocations = [ln for ln in hook.splitlines()
+                       if "check-push-range" in ln and not ln.lstrip().startswith("#")]
+        self.assertEqual(len(invocations), 3)
+        for ln in invocations:
+            self.assertIn("--allow-legacy", ln,
+                          f"check-push-range 调用未显式声明豁免: {ln.strip()}")
+        cli = (SCRIPTS / "archive_convergence.py").read_text(encoding="utf-8")
+        self.assertIn("allow_legacy: bool = False", cli,
+                      "CLI 默认必须仍是 fail-closed")
+
     def _close_review_for_transaction(self):
         from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
         self._append_ledger_pair("r1", 1, "recovery-instance")

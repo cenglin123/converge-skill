@@ -1,0 +1,16 @@
+Delta recheck in the same reviewer session. Do not reopen the full audit or introduce new scope.
+
+The orchestrator applied exactly three low-risk final changes after your `可执行` verdict:
+1. Deleted the unreachable block after `check_archive`'s exception return in `scripts/archive_contract/model.py`.
+2. Updated `docs/problems/bugfix/convergence-archive-auditability.md` from `fixing` to `fixed` and replaced the outdated verification paragraph with the actual 88/88 test and OCSR review evidence.
+3. Converted `tests/test_budget_gate.py` from CRLF to LF without changing its text.
+
+Read only those three files plus your prior report at `.converge/active/20260712-archive-contract/ocsr-final-review.md`. Confirm the changes match the description and do not invalidate the prior verdict. Run only:
+- static inspection of the removed dead-code location;
+- `python -B -m unittest discover -s tests -p 'test_*.py'`;
+- `git diff --check` and byte-level BOM/CRLF checks for the three files.
+
+Do not modify inputs. Write only:
+<user-home>\.agents\skills\converge\.converge\active\20260712-archive-contract\ocsr-final-recheck.md
+
+UTF-8 without BOM, LF. Output YAML with `verdict`, `delta_checks`, `blocking_issues`, `suggestion_issues`, followed by concise execution evidence including output path and byte size. This is the single allowed Continue call; finish decisively.

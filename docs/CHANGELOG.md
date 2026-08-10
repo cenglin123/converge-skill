@@ -4,6 +4,54 @@
 
 ## 2026-08-10
 
+### chore: `.converge/done/` 纳入版本控制
+
+#### 变更内容
+
+- `.gitignore` 由忽略整个 `.converge/` 改为只忽略 `.converge/active/` 与 `.converge/tmp/`；`done/` 下 **118 个文件**入库。
+- `.gitattributes` 新增 **`.converge/done/** -text`**。归档是内容寻址的，manifest 按字节记录 sha256 + size，而 `* text=auto eol=lf` 的换行归一化会改字节。**实测：去掉该行，`done/` 下 14 个 CRLF 文件的索引字节即与工作树不一致**（它们全在 legacy 归档里、无 manifest，所以没有任何东西会报错——静默改写证据）。
+- 删除 `.converge/.git`——`.converge/` 此前也是一个**无远端的嵌套 git 仓库**（1 个 commit，仅 tracked 30/118 个文件）。历史已 `git bundle --all` 备份到仓库外并 `verify` 通过；删前已证明其无独有内容（单个纯新增 commit，`git diff HEAD` 为空）。
+- **legacy 归档中 4 个文件的真实用户路径占位化为 `<user-home>`**（这 4 个所在归档均无 manifest，改写不破坏任何哈希）。
+
+#### 刻意未做：唯一 valid 归档中的 2 个文件保持原字节
+
+`20260725-dogfood-adapter-usage` 是 15 个归档里**唯一** `check` 通过的（其余 14 个是 `legacy-unverifiable`，无 manifest）。它的 `ocsr-dispatch-ledger.jsonl`（在 `manifest.records` 中）与一个 event JSON 含真实用户路径。
+
+**实测：占位化后 `check` 立刻变成 `valid=False`（`content-mismatch`）。** 字节完整性与路径隐私在这两个文件上真实冲突，无两全解。用户裁定：**保持原字节**——宁可公开这一处路径，也不让唯一可机械复验的归档变成永久无效，更不为此伪造归档状态（违反「不得覆盖证据 / 不得伪造归档成功状态」）。
+
+#### 验证
+
+| 项 | 结果 |
+|---|---|
+| 入库文件数 | 118，无 gitlink |
+| `git ls-files --eol` | 全部 `attr/-text`；索引与工作树字节不一致数 = **0** |
+| **从 git 索引**复验 manifest（`check-git-ref --from-index`） | `valid = True` |
+| `scan .converge/done` | 1 valid + 14 legacy-unverifiable（与入库前一致） |
+| `active/` `tmp/` | 仍被忽略，0 文件入库 |
+
+#### 附带修正：`check-push-range` 把「无契约可校验」当成了「契约违反」
+
+入库后第一次推送即被 `pre-push` 拒绝——`check-push-range` 对 14 个 `legacy-unverifiable` 归档判 `valid: false` 并阻断。
+
+该检查原先把两件事混为一谈：
+
+- **契约违反**——manifest 存在，字节/事件图与之不符。这是 hook 要抓的篡改，必须阻断。
+- **没有契约可校验**（`legacy-unverifiable`）——归档早于 Archive Contract v1，压根没有 manifest，无从篡改检测。
+
+不做区分的后果是：**pre-contract 归档永远无法进入版本控制**。首次提交必被拒，而"修复"它需要重写归档本身——`check_archive` 自己的 `next_action` 明说不许（"do not rewrite legacy archives in place"）。这是缺一条合规路径，不是刻意选择的策略。
+
+改法遵循仓库既有的 `archive --declare-orphan-reservation` 形状：**豁免是调用点显式 opt-in，不烧进检查器**。
+
+- `check-push-range` 新增 `--allow-legacy`（默认关闭，CLI 默认行为**不变**）
+- `scripts/hooks/pre-push` 三处调用显式带上该参数，并把理由写在调用点上方
+- 被豁免的 slug **打印到 stderr**——没人看见的豁免，与从未运行过的检查无法区分
+
+两条回归测试：① 豁免只对「唯一诊断是 `legacy-unverifiable`」生效，契约违反与混合诊断仍阻断，且默认关闭时三者全阻断；② hook 的三处调用都必须带该参数，CLI 签名默认必须仍是 `allow_legacy: bool = False`。
+
+#### 动机
+
+归档是这套治理机制**唯一的事后凭据**：`pre-push` hook 早就在跑 `check-push-range` 校验「本次推送范围内改动过的 done 目录」——它本来就是按 `done/` 入库设计的，只是 `done/` 一直不在库里，**那条检查从来没有真正跑过真实数据**。上面那处缺陷正是这次第一次跑才暴露的。
+
 ### chore: `docs/` 纳入版本控制
 
 #### 变更内容
