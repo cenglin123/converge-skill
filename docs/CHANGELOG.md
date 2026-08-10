@@ -4,6 +4,42 @@
 
 ## 2026-08-10
 
+### chore: `20260725-flow-prior-legitimacy` 按 legacy 归入 `done/`
+
+`.converge/active/` 里悬了 16 天的这一项，查明是**做完了、产物也上线了，但整场收敛从头到尾没走契约机制**——不是漏跑 `archive`，是当时根本归不了档。
+
+#### 它确实做完了
+
+完整 ultraverge：三族并行初评（`review-ds` 可执行 / `review-mimo` 可执行 / `review-glm` **阻断需修复**）→ 修复后复评 `review-r2` 可执行、零阻断 → 盲审复核 `review-blind` 可执行、零阻断 → **强制设计审查** `design-review.md` 可执行、`deterministic_check: pass`、仅 3 条 suggestion。设计审查是 ultraverge 的最后一步，链条走到底了。
+
+产物（plan.md 的目标是「三仓库贯彻流程先验合法性判据」）三处全部落在各自默认分支：
+
+| 仓库 | 落点 | commit |
+|---|---|---|
+| converge | `CONSTITUTION.md` L32-34 | `dace767` |
+| ocsr | `SKILL.md` L64 | `33c8bf2` |
+| init-agent-docs | `SKILL.md` L157 | `4f1a92c` |
+
+#### 为什么归不了档
+
+契约要件**一个都不存在**：无 `_orchestrator-state.md` / `attempts.md` / `retrospective.md` / `round-N.md` / `gate-ledger.jsonl` / `_budget-state.json` / `evidence/events/`。目录里只有 `plan.md`、`prompts/`、`reviews/`、`artifact/*.diff`、`design-review.md`——**全是人工命名的文件，没有一个是机器写的**。`archive` 在这种状态下必然 `events-missing` fail-closed。
+
+时间线上说得通：`20260712-archive-contract` 才刚把契约建起来，`20260725` 当天还在同时跑 `ocsr-converge-integration`（把 OCSR 接进事件流那件事）——**契约当时正在被搭建，尚未成为默认路径**。这是过渡期的产物。
+
+#### 处置
+
+**不补造证据。** 归档要的 invocation 事件对、reservation、settlement 都是「当时发生了才有」的事实，事后造出来就是伪造。按 legacy 处理：移入 `.converge/done/`，以 `legacy-unverifiable` 身份入库——与另外 14 个 pre-contract 归档同类。`scan` 会机械地把它报成 `legacy-unverifiable`，无需在目录里再放一个说明文件（那反而是「rewrite legacy archive in place」）。
+
+入库前把 13 个文件里的真实用户路径占位化为 `<user-home>`（该归档无 manifest，改写不破坏任何哈希）。
+
+#### 同批次的另一项：`20260725-ocsr-converge-integration`
+
+**同样的病，程度较轻，暂未处理。** 它有 `_orchestrator-state.md`（`current_phase: completed`）、`retrospective.md`（`status: completed`，终止-a）和 `ocsr-dispatch-ledger.jsonl`（9 行），但同样缺 `gate-ledger.jsonl` / `_budget-state.json` / `evidence/events/` / `manifest.json` / `round-N.md` / `attempts.md`——`archive` 同样会 `events-missing`。产物（`scripts/ocsr_spawn_adapter.py`）已随 `5d8aff5` / `6bcdc21` 上线。
+
+有意思的是它的 Phase 3 dogfood **是**正经归档的（`.converge/done/20260725-dogfood-adapter-usage`，至今 `valid=True`）——**被验证的是适配层，验证适配层的那场收敛自己没被验证**。
+
+其 `_orchestrator-state.md` 还自报了 `boundary_check: violated-but-documented`。
+
 ### chore: `.converge/done/` 纳入版本控制
 
 #### 变更内容
