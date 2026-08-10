@@ -1,0 +1,37 @@
+diff --git a/SKILL.md b/SKILL.md
+index 1941b70..716f679 100644
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -152,6 +152,8 @@ CHANGELOG 会随项目推进不断增长，可能达到几百甚至上千行。
+ 
+ 判别原则：先验如果能随项目演进自然扩展（脚本可加 flag、计划状态机可加新状态），且替代的是**确定会发生的、可机械化的**动作，就保留；先验如果是把"未来可能遇到的情况"提前枚举出来，就让它由 Agent 在具体上下文中判断，不要预编码。
+ 
++**Bitter Lesson 的精确边界——封顶型先验 vs 防呆型机制**：Bitter Lesson 反对的是封顶型先验（任务知识、局部最优启发式——注入后系统上限停在设计者水平，随模型变强而减值），不反对防呆型机制（契约校验、过程监督、预算门控——防御机械失误而非代偿模型判断；推理错误随模型变强减少，机械失误随任务量缩放——后者是本框架的工程外推，非 Sutton 原文结论——此类机制不过时）。流程先验（如脚本化调度）合法的三分判据：①机制不执行任务本身；②不收窄模型可达的解空间——必须留逃生舱且真实可用；③对契约违反 fail-closed（拦机械错误），对判断分歧 fail-open（不否决自己不理解的判断）。脚本防御的是失误，不是无能。本节判别样例表中的“结构性先验”，其承载可验证机械动作的部分（如同步脚本、CHANGELOG 脚本）即属防呆型机制；承载跨上下文交接的部分（如计划状态机）是结构性先验的另一子类。
++
+ ### 9. 软约束靠文档，硬约束靠工具
+ 
+ AGENTS.md 里的规则本质上是"告诉 Agent 应该怎么做"，Agent 可能遗忘或违反。Pre-commit hook、lint、CI 是"强制 Agent 必须这样做"，Agent 绕不过去。
+diff --git a/tests/test_skill_guidance.py b/tests/test_skill_guidance.py
+index 0c6f51b..4694526 100644
+--- a/tests/test_skill_guidance.py
++++ b/tests/test_skill_guidance.py
+@@ -110,6 +110,19 @@ class SkillGuidanceTestCase(unittest.TestCase):
+             ],
+         )
+ 
++    def test_bitter_lesson_boundary_terms_present(self) -> None:
++        skill = read_repo_file("SKILL.md")
++        self.assert_contains_all(
++            skill,
++            [
++                "封顶型先验",
++                "防呆型机制",
++                "逃生舱",
++                "fail-closed",
++                "fail-open",
++            ],
++        )
++
+     def test_worktree_runtime_guidance_present(self) -> None:
+         skill = read_repo_file("SKILL.md")
+         self.assert_contains_all(

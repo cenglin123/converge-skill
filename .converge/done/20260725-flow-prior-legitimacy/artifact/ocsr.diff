@@ -1,0 +1,13 @@
+diff --git a/SKILL.md b/SKILL.md
+index 670763b..1a9761e 100644
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -57,7 +57,7 @@ python scripts/ocsr_dispatch.py dispatch --worker <prompt|model|label> --output-
+ 
+ **错峰**（多 worker 默认间隔 5s 启动）/**看门狗**（硬阈值到期终止进程）/**产物快照比对**（派发前后目录快照 + 覆盖检测）/**遥测**（`~/.ocsr/dispatch-log.jsonl`）全部内置。
+ 
+-**脚本不做编排判断**——选模型、prompt 残注入、verdict 裁决仍由 orchestrator 负责。`--meta` 用于遥测归因（task_id/role/plan_ref 等），与派发核心逻辑正交。
++**脚本不做编排判断**——选模型、prompt 残注入、verdict 裁决、重试时的 prompt 修订仍由 orchestrator 负责。脚本化边界（与 converge 宪法的流程先验判据同构）：可脚本化的只有确定性验证与过程监督——错峰、看门狗、产物契约校验（输出路径一致性、存在性）、快照比对、遥测；预算门控由上层机制承担（如 converge 的 budget_gate）；不可脚本化的是判断力（上述编排判断）。三分判据：①机制不执行任务本身；②不收窄 orchestrator 的编排空间（此层的逃生舱即编排判断全留 orchestrator）；③对契约违反 fail-closed，对判断分歧 fail-open。脚本防御的是失误，不是无能——机械失误随任务量缩放，不随模型强度缩放。`--meta` 用于遥测归因（task_id/role/plan_ref 等），与派发核心逻辑正交。
+ 
+ 当前 skill 仓库 `scripts/ocsr_dispatch.py` 为权威实现，vault 侧仅驻留适配层（见 `docs/CURRENT.md`）。
+ 
