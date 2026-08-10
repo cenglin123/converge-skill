@@ -1,0 +1,114 @@
+You are a code reviewer in an iterative convergence loop. This is Round 1, Phase 2 verification.
+
+## Required reading (in order, absolute paths)
+
+1. **Implementation under review** (Phase 2 added these to the Phase 1 adapter):
+   - `<user-home>/.agents/skills/converge/scripts/ocsr_spawn_adapter.py` — focus on:
+     - `cmd_config_init` (new): writes initial `_budget-state.json`
+     - `cmd_summary` (new): pass-through to budget_gate summary
+     - The two new subparsers at the bottom of `build_parser`
+   - `<user-home>/.agents/skills/converge/tests/test_ocsr_spawn_adapter.py` — focus on:
+     - `TestConfigInit` class (6 tests)
+     - `TestBudgetAccounting` class (2 tests)
+
+2. **Phase 1 implementation context** (already passed R1 review with verdict=可执行):
+   - Same files above — Phase 1 logic must remain unbroken
+   - `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/review-phase1-round-1.md` (Phase 1 review; 6 suggestion issues deferred to retrospective)
+
+3. **Plan (Phase 2 section)**:
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/plan.md` (lines for Phase 2)
+
+4. **Design**:
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/design.md` (esp. §3.4 角色→consumes 映射, §3.5 ledger 双写语义)
+
+5. **Source code the implementation must be compatible with**:
+   - `<user-home>/.agents/skills/converge/scripts/budget_gate.py` — focus on:
+     - `cmd_reserve` per-scope blocking logic (lines 741-758): outer/blind/ultraverge BLOCK conditions
+     - `read_state` / `write_state` (lines 181-206): schema and LF pinning
+     - `DEFAULTS` and `INT_CONFIG` (lines 60-74): which config keys exist, which are int-typed
+     - `cmd_summary` (lines 863-899): the JSON shape summary returns
+     - `validate_integrity` config type checks (lines 608-624): what would fail-closed
+   - `<user-home>/.agents/skills/converge/scripts/archive_contract/model.py` — `ROOT_FIXED` (line 52-60): confirms `_budget-state.json` is a root-fixed hashed file → LF matters
+
+6. **Reviewer discipline**:
+   `<user-home>/.agents/skills/converge/refs/reviewer-discipline.md`
+
+## Context
+
+Phase 0 produced design.md; Phase 1 implemented the adapter (R1 verdict=可执行, 6 deferred suggestions). Phase 2 adds:
+- `config-init` subcommand for reproducible `_budget-state.json` initialization (esp. ultraverge `max_blind_rechecks=2` override per SKILL.md §Ultraverge)
+- `summary` subcommand pass-through
+- 8 new tests covering config-init edge cases + per-scope budget blocking + summary's attempted/model_invocation distinction
+
+All 168 tests pass (14 adapter + 69 budget_gate + 85 archive). The orchestrator is glm-5.2; you are xiaomi/mimo-v2.5-pro (different family). Your job: catch any Phase 2 issues before Phase 3 dogfood.
+
+## Your task
+
+Code project review. Run deterministic checks first, then semantic.
+
+### Deterministic check (mandatory)
+
+```
+cd <user-home>/.agents/skills/converge
+python tests/test_ocsr_spawn_adapter.py
+python tests/test_budget_gate.py
+python tests/test_archive_convergence.py
+```
+Expected: 14 + 69 + 85 = 168 pass. Report exit codes + final-line counts.
+
+### Semantic review — focus areas
+
+1. **config-init ultraverge override correctness**: SKILL.md §Ultraverge says ultraverge inits `max_blind_rechecks=2`. Verify `cmd_config_init` does exactly this AND that `setdefault` semantics mean an explicit `--max-blind-rechecks` override wins over the ultraverge default. Cross-check `budget_gate.DEFAULTS["max_blind_rechecks"]=1` and the ceiling formula `default_total_cap` uses the overridden value.
+
+2. **Idempotency / fail-closed on re-init**: `cmd_config_init` returns EXIT_FAIL_CLOSED (30) if state exists and no `--force`. Is this the right exit code per budget_gate.py's EXIT_FAIL_CLOSED=30 convention? Read budget_gate.py line 52 and the bind/rebind pattern (lines 979-997) — are we consistent?
+
+3. **LF line-ending pinning**: `_budget-state.json` is in `ROOT_FIXED` (model.py:55) and gets hashed by archive. Verify `cmd_config_init` writes with `newline="\n"` (mirroring budget_gate.write_state at lines 201-206). Test `test_state_file_uses_lf_line_endings` asserts this — does it actually prove no CRLF in bytes?
+
+4. **Per-scope blocking test validity**: `test_outer_scope_reservation_blocks_at_ceiling` does 5 successful outer-reviewer dispatches then expects the 6th to BLOCK:budget_exhausted. Trace through budget_gate.effective_usage (lines 340-341): is `realized(active, "outer") + pending(...)` correctly computed when adapter uses unique round numbers 1-6? Why does round-6 fail at reserve (not begin)?
+
+5. **summary pass-through correctness**: `cmd_summary` shells out to budget_gate.py summary. Is the JSON shape preserved? Verify against budget_gate.cmd_summary output (lines 891-899): `total_reservations_issued`, `total_ceiling`, `attempted_dispatch`, `model_invocation`, `scopes` dict.
+
+6. **attempted vs model_invocation distinction**: Test asserts `attempted_dispatch=3` and `model_invocation=2` after 2 happy + 1 fail-launcher. Read budget_gate.py:282-304 (both functions). Is the test's expectation correct? Specifically: does `fail-launcher` with `pre_execution=true` get excluded from `model_invocation`? (Lines 297-304)
+
+7. **Phase 1 regression**: Did the new Phase 2 code break any Phase 1 behavior? The Phase 1 test class `TestHappyPath` / `TestFailurePaths` / `TestReserveGate` / `TestArchiveCheckValid` should still pass — verify.
+
+8. **CLI surface completeness**: Does the new `config-init` and `summary` subparser expose all needed flags? Are defaults sensible? Anything missing for Phase 3 dogfood use?
+
+9. **Antipattern scan**: check `refs/antipatterns.md` `status: active`. Look for environment_lock-in (Windows-only assumptions), data_tool_coupling (state file format tightly coupled to gate internals), solution_anchoring.
+
+### Forbidden
+
+- Do NOT modify any file except your output file.
+- Do NOT run git commands.
+- Do NOT trust the test pass summary at face value — run them yourself.
+- Today is 2026-07-25; do not "correct" version numbers.
+
+## Output format
+
+Write to:
+`<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/review-phase2-round-1.md`
+
+YAML block (parseable) + prose:
+
+```yaml
+round: 1
+verdict: <可执行 | 阻断需修复 | 需重新设计>
+deterministic_check: <pass | fail | skipped>
+blocking_issues: []
+suggestion_issues:
+  - description: ...
+    attribution: <plan_defect | executor_limit>
+    severity: <conceptual | architectural | structural | implementation>
+    location: <file:line or test name>
+antipattern_observations: []
+contract_amendment_required: <true | false>
+```
+
+## Execution evidence
+
+Final reply must include:
+- Output file absolute path + byte size + first 5 lines of YAML block.
+- Test counts (adapter / budget_gate / archive) + exit codes.
+- One-sentence verdict summary.
+
+Missing evidence = execution failure.

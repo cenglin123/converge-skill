@@ -4,6 +4,38 @@
 
 ## 2026-08-10
 
+### chore: `20260725-ocsr-converge-integration` 按 legacy 归入 `done/`——`active/` 清空
+
+与上一条同样的处置。**`.converge/active/` 现在为空**，两项悬置全部落定。
+
+#### 情况：做完了，产物已上线，但契约要件不全
+
+`_orchestrator-state.md` 记 `current_phase: completed`，`retrospective.md` 记 `status: completed`（终止-a，各 Phase 设计审查与代码审查均零阻断首轮通过）。产物 `scripts/ocsr_spawn_adapter.py` 已随 `5d8aff5` / `6bcdc21` 上线。
+
+比 `flow-prior-legitimacy` 多了三样：`_orchestrator-state.md`、`retrospective.md`、`ocsr-dispatch-ledger.jsonl`（9 行）。但仍缺 `gate-ledger.jsonl` / `_budget-state.json` / `evidence/events/` / `manifest.json` / `round-N.md` / `attempts.md`——`archive` 同样 `events-missing` fail-closed。
+
+一处值得记的讽刺：它的 Phase 3 dogfood **是**正经归档的（`.converge/done/20260725-dogfood-adapter-usage`，至今 `valid=True`）——**被验证的是适配层，而验证适配层的那场收敛自己没被验证。** 其 `_orchestrator-state.md` 另自报 `boundary_check: violated-but-documented`。
+
+#### 占位化时抓到一个真实的清洗盲区
+
+脚本的替换表原先只有 `C:\Users\chenr` 与 `C:/Users/chenr` 两种形态。`ocsr-dispatch-ledger.jsonl` 里 15 处 `chenr` 只命中 4 处——**JSON 里的 Windows 路径是转义过的双反斜杠 `C:\\Users\\chenr`**，不匹配单反斜杠形态。
+
+脚本的 `assert b"chenr" not in nb` 当场拦下，**拒绝写出半清洗的文件**。补上转义形态后 15 处全清。转义形态必须排在单反斜杠形态**之前**，否则会被后者切成两半、留下半截 `\Users\chenr`。
+
+顺带复查了**已经公开**的 `origin/master`：`.converge/done/` 与 `docs/` 里残留的 `chenr` 只有 2 处，正是既有取舍中刻意保留原字节的那两个受 manifest 保护的文件——早前几批清洗没有被这个盲区漏掉。
+
+#### 验证
+
+`ocsr-dispatch-ledger.jsonl` 含 CRLF，入库后 `git ls-files --eol` 显示 `i/crlf w/crlf attr/-text`——**这是 `.converge/done/** -text` 在本仓库第一次真正吃到活儿**：没有它，这个文件的索引字节就会被悄悄改成 LF。
+
+| 项 | 结果 |
+|---|---|
+| 新增文件 | 17，全部 `attr/-text` |
+| 索引与工作树字节不一致 | **0** |
+| `check-git-ref --from-index` | 仍 `valid = True` |
+| `scan .converge/done` | 17 个：1 valid + 16 legacy-unverifiable |
+| `.converge/active/` | **空** |
+
 ### chore: `20260725-flow-prior-legitimacy` 按 legacy 归入 `done/`
 
 `.converge/active/` 里悬了 16 天的这一项，查明是**做完了、产物也上线了，但整场收敛从头到尾没走契约机制**——不是漏跑 `archive`，是当时根本归不了档。
@@ -34,7 +66,7 @@
 
 #### 同批次的另一项：`20260725-ocsr-converge-integration`
 
-**同样的病，程度较轻，暂未处理。** 它有 `_orchestrator-state.md`（`current_phase: completed`）、`retrospective.md`（`status: completed`，终止-a）和 `ocsr-dispatch-ledger.jsonl`（9 行），但同样缺 `gate-ledger.jsonl` / `_budget-state.json` / `evidence/events/` / `manifest.json` / `round-N.md` / `attempts.md`——`archive` 同样会 `events-missing`。产物（`scripts/ocsr_spawn_adapter.py`）已随 `5d8aff5` / `6bcdc21` 上线。
+**同样的病，程度较轻**（已在下一条中同样处理）。它有 `_orchestrator-state.md`（`current_phase: completed`）、`retrospective.md`（`status: completed`，终止-a）和 `ocsr-dispatch-ledger.jsonl`（9 行），但同样缺 `gate-ledger.jsonl` / `_budget-state.json` / `evidence/events/` / `manifest.json` / `round-N.md` / `attempts.md`——`archive` 同样会 `events-missing`。产物（`scripts/ocsr_spawn_adapter.py`）已随 `5d8aff5` / `6bcdc21` 上线。
 
 有意思的是它的 Phase 3 dogfood **是**正经归档的（`.converge/done/20260725-dogfood-adapter-usage`，至今 `valid=True`）——**被验证的是适配层，验证适配层的那场收敛自己没被验证**。
 

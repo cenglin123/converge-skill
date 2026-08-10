@@ -1,0 +1,122 @@
+You are a code reviewer in an iterative convergence loop. This is Round 1, Phase 1 verification.
+
+## Required reading (in order, absolute paths)
+
+1. **Implementation under review** (the code you are evaluating):
+   - `<user-home>/.agents/skills/converge/scripts/ocsr_spawn_adapter.py` (main adapter)
+   - `<user-home>/.agents/skills/converge/tests/test_ocsr_spawn_adapter.py` (tests)
+   - `<user-home>/.agents/skills/converge/tests/_fake_ocsr_dispatch.py` (test shim)
+
+2. **Design** (the spec this code must implement):
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/design.md`
+
+3. **Plan**:
+   `<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/plan.md` (Phase 1 section)
+
+4. **Source code the implementation must be compatible with** (verify by reading, don't trust design citations):
+   - `<user-home>/.agents/skills/converge/scripts/archive_convergence.py` (CLI subcommands: begin-invocation/complete-invocation/recover-invocation/record-terminal-decision)
+   - `<user-home>/.agents/skills/converge/scripts/archive_contract/capture.py` (begin_invocation/complete_invocation/recover_invocation signatures)
+   - `<user-home>/.agents/skills/converge/scripts/archive_contract/model.py` (PROVENANCE_MATRIX lines 94-99; validate_event lines 481-518; canonical_round lines 103-116)
+   - `<user-home>/.agents/skills/converge/scripts/budget_gate.py` (cmd_reserve/cmd_settle; ROLE_CONSUMES; EXIT codes 43-52)
+   - `<user-home>/.agents/skills/ocsr/scripts/ocsr_dispatch.py` (cmd_dispatch; _append_dispatch_ledger; worker arg format; ledger row schema)
+
+5. **Reviewer discipline**:
+   `<user-home>/.agents/skills/converge/refs/reviewer-discipline.md`
+
+## Context
+
+Phase 0 produced design.md ( Round 1 review fixed the illegal provenance combination to `configured+cli_argument+backend-does-not-expose`). Phase 1 implements the adapter. The orchestrator is glm-5.2; you are deepseek-v4-pro (different family). Smoke test already verified nested `opencode run` works. All 6 unit tests pass; existing 154 tests (69 budget_gate + 85 archive) still pass — no regressions.
+
+Your job: catch any correctness/protocol/spec-mismatch issues before Phase 2 (budget gate wiring) starts.
+
+## Your task
+
+This is a code project review. Run deterministic checks first, then semantic review.
+
+### Deterministic check (mandatory — you have shell/bash)
+
+Run the test suite to independently verify:
+```
+cd <user-home>/.agents/skills/converge
+python tests/test_ocsr_spawn_adapter.py
+```
+Expected: 6 tests pass. Report actual exit code + last 5 lines of output. If any test fails, that is blocking issue #1.
+
+Also run regression check:
+```
+python tests/test_budget_gate.py
+python tests/test_archive_convergence.py
+```
+Both must still pass (no regressions).
+
+### Semantic review — focus areas
+
+1. **Spec-conformance to design.md §3.2 call sequence**: Does the adapter implement the exact 5-step sequence (reserve → begin → dispatch → complete-or-recover → settle)? Trace `cmd_dispatch` in ocsr_spawn_adapter.py and verify each step matches design §3.2 happy path AND failure path.
+
+2. **Provenance correctness (CRITICAL)**: Verify the adapter passes `--evidence-level configured --resolution-source cli_argument --resolution-reason-code backend-does-not-expose` to complete-invocation, AND does NOT pass any `--resolved-provider/model/family` (which would be illegal under configured level per model.py:498, 512-513). Cross-check by reading `_archive_complete` in the adapter and the `PROVENANCE_MATRIX` rules.
+
+3. **pre_execution mapping correctness**: For each failure mode in `_map_ocsr_outcome`:
+   - fail-launcher (Start-Process error) → pre_execution=true (model never called)
+   - fail-timeout (watchdog) → pre_execution=false (model was called)
+   - generic backend error → pre_execution=false
+   Verify these match the budget_gate.py semantics (lines 573-575 comment).
+
+4. **Settle result mapping for archive timeout**: The adapter maps archive `timeout` → gate `failed` (since gate has no timeout enum). Is this the right call? Check budget_gate.py SETTLE_EVENTS (line 121) — `{"spawn_succeeded", "spawn_failed", "cancelled"}`. Is mapping timeout→failed semantically honest?
+
+5. **Orphan-event prevention**: If `complete-invocation` fails AFTER the product landed (line ~252 in adapter), the adapter logs and returns non-zero but does NOT undo the product. Is this safe? Could it leave an orphan started event (begin without terminal)? Trace the code.
+
+6. **Test coverage adequacy**: Does `tests/test_ocsr_spawn_adapter.py` cover every code path in `cmd_dispatch`? Specifically: happy path (✓), fail-launcher (✓), fail-timeout (✓), unknown role DENY (✓), outer-reviewer scope (✓), event-graph validity (✓). What's missing? Is `_extract_ocsr_instance_id` tested? Is the `--reserved-reservation-id` bypass path tested?
+
+7. **CLI parameter completeness**: Compare adapter's argparse to design.md §3.1 + §3.2's referenced params. Are all params present? Any params in code not in design?
+
+8. **Source-code citations in design.md**: Re-verify 3-4 load-bearing citations the Phase 0 review already checked (e.g., model.py:498 forbids configured carrying resolved_model, capture.py:214 requires reservation_id for spawn). If the implementation correctly uses these facts, mark pass; if it contradicts them, blocking.
+
+9. **Antipattern scan (Round 1, design-layer only)**: `<user-home>/.agents/skills/converge/refs/antipatterns.md` `status: active` entries. Look for solution_anchoring, false_generality, data_tool_coupling, etc. in the adapter design.
+
+### Forbidden
+
+- Do NOT modify any file except your output file.
+- Do NOT run any git command.
+- Do NOT trust the test pass summary at face value — actually run them yourself.
+- Today is 2026-07-25; your knowledge cutoff may be earlier — do not "correct" version numbers.
+
+## Output format
+
+Write your review to:
+`<user-home>/.agents/skills/converge/.converge/active/20260725-ocsr-converge-integration/reviews/review-phase1-round-1.md`
+
+YAML block (must be parseable) + any prose before/after:
+
+```yaml
+round: 1
+verdict: <可执行 | 阻断需修复 | 需重新设计>
+deterministic_check: <pass | fail | skipped>
+deterministic_check_skip_reason: <if skipped>
+blocking_issues:
+  - id: 1
+    description: |
+      <plain language, single paragraph>
+    attribution: <plan_defect | executor_limit>
+    severity: <conceptual | architectural | structural | implementation>
+    plan_amendment_required: <true | false>
+    location: <adapter file:line or test name or N/A>
+    rubric_gap: <true | false>
+suggestion_issues:
+  - description: ...
+antipattern_observations:
+  - round_referenced: 1
+    type: <from antipatterns.md>
+    evidence: |
+      <quote>
+contract_amendment_required: <true | false>
+```
+
+## Execution evidence
+
+Final reply must include:
+- Output file absolute path + byte size + first 5 lines of YAML block.
+- Test run results (adapter test exit code + last 5 lines; budget_gate/archive test pass count).
+- Count of source files opened (should be ≥5 of the 7 listed).
+- One-sentence verdict summary.
+
+Missing evidence = execution failure (报告幻觉).
