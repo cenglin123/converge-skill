@@ -18,11 +18,11 @@
 
 #### 占位化时抓到一个真实的清洗盲区
 
-脚本的替换表原先只有 `C:\Users\chenr` 与 `C:/Users/chenr` 两种形态。`ocsr-dispatch-ledger.jsonl` 里 15 处 `chenr` 只命中 4 处——**JSON 里的 Windows 路径是转义过的双反斜杠 `C:\\Users\\chenr`**，不匹配单反斜杠形态。
+脚本的替换表原先只有 `C:\Users\<用户名>` 与 `C:/Users/<用户名>` 两种形态。`ocsr-dispatch-ledger.jsonl` 里 15 处只命中 4 处——**JSON 里的 Windows 路径是转义过的双反斜杠 `C:\\Users\\<用户名>`**，不匹配单反斜杠形态。
 
-脚本的 `assert b"chenr" not in nb` 当场拦下，**拒绝写出半清洗的文件**。补上转义形态后 15 处全清。转义形态必须排在单反斜杠形态**之前**，否则会被后者切成两半、留下半截 `\Users\chenr`。
+脚本的 `assert` 残留检查 当场拦下，**拒绝写出半清洗的文件**。补上转义形态后 15 处全清。转义形态必须排在单反斜杠形态**之前**，否则会被后者切成两半、留下半截 `\Users\<用户名>`。
 
-顺带复查了**已经公开**的 `origin/master`：`.converge/done/` 与 `docs/` 里残留的 `chenr` 只有 2 处，正是既有取舍中刻意保留原字节的那两个受 manifest 保护的文件——早前几批清洗没有被这个盲区漏掉。
+顺带复查了**已经公开**的 `origin/master`：`.converge/done/` 与 `docs/` 里残留的用户名只有 2 处，正是既有取舍中刻意保留原字节的那两个受 manifest 保护的文件——早前几批清洗没有被这个盲区漏掉。
 
 #### 验证
 
