@@ -370,6 +370,53 @@ class ArchiveContractTests(unittest.TestCase):
         self.assertEqual(len(outcomes), 2)
         self.assertTrue(all(isinstance(item, (dict, ArchiveError)) for item in outcomes))
 
+    def test_lock_release_survives_a_concurrent_reader_and_never_wedges(self):
+        """一次瞬时的删除失败不得让事件锁永久自锁。
+
+        Windows 上删除正被别人打开的文件会失败（`WinError 32`），而竞争失败的一方在
+        `__enter__` 里恰好要 `read_bytes()` 读 owner 记录。修复前的实测：
+
+          第 1 轮 —— unlink 抛 PermissionError，**从 `with` 块里穿出来**（事件此时已落盘）
+          第 2..400 轮 —— 锁文件带着本进程 pid 残留，liveness 永远答 "alive"，
+                          后续 399 次获取全部 lock-conflict
+
+        即一次瞬时冲突就让该 root 的事件锁在本进程余生里报废。本用例同时钉住两件事：
+        OSError 不得穿出 `with`，且不得出现虚假的 lock-conflict。
+        """
+        from archive_contract.capture import EventLock
+        from archive_contract.model import ArchiveError
+
+        lock_path = self.active / ".archive-event.lock"
+        stop = threading.Event()
+        escaped: list[BaseException] = []
+        conflicts = 0
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    lock_path.read_bytes()
+                except OSError:
+                    pass
+
+        hammer = threading.Thread(target=reader, daemon=True)
+        hammer.start()
+        try:
+            for _ in range(200):
+                try:
+                    with EventLock(self.active):
+                        pass
+                except ArchiveError:
+                    conflicts += 1
+                except OSError as exc:
+                    escaped.append(exc)
+        finally:
+            stop.set()
+            hammer.join(timeout=5)
+
+        self.assertEqual(escaped, [], "锁释放路径的瞬时删除失败不得穿出 with 块")
+        self.assertEqual(conflicts, 0, "本进程独占时不得出现 lock-conflict（残骸未被回收即会如此）")
+        self.assertFalse(lock_path.exists(), "循环结束后不应残留锁文件")
+
     def test_hardlink_artifact_is_rejected(self):
         from archive_contract.capture import capture_artifact
         from archive_contract.model import ArchiveError
