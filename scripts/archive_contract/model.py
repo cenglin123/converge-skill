@@ -91,6 +91,12 @@ REVIEWER_AUTHORITIES = {
     "fresh": frozenset({"reviewer", "outer-reviewer", "ultraverge-initial"}),
     "blank-slate": frozenset({"blank-slate-reviewer", "blind-reviewer"}),
 }
+# `accepted_state` is a pure function of `decision_kind`. Kept as one constant so the
+# capture-side CLI can fill it in and `validate_event` can check it against the same map.
+DECISION_ACCEPTED_STATE = {
+    "accept-terminal-b": "accepted-degraded-result",
+    "accept-terminal-c": "accepted-stop",
+}
 PROVENANCE_MATRIX = {
     "observed": {"sources": frozenset({"host_receipt", "tool_response"}), "reasons": frozenset({None})},
     "host-reported": {"sources": frozenset({"host_receipt", "tool_response"}), "reasons": frozenset({None})},
@@ -550,7 +556,7 @@ def validate_event(event: Any, filename: str | None = None) -> None:
             if not event["verdict"] or not event["verdict_output_ref"]:
                 raise ArchiveError("decision-review-evidence", "Reviewer decision requires verdict and output binding.")
         elif event["decision_type"] == "user-decision":
-            expected_state = {"accept-terminal-b": "accepted-degraded-result", "accept-terminal-c": "accepted-stop"}
+            expected_state = DECISION_ACCEPTED_STATE
             if event["decision_kind"] not in expected_state or not isinstance(event["presented_degradations"], list) or event["accepted_state"] != expected_state.get(event["decision_kind"]):
                 raise ArchiveError("user-decision-evidence", "User decision lacks fresh quote or auditable source.")
             _text(event["user_quote"], "user_quote"); _text(event["source_ref"], "source_ref")
@@ -889,6 +895,62 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
     return result
 
 
+def derive_presented_degradations(prior_events: list[dict[str, Any]]) -> list[str]:
+    """The degradations in force at a decision point, derived from the event graph.
+
+    This is a *function of the events*, not an authored value — which is why
+    `capture.record_terminal_decision` fills it in and `validate_event_graph` re-derives
+    it rather than trusting what was written. Two archives (ocsr `20260809` and
+    `20260810`) fail-closed on a hand-written value; the field was never something a
+    human could reliably compute by hand.
+
+    `prior_events` must contain exactly the events that precede the decision (lower
+    `sequence`). Callers at write time can pass the whole existing log, since the event
+    being written always gets the next sequence number.
+    """
+    return sorted({
+        f"model-provenance:{e['evidence_level']}" for e in prior_events
+        if e["event_type"] == "invocation-terminal" and e["evidence_level"] != "observed"
+    } | {
+        f"artifact:{e['artifact_id']}:{e['reproduction_capability']}" for e in prior_events
+        if e["event_type"] == "artifact-captured" and e["reproduction_capability"] != "snapshot"
+    })
+
+
+def derive_supersedes_decision_event_id(prior_events: list[dict[str, Any]]) -> str | None:
+    """The `event_id` this decision must supersede: the latest existing terminal-decision.
+
+    Terminal decisions form one append-only supersession chain (`decision-chain`), so the
+    predecessor is fully determined by the log — there is nothing for a caller to decide.
+    Hand-filling it is how ocsr `20260809` ended up with two decisions both claiming no
+    predecessor, which fail-closes the archive with no repair path.
+    """
+    decisions = [e for e in prior_events if e["event_type"] == "terminal-decision"]
+    if not decisions:
+        return None
+    # Keyed on `sequence` rather than list position: the caller's ordering is not part of
+    # this function's contract, and `sequence` is the authoritative order.
+    return max(decisions, key=lambda e: e["sequence"])["event_id"]
+
+
+def final_decision_summary(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The `{event_id, type, value}` triple `project_manifest` will publish as `final_decision`.
+
+    Exposed separately so the active-side tooling can stamp `round-N.md` / `retrospective.md`
+    with the same identity the archive will demand (`_validate_decision_cross_refs`), instead
+    of an author copying a UUID across files by hand.
+    """
+    decisions = [e for e in events if e["event_type"] == "terminal-decision"]
+    if not decisions:
+        return None
+    final = max(decisions, key=lambda e: e["sequence"])
+    return {
+        "event_id": final["event_id"],
+        "type": final["decision_type"],
+        "value": final.get("verdict", final.get("accepted_state")),
+    }
+
+
 def validate_event_graph(events: list[dict[str, Any]]) -> list[str]:
     by_id = {e["event_id"]: e for e in events}
     started_by_invocation: dict[str, dict[str, Any]] = {}
@@ -966,14 +1028,7 @@ def validate_event_graph(events: list[dict[str, Any]]) -> list[str]:
             message = by_id.get(decision["source_ref"])
             if not message or message.get("event_type") != "user-message" or message["sequence"] >= decision["sequence"] or message["user_quote"] != decision["user_quote"]:
                 raise ArchiveError("user-decision-source", "User decision must bind a prior canonical user-message event with the exact quote.", "evidence/events")
-            actual = sorted({
-                f"model-provenance:{e['evidence_level']}" for e in prior
-                if e["event_type"] == "invocation-terminal" and e["evidence_level"] != "observed"
-            } | {
-                f"artifact:{e['artifact_id']}:{e['reproduction_capability']}" for e in prior
-                if e["event_type"] == "artifact-captured" and e["reproduction_capability"] != "snapshot"
-            })
-            if decision["presented_degradations"] != actual:
+            if decision["presented_degradations"] != derive_presented_degradations(prior):
                 raise ArchiveError("user-decision-degradations", "User decision must present exactly the degradations present at decision time.", "evidence/events")
     return sorted(graph_degradations)
 

@@ -134,6 +134,69 @@ python scripts/ocsr_spawn_adapter.py dispatch \
 
 详细对接设计见 `.converge/active/20260725-ocsr-converge-integration/design.md`（adapter-layer 决策、provenance 矩阵引用、失败注入测试、验收锚点）。端到端 dogfood 验证（`.converge/done/20260725-dogfood-adapter-usage/`，`archive` committed + `check` valid-v1 + sequence 1-7 连续 + 零孤儿 reservation）已通过。
 
+#### 退出码契约（2026-08 接口变更）
+
+`ocsr_dispatch.py dispatch --watch` 的退出码语义由 **ocsr 仓库的 `refs/dispatch-patterns.md` §退出码契约**单一定义：
+
+```
+0 全部落盘 ｜ 1 看门狗超时 ｜ 2 确定性失败 ｜ 3 路径碰撞
+混合结局优先级：3 > 1 > 2 > 0
+```
+
+退出码 `2` 是新增。在此之前 `--watch` 在 worker 失败时也返回 **0**，调用方无法用退出码判断成败——适配层最初就是在那个前提下写的。接线后有一条行为变化值得单列：
+
+> **产物存在不等于成功。** 适配层现在要求 **产物落盘 且 `rc == 0`** 才记 `complete-invocation(succeeded)`。
+> `rc=3` 意味着这一批**覆盖了既有文件**——本 worker 自己的产物在不在盘上，与「别的东西有没有被覆写」无关。
+> 只看产物就会把一次路径碰撞记成一次干净的 Spawn。
+
+### 终局链路交给 OCSR 运行器（`run --spec`）
+
+ocsr 的确定性步骤运行器（`ocsr_dispatch.py run --spec`，schema 见 ocsr `refs/run-spec.md`）用来执行**终局这一段**：
+
+```
+record-user-message → record-terminal-decision → stamp-decision-markers → archive → check
+```
+
+模板：**`refs/run-specs/terminal-chain.yaml`**（本仓库）。填 `vars` 即可用，先 `--validate` 再执行。
+
+**为什么只接这一段**：它失败率最高，而且**完全不含判断**。多轮主循环（spawn reviewer/executor、裁 verdict、盲审）每一步都要 agent 判断，正是运行器不该接管的——`run --spec` 的 `pause` 步骤保证编排空间不被收窄，但这里根本用不上。
+
+**分工边界不变**：spec 由 converge 撰写并保存在 converge 仓库；ocsr 的运行器不认识 reserve/settle/archive/verdict 的含义，只按 spec 执行 argv 并按契约 fail-closed。
+
+**配套的机械化**（2026-08-10，S9b）：链路里凡是能从事件图导出的值，一律不再手填——
+
+| 值 | 由谁导出 |
+|---|---|
+| `supersedes_decision_event_id` | `record-terminal-decision`（缺省填充；给定则比对，不符拒写） |
+| `presented_degradations` | 同上 |
+| `accepted_state` | 由 `--decision-kind` 蕴含 |
+| `terminal_decision_event_id` / `_value` 两个 marker | `stamp-decision-markers` |
+| 决策的 `--source-ref` | 上一步 `record-user-message` 的输出捕获（`{{steps.<id>.capture.<name>}}`） |
+
+只剩**用户原话**需要人写——它本来就不是能导出的东西。诊断用 `derive-decision-fields`（只读，派发前肉眼复核）。
+
+> **重放旧事件时省略 derived 字段。** 把旧版本写下的事件重新灌入
+> `record-terminal-decision` 时，不要把原事件里的 `supersedes_decision_event_id` /
+> `presented_degradations` 一起传——重放时的事件图与当初不同，导出值也不同，
+> 原样传入会撞上 `decision-derived-field-conflict`。让它自动填充即可。
+> （直接写事件文件的 bootstrap 导入路径不走这条 CLI，不受影响。）
+
+**这不是新功能，是止血。** ocsr 的两次收敛在归档这一步连续失败（`20260809` → `decision-chain`，`20260810` → `user-decision-degradations`），两次都是把机器能算的值交给人手填，两次都**不可追加修复**。`record-terminal-decision` 现在在写入前就拒绝这两类事件（连同 `user-decision-source` 的 quote 绑定），理由与既有的 `reviewer-verdict` 授权前置检查逐字相同：一条注定在归档时 fail-closed 的事件，不该先落盘再被发现。
+
+**诚实边界**：运行器**不是安全沙箱**——`hook` 步骤执行 spec 声明的任意 argv。spec 及其调用的命令必须当作可信输入（ocsr `refs/run-spec.md` 已就此订正过一次虚假声称）。
+
+**一处仍然存在的缺口（2026-08-10 登记，非待办）**：`validate_event_graph` 对
+`reviewer-verdict` 有「已被超越者降级为可审计条目」的宽免，对 `user-decision` **没有**。
+因此若一条 `presented_degradations` 或 `source_ref` 有误的 `user-decision` 真的进了事件图，
+归档将永久 fail-closed，**且「追加一条正确的决策去超越它」这条合规修复路径不通**
+（已实测）。上述写入前拒绝把这种情形从常态降为异常（只剩 `append_event` 直写、
+bootstrap 导入、本次变更之前的旧归档三条路径），但没有消除它。
+对应的放宽提案经两位跨族独立评审后**未获通过**：先例放掉的恰恰是
+`reviewer_event_id` 这个**身份**字段，因此「放元数据、保身份」这条界线未被论证。
+要放就得连 `source_ref` 一起放以对齐先例，要保就得给出区分判据——两者都还没做。
+
+端到端验证：`tests/test_terminal_chain_spec.py`（5 条）用**真实 ocsr 运行器**跑通模板，产出真实归档并独立 `check` 为 `valid-v1`；全程零模型调用。ocsr 检出位置由 `OCSR_SKILL_DIR` 指定，缺失即 skip——converge 不硬依赖它的路径。
+
 ## A.3 codex (OpenAI Codex CLI)
 
 优先按能力探测适配。若当前 Codex 环境暴露 `multi_agent_v1`，使用原生多 agent adapter：

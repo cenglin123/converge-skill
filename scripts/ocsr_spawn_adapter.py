@@ -263,25 +263,42 @@ def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -
               opencode run executed)
       false = model was invoked (default for any path where Start-Process succeeded)
 
-    ocsr_dispatch exit codes:
-      0            = success (all workers landed) — should not reach recover path
-      1            = watchdog timeout / not-landed
-      3            = EXIT_PATH_COLLISION (overwrote existing files)
-      other        = various errors
+    `ocsr_dispatch.py dispatch --watch` exit-code contract — the single source of truth
+    is the ocsr repo's `refs/dispatch-patterns.md` §退出码契约:
+
+      0 = every worker landed (product exists, non-zero bytes)
+      1 = watchdog timeout (a worker hit its deadline unsettled)
+      2 = deterministic failure (launcher error / opencode non-zero /
+          **opencode exited 0 but the expected product never landed**)
+      3 = path collision (pre/post snapshot shows an existing file was overwritten)
+
+      mixed-outcome priority: 3 > 1 > 2 > 0
+
+    Exit code 2 is new in 2026-08. Before it existed, `--watch` returned **0** even when
+    a worker failed, so callers could not distinguish success from failure by exit code —
+    this adapter was written under that older contract. Two consequences were corrected
+    when wiring the new one:
+
+      1. Launcher errors no longer surface as `rc=0 + error.log`; they surface as
+         `rc=2 + error.log`. `error.log` presence stays the pre_execution discriminator,
+         because rc=2 covers *both* the pre-execution launcher error and the
+         post-execution "opencode ran but produced nothing" case.
+      2. The caller must not decide success from the product alone (see `cmd_dispatch`).
     """
     # Watchdog timeout: model was invoked but stalled past deadline → not pre_execution
     if ocsr_rc == 1:
         return "timeout", "timeout", False
-    # Path collision: model may have written somewhere unexpected; treat as backend error
-    # post-execution (model was invoked).
+    # Path collision: the batch overwrote pre-existing files. The model *was* invoked;
+    # whether or not this worker's own product landed, the batch is not a clean success.
     if ocsr_rc == 3:
         return "failed", "backend-error", False
-    # Launcher-level errors (Start-Process failed) typically surface as ocsr rc=0 with
-    # error.log present and no output — we treat as pre_execution since the launcher
-    # never started opencode.
+    # rc=2 (deterministic failure) and any unexpected non-zero code: `error.log` is the
+    # only evidence that separates "launcher never started opencode" (pre_execution) from
+    # "opencode ran and failed / wrote nothing" (post-execution). Absent that evidence we
+    # assume the model *was* called — the honest default, since claiming pre_execution
+    # would under-report budget consumption.
     if error_log is not None and error_log.is_file():
         return "failed", "backend-error", True
-    # Generic backend error (post Start-Process): model was invoked.
     return "failed", "backend-error", False
 
 
@@ -462,8 +479,16 @@ def cmd_dispatch(args) -> int:
         converge_invocation_id=invocation_id)
     receipt = f"ocsr-dispatch-ledger.jsonl:{reservation_id}"
 
-    if output_path.is_file() and output_path.stat().st_size > 0:
-        # Happy path: product landed
+    product_landed = output_path.is_file() and output_path.stat().st_size > 0
+    if product_landed and ocsr_rc == 0:
+        # Happy path: product landed AND the dispatch itself reported clean success.
+        #
+        # Both conditions are required. The product alone is not sufficient evidence:
+        # under the exit-code contract, rc=3 means the batch overwrote pre-existing files
+        # — this worker's product may well be on disk while something *else* was
+        # clobbered. Recording that as `succeeded` would let a path collision enter the
+        # archive as a clean Spawn. Conversely rc alone is not sufficient either: ocsr can
+        # return 0 when `--watch` was not requested, in which case no product recovery ran.
         complete_rc = _archive_complete(
             archive_script, active_dir, invocation_id,
             status="succeeded", instance_id=instance_id, receipt=receipt,
@@ -485,7 +510,7 @@ def cmd_dispatch(args) -> int:
               f"instance={instance_id} output={output_path}")
         return EXIT_PROCEED
 
-    # Failure path: product did not land
+    # Failure path: the product did not land, or the dispatch reported a non-zero code.
     # Locate the work_dir's error.log (ocsr creates batch_dir/label/error.log)
     # Best-effort: walk ~/.ocsr or $TEMP for ocsr_dispatch_<batch>/error.log — but
     # this is fragile. Use _map_ocsr_outcome heuristics on exit code + work_dir probe.
@@ -500,7 +525,11 @@ def cmd_dispatch(args) -> int:
         pass
 
     status, failure_reason, pre_exec = _map_ocsr_outcome(ocsr_rc, output_path, error_log)
-    failure_detail = f"ocsr rc={ocsr_rc}; output={output_path} missing or empty"
+    # State the product's real status. When a dispatch fails with the product *present*
+    # (rc=3 path collision is the live case), a detail line reading "missing or empty"
+    # would be a false statement in the permanent archive record.
+    product_state = ("present but dispatch failed" if product_landed else "missing or empty")
+    failure_detail = f"ocsr rc={ocsr_rc}; output={output_path} {product_state}"
     if error_log and error_log.is_file():
         try:
             failure_detail += f"; error.log: {error_log.read_text(encoding='utf-8', errors='replace')[:200]}"

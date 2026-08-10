@@ -607,6 +607,40 @@ class TestFailCollisionAndFallthrough(AdapterBase):
         self.assertFalse(failed[0].get("pre_execution"),
                          "path collision must have pre_execution=false")
 
+    def test_collision_with_landed_product_is_not_success(self):
+        """S9a: product on disk + ocsr rc=3 must NOT be recorded as a succeeded Spawn.
+
+        The pre-S9 adapter decided success from `output_path exists and non-empty` alone,
+        ignoring the exit code entirely. Under the ocsr exit-code contract rc=3 means the
+        batch overwrote pre-existing files — this worker's own product landing says
+        nothing about what else got clobbered. Recording it as `succeeded` would let a
+        path collision enter the archive as a clean Spawn.
+        """
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "collide-but-landed"},
+            *self._adapter_args(),
+        )
+        self.assertEqual(rc, 5, f"expected EXIT_OCSR_NO_PRODUCT=5, got rc={rc}; stderr={err}")
+
+        # The product really is on disk — the point is that this alone is not success.
+        product = self.output_dir / "product.md"
+        self.assertTrue(product.is_file() and product.stat().st_size > 0,
+                        "fixture precondition: collide-but-landed must write the product")
+
+        events = _read_events(self.active)
+        terminal = events[1]
+        self.assertEqual(terminal["terminal_status"], "failed")
+        self.assertEqual(terminal["failure_reason_code"], "backend-error")
+        # The permanent record must not claim the product is missing when it is not.
+        self.assertIn("present but dispatch failed", terminal["failure_detail"])
+        self.assertNotIn("missing or empty", terminal["failure_detail"])
+
+        gate = _read_gate_ledger(self.active)
+        failed = [e for e in gate if e.get("event") == "spawn_failed"]
+        self.assertEqual(len(failed), 1)
+        self.assertFalse(failed[0].get("pre_execution"),
+                         "path collision must have pre_execution=false")
+
     def test_unknown_ocsr_rc_falls_through_to_generic(self):
         """Unknown ocsr exit code → generic backend-error recover."""
         rc, out, err = run_adapter(

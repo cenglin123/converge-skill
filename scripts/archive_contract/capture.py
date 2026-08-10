@@ -9,12 +9,13 @@ import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .model import (
     ARCHIVE_TOTAL_LIMIT, ArchiveError, EVIDENCE_LEVELS, EVIDENCE_MODES, FAILURE_REASONS, RESOLUTION_REASONS,
     RESOLUTION_SOURCES, SCHEMA_ID, SCHEMA_VERSION, SECRET_NAMES, TERMINAL_STATUSES, canonical_json_bytes,
     ROOT_FIXED, ROUND_RE, ensure_safe_root, ensure_safe_tree, normalize_relative, sha256_size, strict_json_bytes,
+    derive_presented_degradations, derive_supersedes_decision_event_id,
     validate_event,
     validate_identifier,
     validate_reviewer_verdict_authority,
@@ -96,6 +97,11 @@ def _read_existing(root: Path) -> list[dict[str, Any]]:
     return result
 
 
+def read_events(root: Path) -> list[dict[str, Any]]:
+    """Public read-only view of the event log, for diagnostics that must not write."""
+    return _read_existing(Path(root))
+
+
 def _prune_empty(path: Path, stop: Path) -> None:
     while path != stop:
         try:
@@ -105,12 +111,22 @@ def _prune_empty(path: Path, stop: Path) -> None:
         path = path.parent
 
 
-def _commit_event(root: Path, fields: dict[str, Any], blobs: list[tuple[Path, bytes]] | None = None) -> dict[str, Any]:
+def _commit_event(root: Path, fields: dict[str, Any], blobs: list[tuple[Path, bytes]] | None = None,
+                  prepare: "Callable[[dict[str, Any], list[dict[str, Any]]], dict[str, Any]] | None" = None) -> dict[str, Any]:
+    """Append one event. `prepare(fields, existing)` runs *inside the lock*.
+
+    The hook exists so that fields derived from the current event graph — and the checks
+    that compare against it — see the same `existing` snapshot the sequence number is
+    assigned from. Deriving outside the lock would leave a TOCTOU window in which a
+    concurrent append silently invalidates the derivation.
+    """
     root = ensure_safe_root(Path(root))
     ensure_safe_tree(root)
     blobs = blobs or []
     with EventLock(root):
         existing = _read_existing(root)
+        if prepare is not None:
+            fields = prepare(fields, existing)
         event = {"schema_id": SCHEMA_ID, "schema_version": SCHEMA_VERSION, **fields}
         event["sequence"] = len(existing) + 1
         event["event_id"] = str(uuid.uuid4())
@@ -403,17 +419,82 @@ def capture_artifact(root: Path, source: Path, *, artifact_id: str, revision_id:
     }, blobs)
 
 
-def record_terminal_decision(root: Path, fields: dict[str, Any]) -> dict[str, Any]:
-    root = Path(root)
-    values = {"event_type": "terminal-decision", "generated_at": _now(), **fields}
-    values.setdefault("supersedes_decision_event_id", None)
+DERIVED_DECISION_FIELDS = ("supersedes_decision_event_id", "presented_degradations")
+
+
+def derive_decision_fields(existing: list[dict[str, Any]], decision_type: str | None = None) -> dict[str, Any]:
+    """The terminal-decision fields that are functions of the event graph, not authorship.
+
+    `presented_degradations` only exists on `user-decision`; `supersedes_decision_event_id`
+    exists on both decision types.
+    """
+    derived: dict[str, Any] = {
+        "supersedes_decision_event_id": derive_supersedes_decision_event_id(existing),
+    }
+    if decision_type == "user-decision":
+        derived["presented_degradations"] = derive_presented_degradations(existing)
+    return derived
+
+
+def _prepare_terminal_decision(fields: dict[str, Any], existing: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fill the machine-derivable decision fields; reject a caller value that disagrees.
+
+    Both fields are determined by the event graph (see `model.derive_*`). Requiring the
+    caller to type them is what broke two ocsr archives: `20260809` hand-filled
+    `supersedes_decision_event_id` as null on both decisions (`decision-chain`), and
+    `20260810` hand-filled `presented_degradations` with prose (`user-decision-degradations`).
+    Neither is repairable after the fact — the archive fail-closes at `archive` time, and
+    for `presented_degradations` even superseding the bad entry does not clear it.
+
+    So: absent → derive; present → compare and refuse to write on mismatch. We deliberately
+    do NOT silently rewrite a caller-supplied value: a caller that passes something else
+    believes a different fact about the graph, and silently overwriting would hide that
+    disagreement instead of surfacing it.
+
+    This mirrors the pre-existing `reviewer-verdict` authority check below — same reason,
+    stated there as "this fact should not be written to the ledger in the first place".
+    An event certain to fail-closed at archive time should not reach the disk.
+    """
+    values = dict(fields)
+    derived = derive_decision_fields(existing, values.get("decision_type"))
+    for key, expected in derived.items():
+        if key not in values:
+            values[key] = expected
+        elif values[key] != expected:
+            raise ArchiveError(
+                "decision-derived-field-conflict",
+                f"Terminal decision field {key!r} must equal the value derived from the event "
+                f"graph; got {values[key]!r}, derived {expected!r}. Omit the field to have it "
+                f"filled in, or run `derive-decision-fields` to see the current values.",
+                "evidence/events",
+            )
     if values.get("decision_type") == "reviewer-verdict":
         # 调用前阻止：把 REVIEWER_AUTHORITIES 授权检查前移到落盘之前，而不是只在归档时
         # (validate_event_graph) 才发现——一个越权角色（如 l2-gate-reviewer，只是
         # refs/quality-gate.md 定义的 advisory 门控，从不在 REVIEWER_AUTHORITIES 中）
         # 永远不能被登记为 terminal owner，这个事实本身都不应该被写入 ledger。
-        validate_reviewer_verdict_authority(_read_existing(root), values)
-    return append_event(root, values)
+        validate_reviewer_verdict_authority(existing, values)
+    elif values.get("decision_type") == "user-decision":
+        # 同理前移 `user-decision-source`：quote 必须逐字匹配它绑定的那条 user-message。
+        # 该检查在 validate_event_graph 里对**每一条**决策全强度生效（包括已被超越的），
+        # 所以一条绑定错误的决策同样是永久 fail-closed、追加无法修复。既然如此，
+        # 它更不该先落盘再在归档时才被发现。
+        source = next((e for e in existing if e.get("event_id") == values.get("source_ref")), None)
+        if source is None or source.get("event_type") != "user-message":
+            raise ArchiveError(
+                "user-decision-source",
+                "User decision must bind a prior canonical user-message event.", "evidence/events")
+        if source.get("user_quote") != values.get("user_quote"):
+            raise ArchiveError(
+                "user-decision-source",
+                "User decision quote must match the bound user-message verbatim.", "evidence/events")
+    return values
+
+
+def record_terminal_decision(root: Path, fields: dict[str, Any]) -> dict[str, Any]:
+    root = Path(root)
+    values = {"event_type": "terminal-decision", "generated_at": _now(), **fields}
+    return _commit_event(root, values, prepare=_prepare_terminal_decision)
 
 
 def record_design_review_completion(root: Path, *, invocation_event_id: str,
