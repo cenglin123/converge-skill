@@ -92,8 +92,18 @@ reserve → Agent spawn → settle → ingest-verdict
 ```
 converge/
 ├── SKILL.md                  # 入口：Orchestrator 工作流 + 抽象能力层
+├── CONSTITUTION.md           # 宪法级设计原则、Orchestrator 行为边界、治理文档清单与修改程序
+├── GOVERNANCE-DECISIONS.md   # 具名治理决策记录（GD-N）
+├── docs/                     # 开发侧记录（不随 skill 加载，但入库）
+│   ├── CHANGELOG.md               # 变更记录
+│   ├── plans/{active,done}/       # 计划文件——CONSTITUTION §四 要求的修改程序凭据
+│   ├── problems/bugfix/           # 具体缺陷的排查记录
+│   └── dogfood/                   # 端到端自用验证记录
 ├── scripts/
 │   ├── budget_gate.py             # 预算 gate（file-authoritative，reserve/settle/ingest-verdict/bind + PreToolUse hook）
+│   ├── archive_convergence.py     # Archive Contract v1 CLI（begin/complete/record/archive/check）
+│   ├── archive_contract/          # 契约实现：model / capture / presentation / transaction
+│   ├── ocsr_spawn_adapter.py      # 把 OCSR dispatch 包装为 Spawn 实现（见 refs/framework-adapters.md §A.2）
 │   ├── l1_gate.py                 # L1 信号检测（非 LLM，零 token 成本）
 │   ├── distill_antipatterns.py    # 反模式蒸馏器（全量编译 retrospective → status）
 │   └── hooks/
@@ -113,8 +123,17 @@ converge/
     ├── testing-toolbox.md         # 外部验证工具（lint、测试、hooks）
     ├── quality-gate.md            # 质量门控协议，用于 Dynamic Workflows 集成
     ├── design-review-prompt.md    # 收敛后设计审查：7 维骨架，单轮咨询式
+    ├── framework-adapters.md      # 附录 A：各框架的 Spawn/Continue/Identify 实现与诚实边界
+    ├── model-tiers.md             # 家族档位对照（数据层，随模型换代更新）
+    ├── run-specs/                 # OCSR 确定性运行器的 spec 模板（如终局链路）
+    ├── executor-discipline.md     # Executor 纪律
+    ├── reviewer-discipline.md     # Reviewer 纪律
     └── antipatterns.md            # 反模式注册表（compiled 产物，status 由 distill 维护）
 ```
+
+> `.converge/` 是运行期证据（active/ 收敛现场、done/ 归档），**不入库**——体量大且逐次产生。
+> `docs/` 相反：它是开发侧的长期记录，2026-08-10 起纳入版本控制（此前被 gitignore，
+> 且自成一个无远端的嵌套仓库，等于「看起来受控、实际断电就没」）。
 
 ## 验证
 
