@@ -272,10 +272,207 @@ def _cancel_skeleton(active: Path, started: dict, rid: str) -> str:
 # §1 reserve-round
 # ==============================================================================
 
+MAX_INNER_LOOPS = 3  # SKILL.md「最多 3 次 Continue」（Inner Loop 上限；独立于 max_outer_loops 与 spawn cap）
+
+
+def _started_of(events: list[dict], invocation_id: str) -> dict | None:
+    return next((e for e in events
+                 if e.get("event_type") == "invocation-started"
+                 and e.get("invocation_id") == invocation_id), None)
+
+
+def _reserve_continue(args, active: Path, prompt: Path) -> int:
+    """Inner Loop Continue（方案甲，Archive Contract v1 原生）：发射
+    begin-invocation kind=continue。
+
+    契约规定 continue 不携带 reservation（capture 侧自动派生 parent_instance_id
+    并校验父链）——故本路径**无 gate reserve**：Continue 计数由 events 承载
+    （同父链 kind=continue 的 started 事件数），上限 MAX_INNER_LOOPS；
+    不占 spawn cap、不推进 outer 计数（gate ledger 零感知 = 计数天然独立）。
+    """
+    if args.resume_reservation:
+        _err("--continue-of 与 --resume-reservation 互斥（continue 无 reservation）")
+        return EXIT_ERROR
+    if not prompt.exists():
+        _err(f"--prompt-file 须已存在（begin-invocation 记录其 hash/metadata）: {prompt}")
+        return EXIT_ERROR
+    events = capture.read_events(active)
+    started_list = _started_for_rid(events, args.continue_of)
+    if not started_list:
+        _err(f"--continue-of 失败: 无此 rid 的 spawn invocation-started: {args.continue_of}")
+        return EXIT_ERROR
+    if len(started_list) > 1:
+        _err(f"--continue-of 失败: 该 rid 匹配到多个 invocation-started: {args.continue_of}")
+        return EXIT_ERROR
+    parent = started_list[0]
+    terminal = _terminal_for_started(events, parent)
+    if (terminal is None or terminal.get("terminal_status") != "succeeded"
+            or not terminal.get("instance_id")):
+        status_now = terminal.get("terminal_status") if terminal else "无 terminal"
+        _err(f"--continue-of 失败: 父轮须为已 succeeded 的 spawn（terminal 记录 instance_id）；"
+             f"当前: {status_now}")
+        return EXIT_ERROR
+    role = parent.get("role", "")
+    if args.role and args.role != role:
+        _err(f"--continue-of 失败: role-conflict（父轮 {role} ≠ --role {args.role}；"
+             f"continue 复用父轮 role）")
+        return EXIT_ERROR
+    round_no = canonical_round(parent.get("round"))
+    if args.round is not None and canonical_round(args.round) != round_no:
+        _err(f"--continue-of 失败: round-conflict（父轮 {round_no} ≠ --round {args.round}；"
+             f"continue 复用父轮 round）")
+        return EXIT_ERROR
+    prior = [e for e in events
+             if e.get("event_type") == "invocation-started"
+             and e.get("invocation_kind") == "continue"
+             and e.get("parent_event_id") == parent.get("event_id")]
+    if len(prior) >= MAX_INNER_LOOPS:
+        _err(f"--continue-of 失败: 已达 max_inner_loops={MAX_INNER_LOOPS}"
+             f"（同父链 continue 上限；超限 → 该轮失败 → 下一 outer loop）")
+        return EXIT_ERROR
+    attempt = (parent.get("attempt") or 1) + len(prior) + 1
+    parent_instance = terminal.get("instance_id")
+
+    if args.dry_run:
+        print("[dry-run] reserve-round(continue) 序列:")
+        print(f"  a. 无 gate reserve（契约: continue 不携带 reservation；计数入 "
+              f"max_inner_loops={MAX_INNER_LOOPS}，当前 {len(prior)}/{MAX_INNER_LOOPS}）")
+        print(f"  b. archive begin-invocation kind=continue role={role} phase={args.phase} "
+              f"attempt={attempt} round={round_no} parent_event={parent.get('event_id')}")
+        print("  c. 无产物骨架（round 产物随父轮已存在）")
+        print(f"  d. 输出 invocation_id；宿主 Continue 同实例后 register-round "
+              f"--invocation-id <iid> --instance-id {parent_instance}")
+        return EXIT_OK
+
+    begin_args = ["begin-invocation", str(active), "--kind", "continue",
+                  "--role", role, "--phase", args.phase,
+                  "--attempt", str(attempt),
+                  "--parent-event-id", parent.get("event_id", ""),
+                  "--prompt", str(prompt.resolve()),
+                  "--evidence-mode", "metadata-only"]
+    if args.requested_provider:
+        begin_args += ["--requested-provider", args.requested_provider]
+    if args.requested_model:
+        begin_args += ["--requested-model", args.requested_model]
+    if round_no is not None:
+        begin_args += ["--round", str(round_no)]
+    rc, out, err_ = _archive_cli(*begin_args)
+    if rc != 0 or not out:
+        _err(f"begin-invocation(continue) 失败（rc={rc}）: {out or err_}")
+        return rc if rc != 0 else EXIT_ERROR
+    try:
+        invocation_id = json.loads(out)["invocation_id"]
+    except (json.JSONDecodeError, KeyError):
+        _err(f"begin-invocation(continue) 输出无法解析: {out[:300]}")
+        return EXIT_ERROR
+    print(f"invocation_id: {invocation_id}")
+    print(f"continue-of: {args.continue_of}（第 {len(prior) + 1}/{MAX_INNER_LOOPS} 次，"
+          f"role={role} round={round_no}，无 reservation）")
+    print(f"next: 宿主 Continue 同实例（{parent_instance}）→ register-round "
+          f"--invocation-id {invocation_id} --instance-id {parent_instance}")
+    return EXIT_OK
+
+
+def _register_continue(args, active: Path) -> int:
+    """continue 轮登记：complete-invocation(succeeded)。无 settle、无骨架回填
+    （无 reservation；round 产物随父轮，verdict 由 record-verdict 单独落盘）。"""
+    events = capture.read_events(active)
+    started = _started_of(events, args.invocation_id)
+    if started is None:
+        _err(f"无此 invocation-started: {args.invocation_id}")
+        return EXIT_ERROR
+    if started.get("invocation_kind") != "continue":
+        _err(f"--invocation-id 仅用于 continue 轮（该 invocation 为 "
+             f"{started.get('invocation_kind')}；spawn 轮用 --reservation-id）")
+        return EXIT_ERROR
+    parent_instance = started.get("parent_instance_id")
+    if args.instance_id != parent_instance:
+        _err(f"continue 登记失败: instance-conflict（Continue 续命同实例: 期望 "
+             f"{parent_instance}, 传入 {args.instance_id}）")
+        return EXIT_ERROR
+    if _terminal_for_started(events, started) is not None:
+        print(f"[register-round] 幂等完成: invocation {args.invocation_id} 已有 terminal")
+        return EXIT_OK
+    output = None
+    if args.output:
+        output = Path(args.output)
+        if not output.is_absolute():
+            output = active / output
+    else:
+        output = _product_path(active, started.get("role", ""), started.get("round"))
+    if output is None or not (output.is_file() and output.stat().st_size > 0):
+        _err("continue 登记失败: 产物无法解析（--output 或 role+round 推导均未命中非空产物）")
+        return EXIT_ERROR
+
+    if args.dry_run:
+        print("[dry-run] register-round(continue) 序列:")
+        print(f"  a. 已读取 invocation-started（continue, invocation_id={args.invocation_id}）")
+        print(f"  b. --output 解析: {output.name}")
+        print(f"  c. complete-invocation status=succeeded instance-id={args.instance_id}（无 settle）")
+        return EXIT_OK
+
+    cargs = ["complete-invocation", str(active), args.invocation_id,
+             "--status", "succeeded",
+             "--instance-id", args.instance_id,
+             "--evidence-level", args.evidence_level,
+             "--resolution-source", args.resolution_source,
+             "--resolution-reason-code", args.resolution_reason_code,
+             "--output", str(output.resolve()),
+             "--evidence-mode", "metadata-only"]
+    if args.backend:
+        cargs += ["--backend", args.backend]
+    if args.backend_version:
+        cargs += ["--backend-version", args.backend_version]
+    rc, out, err_ = _archive_cli(*cargs)
+    if rc != 0:
+        _err(f"complete-invocation(continue) 失败: {out or err_}")
+        return rc if rc != 0 else EXIT_ERROR
+    print(f"[register-round] OK invocation_id={args.invocation_id} "
+          f"instance_id={args.instance_id} output={output.name}（continue: 无 settle/无骨架回填）")
+    return EXIT_OK
+
+
+def _cancel_continue(args, active: Path) -> int:
+    """continue 轮取消：recover-invocation(cancelled)；无 settle（无 reservation）。"""
+    events = capture.read_events(active)
+    started = _started_of(events, args.invocation_id)
+    if started is None:
+        _err(f"无此 invocation-started: {args.invocation_id}")
+        return EXIT_ERROR
+    if started.get("invocation_kind") != "continue":
+        _err(f"--invocation-id 仅用于 continue 轮（spawn 轮用 --reservation-id）")
+        return EXIT_ERROR
+    if _terminal_for_started(events, started) is not None:
+        print(f"[cancel-round] 幂等完成: invocation {args.invocation_id} 已有 terminal")
+        return EXIT_OK
+    if args.dry_run:
+        print("[dry-run] cancel-round(continue) 序列:")
+        print(f"  a. recover-invocation status=cancelled reason={args.reason_code}"
+             f" instance-id={started.get('parent_instance_id')}")
+        return EXIT_OK
+    rargs = ["recover-invocation", str(active), args.invocation_id,
+             "--status", "cancelled", "--failure-reason-code", args.reason_code,
+             "--instance-id", started.get("parent_instance_id") or ""]
+    if args.detail:
+        rargs += ["--failure-detail", args.detail]
+    rc, out, err_ = _archive_cli(*rargs)
+    if rc != 0:
+        _err(f"recover-invocation(continue) 失败: {out or err_}")
+        return rc if rc != 0 else EXIT_ERROR
+    print(f"[cancel-round] OK invocation_id={args.invocation_id} "
+          f"status=cancelled（continue: 无 settle/无骨架动作）")
+    return EXIT_OK
+
+
 def cmd_reserve_round(args) -> int:
     active = Path(args.active_dir)
     prompt = Path(args.prompt_file)
     role = args.role
+    if getattr(args, "continue_of", None):
+        return _reserve_continue(args, active, prompt)
+    if not role:
+        _err("--role 必填（或改用 --continue-of <父rid>，由父轮派生）")
+        return EXIT_ERROR
     consumes = _consumes(role)
     round_no = canonical_round(args.round)
 
@@ -393,6 +590,11 @@ def cmd_reserve_round(args) -> int:
 
 def cmd_register_round(args) -> int:
     active = Path(args.active_dir)
+    if bool(args.invocation_id) == bool(args.reservation_id):
+        _err("--reservation-id 与 --invocation-id 恰好传一个（spawn 轮用前者，continue 轮用后者）")
+        return EXIT_ERROR
+    if args.invocation_id:
+        return _register_continue(args, active)
     rid = args.reservation_id
     events = capture.read_events(active)
     started_list = _started_for_rid(events, rid)
@@ -511,6 +713,11 @@ def cmd_register_round(args) -> int:
 
 def cmd_cancel_round(args) -> int:
     active = Path(args.active_dir)
+    if bool(args.invocation_id) == bool(args.reservation_id):
+        _err("--reservation-id 与 --invocation-id 恰好传一个（spawn 轮用前者，continue 轮用后者）")
+        return EXIT_ERROR
+    if args.invocation_id:
+        return _cancel_continue(args, active)
     rid = args.reservation_id
     recover_status = REASON_TO_RECOVER[args.reason_code]
     gate_result = "cancelled" if recover_status == "cancelled" else "failed"
@@ -813,6 +1020,18 @@ def cmd_finish(args) -> int:
     for ev in sorted(events, key=lambda e: e["sequence"]):
         if ev.get("event_type") != "invocation-started" or ev["event_id"] in terminal_sids:
             continue
+        if ev.get("invocation_kind") == "continue":
+            # continue 无 reservation（契约）：无 gate 状态可查，恢复 = recover(failed/process-interrupted)
+            recover_notes.append(
+                f"continue:{ev.get('invocation_id', '')[:8]}:补 recover(failed/process-interrupted)")
+            if not args.dry_run:
+                rargs = ["recover-invocation", str(active), ev["invocation_id"],
+                         "--status", "failed", "--failure-reason-code", "process-interrupted",
+                         "--instance-id", ev.get("parent_instance_id") or ""]
+                rc, out, err_ = _archive_cli(*rargs)
+                if rc != 0:
+                    return fail(f"步骤 3: recover-invocation(continue) 失败: {out or err_}")
+            continue
         rid = ev.get("reservation_id")
         st = status.get(rid, {})
         if st.get("status") not in TERMINAL_SETTLE_EVENTS:
@@ -858,6 +1077,10 @@ def cmd_finish(args) -> int:
             continue
         st_event = by_started.get(e.get("started_event_id"))
         role = st_event.get("role") if st_event else None
+        # 终局 verdict owner 必须是 fresh reviewer Spawn（契约 authority 校验）；
+        # Continue 终端（Inner Loop 轮内验收）不作 owner——跳过
+        if st_event is not None and st_event.get("invocation_kind") != "spawn":
+            continue
         if role in fresh:
             last_terminal, review_kind = e, "fresh"
         elif role in blank:
@@ -1015,7 +1238,12 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("reserve-round",
                        help="gate reserve → begin-invocation → 骨架（宿主 Spawn 之前）")
     r.add_argument("--active-dir", required=True)
-    r.add_argument("--role", required=True)
+    r.add_argument("--role", default=None,
+                   help="spawn 轮必填；--continue-of 轮由父轮派生（传入则须与父轮一致）")
+    r.add_argument("--continue-of", metavar="RID", default=None,
+                   help="Inner Loop Continue：父轮（已 succeeded 的 spawn）rid；发射 "
+                        "begin-invocation kind=continue——契约规定 continue 不携带 "
+                        "reservation，计数入 max_inner_loops（无 gate reserve）")
     r.add_argument("--prompt-file", required=True)
     r.add_argument("--phase", required=True)
     r.add_argument("--requested-provider")
@@ -1031,7 +1259,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = sub.add_parser("register-round", help="宿主成功返回后：complete → settle → 回填")
     g.add_argument("--active-dir", required=True)
-    g.add_argument("--reservation-id", required=True)
+    g.add_argument("--reservation-id", default=None,
+                   help="spawn 轮入口（与 --invocation-id 二选一）")
+    g.add_argument("--invocation-id", default=None,
+                   help="continue 轮入口（与 --reservation-id 二选一；complete 而无 settle）")
     g.add_argument("--instance-id", required=True)
     g.add_argument("--output", default=None,
                    help="产物路径（consumes=none 角色必填；consuming 角色缺省按 role+round 推导）")
@@ -1048,7 +1279,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("cancel-round", help="宿主失败/取消后：recover → settle → 骨架处理")
     c.add_argument("--active-dir", required=True)
-    c.add_argument("--reservation-id", required=True)
+    c.add_argument("--reservation-id", default=None,
+                   help="spawn 轮入口（与 --invocation-id 二选一）")
+    c.add_argument("--invocation-id", default=None,
+                   help="continue 轮入口（recover-cancelled，无 settle）")
     c.add_argument("--reason-code", required=True,
                    choices=["cancelled-by-host", "backend-error", "timeout"])
     c.add_argument("--pre-execution", action="store_true",

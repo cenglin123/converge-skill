@@ -286,22 +286,10 @@ class TestExecutorCrashWindow(LoopABase):
 # ── 4. Continue 语义现状（T2 事实门）─────────────────────────────────────────
 
 class TestContinueStatusQuo(LoopABase):
-
-    def test_continue_of_unrecognized(self):
-        """--continue-of 未实现：argparse 直接拒绝（T1 差距清单的机械证据）。
-        T2 实现后本测试改写为完整 Continue 链路断言（begin kind=continue +
-        gate 计数 + register 匹配），届时删除本差距钉子。"""
-        rid1, _ = self.reserve(round_no=1)
-        rc, _, err = self.register(rid1, "inst-r1")
-        self.assertEqual(rc, 0, err)
-        rc, out, err = run_orchest(
-            "reserve-round", "--active-dir", str(self.active),
-            "--role", "outer-reviewer", "--phase", "review", "--attempt", "1",
-            "--prompt-file", str(self.prompt),
-            "--requested-provider", "testp", "--requested-model", "testm",
-            "--continue-of", rid1, "--dry-run")
-        self.assertNotEqual(rc, 0, "扩展未实现应报 unrecognized")
-        self.assertIn("unrecognized", (out + err).lower())
+    """T1 差距钉子已由 T2 实现关闭——完整 Continue 链路断言移至
+    tests/test_continue_extension.py（begin kind=continue + max_inner_loops
+    计数 + register --invocation-id + finish owner 过滤）。本类保留为空锚，
+    标记 T1→T2 的差距闭环轨迹。"""
 
 
 if __name__ == "__main__":
