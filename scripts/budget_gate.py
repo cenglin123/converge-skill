@@ -58,8 +58,12 @@ EXIT_FAIL_CLOSED = 30
 from archive_contract.model import canonical_round  # noqa: E402
 
 DEFAULTS = {
-    "max_outer_loops": 5,
-    "max_blind_rechecks": 1,
+    # 默认额度(2026-08-16 调优,实证依据 .meta/memory/project/ 20260816 预算复盘):
+    # 原默认 5/1 下两次真实收敛(orchest/loop-wiring)全部超限打断——outer 实际 7/12,
+    # blind 实际 3/4,且每轮 findings 均在推进(零振荡),门卡的是正常收敛非异常。
+    # blind=3 覆盖"盲审打回→修复→再审"一个完整周期;超默认仍走 extension 显式授权。
+    "max_outer_loops": 8,
+    "max_blind_rechecks": 3,
     "ultraverge_min_reviewers": 3,
     "max_inner_loops": 3,
     "impl_severity_streak_threshold": 3,

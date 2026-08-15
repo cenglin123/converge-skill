@@ -361,11 +361,11 @@ class TestBudgetAccounting(AdapterBase):
     """Phase 2: verify reserve/settle through adapter updates budget_gate ledger correctly."""
 
     def test_outer_scope_reservation_blocks_at_ceiling(self):
-        """After max_outer_loops (default 5) outer-reviewer reservations,
-        the 6th must BLOCK:budget_exhausted. Verifies the adapter actually
-        drives budget_gate per-scope, not just total."""
-        # No config init → defaults (max_outer_loops=5)
-        for i in range(1, 6):
+        """After max_outer_loops (default 8, 2026-08-16 调优) outer-reviewer
+        reservations, the 9th must BLOCK:budget_exhausted. Verifies the adapter
+        actually drives budget_gate per-scope, not just total."""
+        # No config init → defaults (max_outer_loops=8)
+        for i in range(1, 9):
             # Each iteration uses a different output_name to avoid collision detection,
             # and a different round to satisfy budget_gate's (scope, round) uniqueness
             # invariant.
@@ -376,11 +376,11 @@ class TestBudgetAccounting(AdapterBase):
                                     label=f"r{i}"),
             )
             self.assertEqual(rc, 0, f"iteration {i}: rc={rc}; stderr={err}")
-        # 6th outer reservation must BLOCK
+        # 9th outer reservation must BLOCK
         rc, out, err = run_adapter(
             self.active, {"FAKE_OCSR_MODE": "happy"},
-            *self._adapter_args(role="outer-reviewer", round=6,
-                                output_name="round-6.md", label="r6"),
+            *self._adapter_args(role="outer-reviewer", round=9,
+                                output_name="round-9.md", label="r9"),
         )
         self.assertEqual(rc, 10, f"expected EXIT_BLOCK=10, got rc={rc}; stderr={err}")
         gate = _read_gate_ledger(self.active)
@@ -388,11 +388,11 @@ class TestBudgetAccounting(AdapterBase):
         last = decisions[-1]
         self.assertEqual(last["verdict"], "BLOCK:budget_exhausted")
         self.assertEqual(last["scope"], "outer")
-        self.assertEqual(last["observed_usage"], 5)
-        # No 6th begin side-effect (no event for round 6)
+        self.assertEqual(last["observed_usage"], 8)
+        # No 9th begin side-effect (no event for round 9)
         events = _read_events(self.active)
-        # 5 successful rounds × 2 events each = 10
-        self.assertEqual(len(events), 10)
+        # 8 successful rounds × 2 events each = 16
+        self.assertEqual(len(events), 16)
 
     def test_summary_reports_attempted_and_model_invocation(self):
         """budget_gate summary must distinguish attempted_dispatch (含启动前失败)

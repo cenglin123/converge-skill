@@ -602,14 +602,16 @@ class TestEnforcedHook(Base):
     def test_default_cap_from_state_stock(self):
         c, out, _ = run("bind", "--session-id", self.sid, "--active-dir", str(self.active),
                         env=self.env)
-        self.assertIn("cap=42", out)             # stock 默认公式（普通 converge, mbr=1）
+        # stock 默认公式(2026-08-16 调优后: outer=8/mbr=3/inner=3/uv=3/safety=1.5):
+        # base = 3+3+8*4+3+1 = 42 → cap = ceil(42*1.5) = 63
+        self.assertIn("cap=63", out)
 
     def test_default_cap_ultraverge_config_override(self):
-        # ultraverge 路径：config 覆盖 max_blind_rechecks=2 → cap=44
+        # ultraverge 路径：config 覆盖 max_blind_rechecks=2 → base=3+3+32+2+1=41 → cap=62
         self.set_config(max_blind_rechecks=2)
         c, out, _ = run("bind", "--session-id", self.sid, "--active-dir", str(self.active),
                         env=self.env)
-        self.assertIn("cap=44", out)             # ultraverge config 覆盖（mbr=2）
+        self.assertIn("cap=62", out)
 
 
 class TestRound0Unification(Base):

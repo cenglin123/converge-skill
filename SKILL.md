@@ -82,7 +82,7 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 | **终止-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，记录 terminal decision，执行单一 `archive` |
 | **终止-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
 | **终止-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
-| **预算软停**（无终止类型对应） | 达预算上限（默认 5 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
+| **预算软停**（无终止类型对应） | 达预算上限（默认 8 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
 | **振荡硬停**（无终止类型对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
 
 终止-a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → 终止-c。
@@ -428,7 +428,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `max_outer_loops` | 5 | 最大 outer loop 轮数（实证：收敛均在 2-3 轮完成；达到上限通常为振荡或 Reviewer 分歧，触发预算软停） |
+| `max_outer_loops` | 8 | 最大 outer loop 轮数（2026-08-16 调优：原默认 5 下两次真实收敛均 7/12 轮超限打断，实证每轮推进零振荡；简单 plan 仍 2-3 轮完成，达到上限触发预算软停） |
 | `max_inner_loops` | 3 | 同轮 inner loop 最大 Continue 次数 |
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
@@ -440,9 +440,9 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
 | `ultraverge_min_reviewers` | 3 | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
-| `max_blind_rechecks` | 1 [^mbr] | 盲审复核最大次数（独立于 max_outer_loops）。盲审失败后修复轮次共享 max_outer_loops |
+| `max_blind_rechecks` | 3 [^mbr] | 盲审复核最大次数（独立于 max_outer_loops；2026-08-16 调优：原默认 1 下盲审发现真问题即必打断，3 覆盖「打回→修复→再审」完整周期）。盲审失败后修复轮次共享 max_outer_loops |
 | `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
-| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关：**普通 = 42 / ultraverge = 44**[^totalcap]。扩容需 `scope=total` extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关：**普通 = 63 / ultraverge = 62**[^totalcap]。扩容需 `scope=total` extension |
 | `total_safety` | 1.5 | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 3 | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 3 | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
@@ -450,9 +450,9 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容） |
 | `task_envelope_initial` / `task_envelope_cap` | 由 `task_tier` 派生 | 直接覆盖任务档的初始额度/一次性授权上限，无需通过 `task_tier` 四档之一；`cap` 须 `>= initial` |
 
-[^mbr]: 普通 converge 的真实默认为 `1`（`scripts/budget_gate.py` DEFAULTS）。**ultraverge 在初始化时经 config 覆盖回写 `max_blind_rechecks=2`**（写入 `_budget-state.json` 的 config，纯 orchestrator 行为、零代码）。
+[^mbr]: 普通 converge 的真实默认为 `3`（`scripts/budget_gate.py` DEFAULTS，2026-08-16 调优，原 1→3：两次真实收敛盲审实际需 3/4 次，默认 1 下盲审发现真问题即必打断）。**ultraverge 在初始化时经 config 覆盖回写 `max_blind_rechecks=2`**（写入 `_budget-state.json` 的 config，纯 orchestrator 行为、零代码）。
 
-[^totalcap]: 两组 stock 上限均由同一确定性公式重算：普通（mbr=1）= `ceil(1.5 × 28)` = **42**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 29)` = **44**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。
+[^totalcap]: 两组 stock 上限均由同一确定性公式重算（2026-08-16 默认 outer=8/mbr=3 后）：普通（mbr=3）= `ceil(1.5 × 42)` = **63**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 41)` = **62**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。
 
 > **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是预算软停 file-authoritative gate 的核心（不依赖 Orchestrator 记忆计数）。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（enforced tier 为 deferred 目标）。
 >
