@@ -196,9 +196,9 @@ Executor 修复后，通过 Continue 让 reviewer 验收。Orchestrator 自己�
 
 预算执行由确定性脚本 `scripts/budget_gate.py` 承担，**不靠 Orchestrator 记忆比较计数**。数据契约见 `refs/state-schema.md` §预算 gate。
 
-1. **每次 spawn 前 reserve**：`python scripts/budget_gate.py reserve --active-dir <active> --role <角色> --reservation-id <session>:<tool_use> [--target-round N]`。
-   - `PROCEED:<rid>` → 继续 spawn；spawn 后 `settle`（成功 `--result succeeded --instance-id <id>`，**instance_id 必填**；失败 `--result failed`；执行前中止 `--result cancelled --pre-execution`）。
-   - reserve/settle 一律由 Orchestrator 手动执行并确保结果落 ledger（两个已落地 tier 都如此；当前无 PostToolUse 自动 settle）。`best-effort guarded` 仅额外提供独立 PreToolUse 总量 cap——hook 不写 ledger、hook counter 与 ledger 不双计、bind/refresh-cap/unbind 只管理总量 backstop；per-scope gate 仍须 Orchestrator 手动执行。
+1. **每次 spawn 经 orchest.py（收敛循环内）**：gate 生命周期统一由 `scripts/orchest.py` 承接——spawn 前 `reserve-round --active-dir <dir> --role <角色> [--round N] --phase <p> --prompt-file <path>`（gate reserve + begin-invocation + 骨架，单命令）；宿主返回后 `register-round --reservation-id <rid> --instance-id <id>`（complete + settle + 回填，settle 语义内嵌：成功带 instance_id、失败/取消走 cancel-round）
+   - `PROCEED` → 继续 spawn；非 PROCEED 透传处置（见下条 2）。gate reserve/settle 由命令内部驱动并确保结果落 ledger——**不得手跑裸 budget_gate.py reserve/settle 序列**（两个已落地 tier 都如此）。`best-effort guarded` 仅额外提供独立 PreToolUse 总量 cap——hook 不写 ledger、hook counter 与 ledger 不双计、bind/refresh-cap/unbind 只管理总量 backstop；per-scope gate 经 reserve-round 驱动。
+   - Inner Loop Continue：`reserve-round --continue-of <父rid>`（begin kind=continue，无 gate reservation，计数入 max_inner_loops=3）→ 宿主 Continue 同实例 → `register-round --invocation-id <iid> --instance-id <父实例>`
 2. **非 PROCEED 处置**（对应 SKILL.md 主循环步骤 4）：
    - `BLOCK:*` → **停止**，向用户呈现菜单：继续迭代 / 接受（终止-c）/ 简化 plan / 终止。续跑须写 `budget_extension` 令牌（见下）。
    - `MODE_SWITCH_REQUIRED` → 呈现：接受进入执行 / 简化 plan 重收敛 / 终止。
@@ -350,6 +350,19 @@ L1 信号检测由非 LLM 脚本执行，编排器通过 shell 调用。触发�
 用户要求落地 → 读取方案中的"文件改动清单"表 → Spawn executor（Plan-Execution 模板）
 → 等待 executor 完成 → 记录 instance_id → 核对清单项数 vs 实改文件数 → 报告用户
 ```
+
+**脚本化映射表（orchest.py 六命令 ≠ 全部适用；落地执行 spawn 不进收敛预算门与 Archive Contract，设计裁决见 SKILL.md §执行阶段）**：
+
+| 流程步骤 | orchest.py 命令 | 说明 |
+|---|---|---|
+| 读取文件改动清单 | 无对应（LLM 读 plan 改动清单） | — |
+| Spawn executor | 无对应——**宿主原生 Spawn** | 不进收敛预算门与 Archive Contract；执行阶段 provenance 由 KB plan frontmatter（implementation 条目）记录 |
+| 等待完成 | 无对应（宿主等待） | — |
+| 记录 instance_id | 无对应——由宿主 Spawn 返回传入，记入 plan frontmatter implementation 条目 | 显式保留，非遗漏 |
+| 核对清单项数 N vs 实改文件数 M | `checkpoint-paths --commit <executor commit>` | **前置条件：executor 落地改动先 commit（提供 --commit 输入）；无 commit 则 M 侧无法机械生成，降级为 LLM 人工核对并标注**；生成 M 侧 implementation_paths（N vs M 比较仍由 LLM 读取 plan 改动清单完成） |
+| 报告 | 无对应（LLM 汇报） | — |
+
+**显式不适用**：reserve-round / register-round / cancel-round（落地执行 spawn 不进收敛预算门；spawn 生命周期三命令仅限**收敛循环内** executor 修复轮，即 SKILL.md 主循环 step f）、record-verdict（落地阶段无 verdict，产物亦非 round-N.md/blind-recheck-N.md）、finish（落地发生在归档之后，无归档动作）。
 
 ### 自主推进判据（普通 converge）
 

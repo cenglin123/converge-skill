@@ -48,6 +48,48 @@ reservation 重跑识别后退出 0；finish 每步可安全重跑，decision �
 succeeded、归档后二次操作等 8 类历史执行错误在此机制层消除——映射表见
 `orchest.py` 模块 docstring。
 
+## Loop A（收敛循环）接线示例
+
+SKILL.md 主循环/盲审/Inner Loop 的机械动作全部经 orchest.py（见 SKILL.md §Orchestrator 主循环 总则）：
+
+```bash
+# 主循环 reviewer 轮（spawn 前先落盘 prompt 文件，再单命令预约）
+python scripts/orchest.py reserve-round --active-dir <dir> --role outer-reviewer \
+    --round 1 --phase review --attempt 1 --prompt-file <prompt.md> \
+    --requested-provider <p> --requested-model <m>
+# → Spawn reviewer → 成功：
+python scripts/orchest.py register-round --active-dir <dir> --reservation-id <rid> --instance-id <sid>
+# → 失败/取消：
+python scripts/orchest.py cancel-round --active-dir <dir> --reservation-id <rid> --reason-code <c>
+# verdict 确定后（替代手写 frontmatter + 裸 ingest-verdict）：
+python scripts/orchest.py record-verdict --active-dir <dir> --round 1 --verdict 阻断需修复 --severities structural
+
+# executor 修复轮（consumes=none，无骨架，--output 必填）
+python scripts/orchest.py reserve-round --active-dir <dir> --role executor \
+    --phase repair --attempt 1 --prompt-file <prompt.md>   # executor 无 --round
+python scripts/orchest.py register-round --active-dir <dir> --reservation-id <rid> \
+    --instance-id <sid> --output attempts.md
+# 崩溃窗口（spawn_succeeded-缺-terminal）官方恢复 = 重跑上面 register-round（幂等），禁手工补 terminal
+
+# 盲审轮（--round 为盲审独立序列号；consuming 角色缺 --round 直接被拒——实测教训）
+python scripts/orchest.py reserve-round --active-dir <dir> --role blind-reviewer \
+    --round 1 --phase review --attempt 1 --prompt-file <blind-prompt.md>
+python scripts/orchest.py register-round --active-dir <dir> --reservation-id <rid> --instance-id <sid>
+python scripts/orchest.py record-verdict --active-dir <dir> --round 1 \
+    --product blind-recheck-1.md --verdict 可执行   # verdict 用 gate 三档；pass/fail/waived 只进 retrospective
+
+# Inner Loop Continue（续命同实例；无 reservation，计数入 max_inner_loops=3）
+python scripts/orchest.py reserve-round --active-dir <dir> --continue-of <父rid> \
+    --phase inner-review --prompt-file <prompt.md>   # role/round 派生自父轮
+python scripts/orchest.py register-round --active-dir <dir> --invocation-id <iid> \
+    --instance-id <父实例id>   # continue 入口；实例冲突被拒（续命同实例）
+
+# 收敛归档（必检清单★语义 → retrospective★LLM → finish 机械三段的前者已完成后再跑）
+python scripts/orchest.py finish --active-dir <dir> --verdict 可执行
+```
+
+落地执行（收敛完成后）**不进**上述循环：spawn 走宿主原生 + instance_id 记 plan frontmatter，仅改动清单核对经 `checkpoint-paths`——映射表见 `refs/orchestrator-guide.md` §落地执行编排。
+
 ## 其他脚本
 
 - `budget_gate.py` — 预算执行硬化（reserve/settle/ingest-verdict/summary）

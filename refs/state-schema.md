@@ -40,6 +40,8 @@ manifest 承诺 canonical records、events、invocation/artifact blobs、revisio
 
 ## 一、Round Log（`round-N.md`）
 
+> **产出方**：round-N.md 骨架由 `orchest.py reserve-round` 创建（与 reservation 同命令落盘），frontmatter 契约字段由 `register-round` 回填、`record-verdict` 补 verdict——不再手写。下方格式定义为产物契约（字段与语义不变，产出方变更详见 `scripts/README.md`）。
+
 ```markdown
 ---
 round: N
