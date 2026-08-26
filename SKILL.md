@@ -175,6 +175,8 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
 
 > **"治理文档"判据**：对 Agent 行为有规范性约束力的文件。项目治理文档由项目入口文档（AGENTS.md / CLAUDE.md 等）定义；本 SKILL 自身的治理文档清单见 `CONSTITUTION.md` 第三部。边界情形按最高强度处理。
 
+> **framework-adapters.md 例外**：仅新增一个框架适配分册（A.x）、不触及公共层/跨框架不变量（Archive provenance 采集、A.4 通用降级、A.5 适配新框架、best-effort guarded 可移植性矩阵）时，可走标准评议，无需 ultraverge；触及公共层/机制层/跨框架不变量仍需 ultraverge。详见 `CONSTITUTION.md` 第三部。
+
 ### 默认入口：评议
 
 首次审查一律使用评议模式（单轮、主观 verdict、一次写回；ultraverge 关键词除外，见上方 Ultraverge 路径）。评议的 Reviewer prompt 与完整收敛的 Round 1 相同。评议完成后 Orchestrator 根据 verdict 决策：

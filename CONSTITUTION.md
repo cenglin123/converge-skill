@@ -75,6 +75,7 @@
 - `refs/design-review-prompt.md` — 设计审查 prompt 模板（Reviewer 行为定义）
 - `refs/executor-discipline.md` — Executor 纪律文档
 - `refs/reviewer-discipline.md` — Reviewer 纪律文档
+- `refs/framework-adapters.md` — 框架适配实现（Spawn/Continue/Identify 抽象能力层）。**修改豁免**：仅新增或调整某个框架分册（A.x），或纯重排/增删框架特定内容、不触及公共层与跨框架不变量（Archive Contract provenance 采集、A.4 通用降级、A.5 适配新框架、best-effort guarded 可移植性矩阵）时，可走标准评议，无需 ultraverge；触及公共层/机制层/跨框架不变量仍需 ultraverge。
 
 以下文件不受宪法保护：
 
