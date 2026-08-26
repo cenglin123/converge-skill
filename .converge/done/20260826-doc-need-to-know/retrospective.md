@@ -77,7 +77,7 @@ Executor 修复路径正确：保留具名锚点（角色对照表/任务档预�
 
 > 单一权威源未落实到预算扩展令牌（budget_extension）这一最需要单源的路径——同一记录在脚本(validate_extensions)、guide §六(作者基准)、state-schema L437(校验细节)三处描述，且 user_quote 被明确排除在脚本单源之外，authoritative 归属悬空。建议为 budget_extension 指定唯一"作者字段清单权威"（guide §六），state-schema 与脚本仅保留"校验视角"并明确"字段清单以 guide 为准"；同类建议把 SKILL.md 硬编码 63/62 与 [^mbr] 调优历史改为"以脚本 DEFAULTS/公式为准"或标注 as-of 日期。
 
-用户决策：**待用户决定**（采纳 / 延后 / 忽略）。
+用户决策：**已采纳（部分，2026-08-26）** —— 1) budget_extension 单一权威源由 guide §六 作为作者字段清单权威落地（计划本身已覆盖）；2) 用户指示将 SKILL.md 的 `普通=63 / ultraverge=62` 一行标注为「以 `scripts/budget_gate.py` DEFAULTS/公式为准」（以脚本为数值单源，避免再漂移）。
 详见 `.converge/done/20260826-doc-need-to-know/design-review.md`。
 terminal_decision_event_id: c4d42f8c-0c7b-406a-a3b2-d86efecaa2b3
 terminal_decision_value: 可执行

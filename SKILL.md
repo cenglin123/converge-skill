@@ -437,7 +437,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
 | `max_blind_rechecks` | 见 budget_gate.py DEFAULTS（单源） [^mbr] | 盲审复核最大次数（独立于 max_outer_loops；2026-08-16 调优：原默认 1 下盲审发现真问题即必打断，3 覆盖「打回→修复→再审」完整周期）。盲审失败后修复轮次共享 max_outer_loops |
 | `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
-| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关：**普通 = 63 / ultraverge = 62**。扩容需 `scope=total` extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关（具体值以 `scripts/budget_gate.py` DEFAULTS/公式为准）：**普通 = 63 / ultraverge = 62**。扩容需 `scope=total` extension |
 | `total_safety` | 见 budget_gate.py DEFAULTS（单源） | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 见 budget_gate.py DEFAULTS（单源） | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 见 budget_gate.py DEFAULTS（单源） | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
