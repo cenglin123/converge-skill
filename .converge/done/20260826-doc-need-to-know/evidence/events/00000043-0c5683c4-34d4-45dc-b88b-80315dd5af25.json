@@ -1,0 +1,24 @@
+{
+  "attempt": 1,
+  "event_id": "0c5683c4-34d4-45dc-b88b-80315dd5af25",
+  "event_type": "invocation-started",
+  "invocation_id": "654df796-32f6-43a4-9ea5-a8df02225883",
+  "invocation_kind": "spawn",
+  "parent_event_id": null,
+  "parent_instance_id": null,
+  "phase": "review",
+  "prompt_evidence": {
+    "evidence_mode": "metadata-only",
+    "sha256": "c0673397ac22ea6be769f251751a9611ec0a97ec92ce23cdbb135fcb93ad00ef",
+    "size": 1794
+  },
+  "requested_model": "deepseek-v4-flash",
+  "requested_provider": "deepseek-official",
+  "reservation_id": "f903decd21f7",
+  "role": "blind-reviewer",
+  "round": 2,
+  "schema_id": "converge.archive",
+  "schema_version": "1.0",
+  "sequence": 43,
+  "started_at": "2026-08-26T06:06:56.994305+00:00"
+}

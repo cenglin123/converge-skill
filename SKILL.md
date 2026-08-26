@@ -165,7 +165,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
   - 实际 spawn 数 ≥2 且 verdict 一致 → 降级为普通评议模式，Orchestrator 标注 `degraded_from: ultraverge` 并告知用户
   - 实际 spawn 数 <2 或 verdict 不一致 → 中止，告知用户原因，由用户决定是否降级为普通评议或稍后重试
 - **完整收敛**：若评议 verdict = 可执行 → 跳过（评议已在扩域下审查完毕，完整收敛新增发现概率极低，只增成本）；若 verdict ≠ 可执行 → 标准流程（Round 0→多轮→收敛）
-- **盲审预算**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 写入 **`max_blind_rechecks=2` 覆盖**（普通 converge 真实默认见 `scripts/budget_gate.py` DEFAULTS = 3）。纯 orchestrator 行为、零代码；总量上限按规范式用覆盖后的值重算——普通 = 63 → ultraverge = 62。
+- **盲审预算**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 写入 **`max_blind_rechecks=2` 覆盖**（普通 converge 真实默认见 `scripts/budget_gate.py` DEFAULTS = 3）。纯 orchestrator 行为、零代码。
 - **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
 
 仅在用户显式使用 `ultraverge` 关键词时触发。**触发边界（明线规则）**：
@@ -406,8 +406,6 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 - [ ] **若收敛对象是代码**：所有测试通过（全绿）
 - [ ] 所有 suggestion items 已处置（采纳/拒绝/延后，记录在 retrospective 中）
 - [ ] retrospective.md 已在 active 目录完成，并引用唯一 terminal decision event id/value
-- [ ] `scripts/archive_convergence.py archive <active-root> <done-root> <slug>` 返回成功；禁止手工移动
-- [ ] done 最终路径的只读 `check` 返回 valid-v1
 - [ ] 用户已被告知收敛结果
 - [ ] 若存在 contract.md：contract 中所有验收断言已被至少一轮 Reviewer 逐条验证
 - [ ] 不存在未处理的 `contract_amendment_required: true` 标记
@@ -439,7 +437,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
 | `max_blind_rechecks` | 见 budget_gate.py DEFAULTS（单源） [^mbr] | 盲审复核最大次数（独立于 max_outer_loops；2026-08-16 调优：原默认 1 下盲审发现真问题即必打断，3 覆盖「打回→修复→再审」完整周期）。盲审失败后修复轮次共享 max_outer_loops |
 | `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
-| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关：**普通 = 63 / ultraverge = 62**[^totalcap]。扩容需 `scope=total` extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关（具体值以 `scripts/budget_gate.py` DEFAULTS/公式为准）：**普通 = 63 / ultraverge = 62**。扩容需 `scope=total` extension |
 | `total_safety` | 见 budget_gate.py DEFAULTS（单源） | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 见 budget_gate.py DEFAULTS（单源） | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 见 budget_gate.py DEFAULTS（单源） | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
@@ -449,13 +447,11 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 
 [^mbr]: 普通 converge 的真实默认 `max_blind_rechecks` 见 `scripts/budget_gate.py` DEFAULTS 注释（2026-08-16 调优，原 1→3）；调优历史与实证依据以 `budget_gate.py` DEFAULTS 注释与 git 历史（提交 `0137fce`）为单源，不在 docs/CHANGELOG.md。
 
-[^totalcap]: 两组 stock 上限均由同一确定性公式重算（2026-08-16 默认 outer=8/mbr=3 后）：普通（mbr=3）= `ceil(1.5 × 42)` = **63**；ultraverge（config 覆盖 mbr=2）= `ceil(1.5 × 41)` = **62**。两者单调递增、均 > 任何单轮所需 spawn 数、**无边界下溢**。调优历史与依据以 `budget_gate.py` DEFAULTS 注释与 git 历史（提交 `0137fce`）为单源，不在 docs/CHANGELOG.md。
+> **模式相关行为事实（非默认值单源）**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 覆盖回写 `max_blind_rechecks=2`（纯 orchestrator 行为、零代码）。
 
-> **模式相关行为事实（非默认值单源）**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 覆盖回写 `max_blind_rechecks=2`（纯 orchestrator 行为、零代码）；total 上限按规范式用覆盖后的值重算——普通 = 63，ultraverge = 62。
-
-> **预算执行**（`max_outer_loops` / `max_blind_rechecks` / `max_ultraverge_initial` / `max_total_reserved_spawns`）由确定性脚本 `scripts/budget_gate.py` 在每次 spawn 前裁决（reserve），而非靠 Orchestrator 记忆比较计数——这是预算软停 file-authoritative gate 的核心（不依赖 Orchestrator 记忆计数）。信任边界按宿主能力分三层：`auditable-only`（通用）/ `best-effort guarded`（= hook-blocked auditable-only，Claude Code）/ `true enforced`（deferred）。机制与 schema 见 `refs/state-schema.md` §预算 gate，落地与残余边界见 `refs/framework-adapters.md` §A.1（enforced tier 为 deferred 目标）。
+> **预算执行**：预算由 `scripts/budget_gate.py` 在每次 spawn 前裁决；trust boundary 三级，逐级能力见 framework-adapters 分册（`refs/framework-adapters/claude-code.md` §A.1 / `refs/framework-adapters/kimi-code.md` §A.6 / `refs/framework-adapters/dsh.md` §A.7）；行为禁令「不得靠记忆计数」规范落在 `refs/orchestrator-guide.md` §六，此处仅指针。
 >
-> **任务级总信封**（`task_tier`/`task_envelope_initial`/`task_envelope_cap`，consumes=`task-envelope`）是与本表其余参数**不同维度、并行叠加**的粗粒度计量——按一次任务的 OCSR/模型调用总量计量（可跨越多次收敛、多个角色、以及 release executor 等 converge 循环外的调用），不消费、也不受 `max_total_reserved_spawns` 约束。机制细节（BLOCK 语义、与 total 的正交性、`summary` 命令）见 `refs/state-schema.md` §预算 gate「任务档预算 / task-envelope scope」。
+> **任务级总信封**（`task_tier`/`task_envelope_initial`/`task_envelope_cap`，consumes=`task-envelope`）是与本表其余参数**不同维度、并行叠加**的粗粒度计量，按一次任务的 OCSR/模型调用总量计量（可跨越多次收敛、多个角色、以及 release executor 等 converge 循环外的调用），不消费、也不受 `max_total_reserved_spawns` 约束。agent 需读的角色摘要见 `refs/state-schema.md` §预算 gate「任务档预算 / task-envelope scope」；机制细节（BLOCK 语义、与 total 的正交性、`summary` 命令等）单一权威源 = `scripts/budget_gate.py`（task-envelope 单一权威源）。
 
 ### pre-push hook 环境变量（`scripts/hooks/`）
 

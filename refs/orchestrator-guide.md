@@ -82,7 +82,7 @@ Spawn reviewer 或 executor 前，逐项确认：
   - ❌ "这里应该只有一些小问题"
   - ✅ 不附加任何评价性前缀
 - [ ] **必读文件路径有效？** 确认 `<plan_path>`、`<attempts_md_path>` 等所指文件确实存在
-- [ ] **若收敛对象是代码项目**：查阅 `testing-toolbox.md`，确定 `<test_command>` 和 `<lint_command>` 的注入值。优先使用项目声明的入口（Makefile / package.json scripts / CI 配置），其次按技术栈信号查速查表。检测不到测试框架时两个占位符都留空
+- [ ] **若收敛对象是代码项目**：按 `refs/testing-toolbox.md` 确定 `<test_command>` 和 `<lint_command>` 的注入值；检测不到测试框架时两个占位符都留空
 - [ ] **升级复查（Round ≥ 2）**：读上一轮 attempts.md，提取 verdict ≠ Accepted 的 blocking issues，汇编为 `<escalated_issues>` 块注入 Reviewer prompt（含原 issue id、原 reviewer 描述原文、当前状态）。参见 reviewer-prompt.md§升级复查
 - [ ] **instance_id 已记录？** Spawn 返回后立即写入 round-N.md frontmatter 和 `_orchestrator-state.md`
 
@@ -194,7 +194,7 @@ Executor 修复后，通过 Continue 让 reviewer 验收。Orchestrator 自己�
 
 ### 预算追踪 + gate 编排（对应职责 #7 / M-11）
 
-预算执行由确定性脚本 `scripts/budget_gate.py` 承担，**不靠 Orchestrator 记忆比较计数**。数据契约见 `refs/state-schema.md` §预算 gate。
+预算执行由确定性脚本 `scripts/budget_gate.py` 承担，**不靠 Orchestrator 记忆比较计数**。状态机/计数/角色表等全量机器数据契约以 `scripts/budget_gate.py` 为单一权威源（编译）；`refs/state-schema.md` §预算 gate 仅保留 agent 需读的角色摘要。
 
 1. **每次 spawn 经 orchest.py（收敛循环内）**：gate 生命周期统一由 `scripts/orchest.py` 承接——spawn 前 `reserve-round`（gate reserve + begin-invocation + 骨架，单命令），宿主返回后 `register-round`（complete + settle + 回填，成功带 instance_id，失败/取消走 `cancel-round`）。命令名与参数见 `scripts/README.md` Loop A。
    - `PROCEED` → 继续 spawn；非 PROCEED 透传处置（见下条 2）。gate reserve/settle 由命令内部驱动并确保结果落 ledger——**不得手跑裸 budget_gate.py reserve/settle 序列**（两个已落地 tier 都如此）。`best-effort guarded` 仅额外提供独立 PreToolUse 总量 cap——hook 不写 ledger、hook counter 与 ledger 不双计、bind/refresh-cap/unbind 只管理总量 backstop；per-scope gate 经 reserve-round 驱动。
@@ -204,7 +204,14 @@ Executor 修复后，通过 Continue 让 reviewer 验收。Orchestrator 自己�
    - `MODE_SWITCH_REQUIRED` → 呈现：接受进入执行 / 简化 plan 重收敛 / 终止。
    - `DENY:*` → 角色非法/未注册，复查后重试。
    - `FAIL_CLOSED:*` → 状态损坏（含 ledger schema 校验失败、孤儿 reservation、extension 链非法），按 reason 修复后重试，**绝不 fail-open**。
-3. **budget_extension 令牌**（超默认预算续跑的唯一合法途径）：在 `_budget-state.json` 的 `extensions` 追加一条，**关联触发它的真实 BLOCK `decision` 事件**（`triggering_block_event_id` + 与该 decision 的 scope/observed_usage/effective_ceiling 逐项一致），含用户原话 `user_quote`；新记录写 `supersedes`，旧记录不可改，`new_ceiling` 单调递增且 `prior_ceiling` 接上链。校验不过 → gate FAIL_CLOSED。**不得用记忆中的旧授权续费**（呼应宪法第二部授权粒度澄清）。
+3. **budget_extension 令牌**（超默认预算续跑的唯一合法途径）：orchestrator 在 manual-fallback 时**手写**该令牌，字段级作者基准（作者 schema）如下——在 `_budget-state.json` 的 `extensions` 追加一条：
+   - `extension_id` / `ts`：纯作者字段（orchestrator 手写，脚本不生成）；
+   - `triggering_block_event_id`：**关联触发它的真实 BLOCK `decision` 事件**；
+   - `scope`/`granted_at_usage`/`prior_ceiling`：与该 decision 的 `scope`/`observed_usage`/`effective_ceiling` 逐项一致——其中 `granted_at_usage` 由 `budget_gate.py` `validate_extensions`（L383）机械校验为 `== decision.observed_usage`（orchestrator 必须照实填写）；
+   - `new_ceiling` 单调递增且 `> prior_ceiling`；`prior_ceiling == 被取代记录.new_ceiling`；
+   - `supersedes`：线性链（旧记录不可改）；
+   - `user_quote`：用户原话——作者基准（`budget_gate.py` 的 `validate_extensions` 并不包含/校验该字段，故**不**指向其为 `user_quote` 作者单源）。
+   校验不过 → gate FAIL_CLOSED。**不得用记忆中的旧授权续费**（呼应宪法第二部授权粒度澄清）。
 4. **孤儿 reservation**：收口前必须全部 settle 或显式作废；consuming 孤儿占自己一格不全局阻断，但收口必检与 pre-push 会拦未结孤儿。
 5. **ingest-verdict**：reviewer 输出落盘后，`budget_gate.py ingest-verdict --target-round N --verdict <可执行|阻断需修复|需重新设计> [--severities ...] [--mode ...]`，驱动 mode 记录与边际递减判定。
 6. **记录**：retrospective 中分析预算消耗（ledger 事件数 / 是否触发 extension / 总量水位）是否合理；rule_frequency 的 `budget_gate` 由 ledger `decision` 事件触发。
