@@ -2,9 +2,10 @@
 
 ## orchest.py — 执行层编排（六命令一段式用法）
 
-> 过渡可发现性入口：SKILL.md 接线（在 Orchestrator 主循环一节引用 orchest.py）留后续
-> plan；接线前经本文件找到 orchest.py。设计契约与验收见 KB 仓 plan
-> `docs/plans/active/20260815-converge-exec-orchestration.md`。
+> 本文件为脚本命令/用法清单的**单源**。SKILL.md 已接线 orchest.py（Orchestrator 主循环总则引用）；
+> 本文件承载全部脚本命令/用法/其他脚本清单。任何脚本或文档改写涉及该清单时须**同步维护本文件**，
+> 并走常规评审（本文件不在 CONSTITUTION 保护文件清单内，不适用保护文件豁免路径）。
+> 设计契约与验收见 KB 仓 plan `docs/plans/active/20260815-converge-exec-orchestration.md`。
 
 单次宿主派发的完整生命周期（LLM 只写 prompt 文件与裁决 verdict，机械步骤全走脚本）：
 
@@ -90,6 +91,32 @@ python scripts/orchest.py finish --active-dir <dir> --verdict 可执行
 
 落地执行（收敛完成后）**不进**上述循环：spawn 走宿主原生 + instance_id 记 plan frontmatter，仅改动清单核对经 `checkpoint-paths`——映射表见 `refs/orchestrator-guide.md` §落地执行编排。
 
+## converge_loop.py — 可选循环调度器（loop-spec 驱动的机械调度）
+
+converge_loop.py 是收敛循环的**可选调度器**（OPTIONAL scheduler），不替代 SKILL.md 主循环
+的语义判定：verdict、修复指令、prompt 内容、retrospective 等★步骤仍由 LLM 按
+SKILL.md 主循环承担；本驱动器只做机械组合——以 subprocess 调用 orchest.py 六命令
+（记账合同唯一事实源）与 spec 提供的**外部 `ocsr_dispatch` 可执行文件**（经 spec 提供，
+非本仓库内置执行体），不重新实现预算/归档/角色语义。设计契约见
+`docs/plans/active/20260818-converge-loop-driver.md`。
+
+命令：
+
+- `run --spec <spec>` — 从零驱动 loop spec（先校验、初始化 budget config、写入 journal；暂停以 pause-request.json 边界交接）。
+- `resume --spec <spec> [--answer k=v ...]` — 续跑已暂停的 journal，处理 pause 等待的裁决答案。
+- `validate --spec <spec>` — 只校验 spec 合法性并列出 phases（不驱动）。
+- `status --spec <spec>` — 输出 journal 的 phase_index / paused / aborted / history（JSON）。
+
+loop-spec 驱动派发阶段的机械调度：轮号推导、预约、派发、落账、产物三方对齐、归档均由
+驱动器机械执行。spec **禁止**出现轮号字段（`round` / `round_number` / `target_round`），
+轮号只能由驱动器从 realized 产物（`round-N.md` 等）推导，防止轮号误用。
+
+**单活约束**：spec 驱动路径与人工主循环**不得并发驱动同一 active 目录**——二者同时写会造成
+ledger/budget 双计数风险；同一 active 目录同一时刻只允许一条驱动路径（spec 驱动或人工主循环）。
+
+退出码：`0` 全流程完成；`1` 步骤失败（不可机械恢复或 agent abort）；`2` spec 非法/用法错误；
+`10` 暂停待裁决（已写 pause-request.json）；`11` resume 状态不确定（journal 损坏/答案缺失/输入未就位）。
+
 ## 其他脚本
 
 - `budget_gate.py` — 预算执行硬化（reserve/settle/ingest-verdict/summary）
@@ -97,3 +124,10 @@ python scripts/orchest.py finish --active-dir <dir> --verdict 可执行
   record-terminal-decision/stamp/archive/check/reopen）
 - `ocsr_spawn_adapter.py` — OCSR 派发的五步原子 Spawn 适配
 - `archive_contract/` — Archive Contract v1 可执行单源（model/capture/transaction）
+- `converge_loop.py` — 循环级机械调度器（可选，见上节；run/resume/validate/status）
+- `l1_gate.py` — L1 信号检测前端：读取 Dynamic Workflow 各 phase 收口 JSON 指标，按阈值判定 pass/warn
+- `distill_antipatterns.py` — Antipattern 蒸馏器：从 done/*/retrospective.md 的 Antipattern 巡查表编译 refs/antipatterns.md 的 status/zero_streak（确定性，零 LLM；--write 才落盘）
+- `hooks/pre-commit` — 检测治理文档变更，提醒走 ultraverge 流程（CONSTITUTION 第三部保护文件）
+- `hooks/pre-push` — 检查 active/ 陈旧项（stale-check）+ 变更的 Archive Contract v1 done 目录（check-push-range）
+- `hooks/stale-check.py` — 扫描 .converge/active/ 与 docs/plans/active/ 的 stale 项（CRITICAL/WARNING/NOTE；CONVERGE_STRICT=1 阻断 push）
+- `hooks/kimi_pretooluse_shim.py` — 把 kimi-code 宿主 hook 事件桥接到 converge budget_gate（字段归一化后子进程调用）
