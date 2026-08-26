@@ -1,0 +1,37 @@
+{
+  "config": {
+    "max_blind_rechecks": 2
+  },
+  "extensions": [],
+  "fsm": {
+    "mode": "standard",
+    "severities": {
+      "3": [
+        "structural",
+        "structural",
+        "implementation"
+      ],
+      "1": [
+        "structural"
+      ],
+      "2": [
+        "structural"
+      ],
+      "5": [
+        "structural"
+      ],
+      "6": [
+        "structural",
+        "implementation"
+      ],
+      "7": [
+        "structural",
+        "structural"
+      ],
+      "8": [
+        "implementation",
+        "implementation"
+      ]
+    }
+  }
+}

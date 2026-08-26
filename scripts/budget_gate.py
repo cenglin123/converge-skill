@@ -522,8 +522,9 @@ def _valid_decision_verdict(v) -> bool:
 def _validate_event(ev: dict) -> None:
     """逐事件完整 schema：必填字段、类型、enum、嵌套结构、role↔consumes 一致。
 
-    与 refs/state-schema.md §预算 gate 的事件契约一一对应。任何缺字段 / 错类型 /
-    非法 enum / 嵌套结构不合 → FAIL_CLOSED（不让损坏事件污染计数）。
+    本脚本是 gate-ledger / `_budget-state.json` / 计数 / 事件契约等全量机器数据契约的
+    单一权威源（编译）；refs/state-schema.md §预算 gate 仅保留 agent 需读的角色摘要。任何缺字段 /
+    错类型 / 非法 enum / 嵌套结构不合 → FAIL_CLOSED（不让损坏事件污染计数）。
     """
     et = ev["event"]
     # 所有事件必带可解析 ISO 时间戳
