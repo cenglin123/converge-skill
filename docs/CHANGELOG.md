@@ -2,6 +2,20 @@
 
 本文件按时间倒序记录已完成且影响后续维护的变更。
 
+## 2026-08-26
+
+### refactor: 文档层对齐机制分工——确定性归脚本单源,判断留 SKILL 入口(ultraverge 收敛)
+
+按仓库哲学(顺序/记账/路由/验收/止损归脚本机械保证;verdict/重派/prompt/模型选择留 agent)重构文档层,机制零改动:
+
+- SKILL.md(563→537):主循环/盲审/Inner Loop 的 CLI 命令块收缩为命令名+指针(单源 scripts/README.md),全部循环结构语义(c+1/c+2/c+3/d2/d3/e/g/h/i)与盲审不变量(pass|fail|waived 口径、修复轮共享 max_outer_loops)逐字保留;配置表两分法——7 个 budget_gate DEFAULTS 键数值列指向脚本单源,判断侧阈值(type_o/r_threshold、gate_l2_*、executor_model_tier、relay_oscillation_interval 等)数值保留;调优史脚注改指 DEFAULTS 注释+git 0137fce;**修正 Ultraverge 路径节残留旧数值**(真实默认 1/42→44 → 对齐 DEFAULTS=3、ultraverge 覆盖 2、总量 63/62);目录结构与 Archive Contract v1 收缩为摘要+指针(规范单源 refs/state-schema.md);M-11 hook 接线细节指向 framework-adapters/claude-code.md §A.1;C-20/C-21 去重指向 guide。
+- refs/orchestrator-guide.md(515→501):§Archive/reopen 仅归档序列被 finish 取代,生命周期契约/reopen revision/journal 幂等/绑定唯一性/bootstrap staging-only/legacy 只读不变量全保留;§六.5 命令序列单源化(非 PROCEED 处置/extension 令牌/孤儿 reservation 语义保留);§八 relay 记录字段集去重(单源 state-schema §relay-ledger,timestamp 裁决与五组中英文名映射记入等价表);§十 区分 converge_loop.py(converge 侧机械组合器)与 vault 侧适配层驱动器。
+- refs/state-schema.md(512→537):新增规范章节「目录结构」(自 SKILL.md 迁入:目录树/slug 命名/done→active→重归档修订注)。
+- scripts/README.md(99→133):新增 converge_loop.py 节(可选调度器/依赖外部 ocsr_dispatch/与手工主循环单活);过时「过渡」头注改为单源声明;其他脚本清单补全(l1_gate/distill_antipatterns/hooks/*)。
+- 等价映射表:docs/plans/active/20260826-doc-layer-refactor-equivalence.md(24 行,逐项 原句→单源处)。
+
+治理:ultraverge 三方并行评议(6 项合并阻断修复)→ outer R1 可执行(6 建议并入)→ 强制设计审查(3 highlights 并入:同文件旧数值矛盾/模式覆盖值保留为行为注/不受保护单源张力记录)。证据:.converge/done/20260826-doc-layer-refactor/。
+
 ## 2026-08-11
 
 ### fix: `EventLock` 在 Windows 上一次瞬时删除失败即永久自锁

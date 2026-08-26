@@ -2,6 +2,31 @@
 
 > 本文件定义 `.converge/` 下所有持久化文件的格式。写文件时参考此处。
 
+## 目录结构
+
+```text
+.converge/
+├── tmp/                          # 中间产物（draft、临时脚本、调试输出等）。每轮结束后清理
+├── active/<slug>/                # 进行中的收敛对象
+│   ├── contract.md               # Round 0 合同终稿（可选）
+│   ├── round-N.md                # 每轮 reviewer 输出 + orchestrator 处理记录
+│   ├── attempts.md               # 跨轮 attempt log（含 overturn 链）
+│   ├── gate-ledger.jsonl         # 预算 gate 仅追加事件流（reserved/settle/decision）
+│   ├── _budget-state.json        # 预算 gate 结构化状态（config 覆盖 / extensions 链 / fsm mode+severities）
+│   └── _orchestrator-state.md    # 抗 compact / 抗 session 切换
+├── done/<slug>/                  # 已收敛/已停止
+│   ├── ... (上述所有文件)
+│   ├── retrospective.md          # 复盘（必填）
+│   └── design-review.md          # 设计审查报告（可选，触发时生成）
+└── gate/<slug>/                  # 门控产物（与 active/ 隔离）
+    └── gate-findings.md          # L2 Reviewer gate_findings 汇总
+```
+
+> 格式规范见本文件以下各节。slug 命名：`<YYYYMMDD>-<对象简述>`。
+>
+> 收敛后修订时：done/ → active/（经 `scripts/archive_convergence.py reopen`） → 修订 → 重新归档 done/。
+> retrospective 追加修订记录，不覆盖原有内容；修订必须经 reopen 保存旧 manifest revision 后再追加事实（见 Archive Contract v1）。
+
 ## Archive Contract v1（规范单源）
 
 `schema_id="converge.archive"`，`schema_version="1.0"`。读取按 schema dispatch，不按日期：无 manifest 为 `missing/legacy-unverifiable`；严格 JSON 失败（含重复 key、BOM、NaN/Infinity）为 `malformed`；缺版本、外部 schema 或更新版本为 `unsupported`；可识别 v1 但闭包失败为 `invalid`；全部通过为 `valid`。未知版本 fail-safe，scan 只读且不迁移。
