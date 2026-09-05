@@ -49,36 +49,8 @@ Identify blocking issues in the plan. Output verdict + structured issue list.
 此检查仅在 Orchestrator 注入 drift_context 时激活——单轮快速评议不触发。
 （注：`source: orchestrator_self` 的降级影响标注见 `refs/reviewer-discipline.md` §硬纪律 #7 Orchestrator 边界审计。）
 
-## Output format (YAML in markdown code block)
-
-```yaml
-round: {N}
-verdict: <可执行 | 阻断需修复 | 需重新设计>
-deterministic_check: <pass | fail | skipped>  # 仅代码项目填写；非代码项目删除此行。skipped 时必填下行
-deterministic_check_skip_reason: <string>      # 仅 skipped 时填写，如"无 bash 权限"、"pytest 未安装"
-blocking_issues:
-  - id: 1
-    description: |
-      <single-paragraph plain language>
-    attribution: <plan_defect | executor_limit>  # MANDATORY, choose one
-    severity: <conceptual | architectural | structural | implementation>  # conceptual=设计哲学(如身份危机); architectural=架构设计(如数据耦合); structural=结构组织(如目录划分); implementation=实现细节(如算法错误)
-    plan_amendment_required: <true | false>
-    location: <plan section reference or N/A>
-    rubric_gap: <true | false>  # 标注时填写 true，表示 Rubric 维度未覆盖此问题
-suggestion_issues:  # non-blocking, will NOT block convergence
-  - description: ...
-    drift_detected: <true | false>  # 可选，仅当意图漂移检查激活且发现漂移时标注
-antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
-  - round_referenced: 3
-    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | iterative_sediment | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）
-    evidence: |
-      <quote from attempts.md>
-rubric_scores:              # 仅当 contract 中定义了维度时填写
-  - dimension: <维度名>
-    score: <1-5>
-    evidence: "<一句话引用具体证据>"
-contract_amendment_required: <true | false>  # 仅当 contract 有缺口时标 true
-```
+## Output format
+完整 schema 见 `refs/reviewer-discipline.md` §Output format。Reviewer 输出结构以该文档为权威源；本模板不复制 schema 全文，避免漂移。
 
 ## Contract（如有）
 
@@ -244,3 +216,5 @@ gate_findings:
 ## 盲审复核变体
 
 参照 `refs/reviewer-discipline.md` §盲审复核纪律。盲审的角色定位、Required reading、审查任务、硬纪律、附加指令与 findings 映射在该文档中独立维护，以自足可读的完整章节呈现，非差分表。
+
+Orchestrator 拼装盲审 prompt 时，须按 `refs/reviewer-discipline.md` §盲审复核纪律 Required reading #3 的条件逻辑判断待审产物是否为 converge 自身治理文档；若是 → 在 prompt 中以 `<background_materials>` 块传入 SKILL.md / CONSTITUTION.md；若否 → Required reading #3 留空跳过。

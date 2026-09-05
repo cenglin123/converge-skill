@@ -81,6 +81,124 @@ orchestrator 会先回写 plan 本体再让 executor 改下游。
 
 > **事故出处**：某 converge 会话中，Reviewer 为验证 pre-commit hook 跑了 `git commit --no-verify -m "bypass test"` + `git reset --hard HEAD~1` 清理；`--hard` 重置了整个工作区，丢弃前序轮次 Executor 未提交的修复，制造出"修复丢失"的 report_hallucination 假象，浪费两轮收敛才由 `git reflog` 查出真因。此约束即源于该事故。
 
+## Output format
+
+### 主循环 Output format
+
+```yaml
+round: {N}
+verdict: <可执行 | 阻断需修复 | 需重新设计>
+deterministic_check: <pass | fail | skipped>  # 仅代码项目填写；非代码项目删除此行。skipped 时必填下行
+deterministic_check_skip_reason: <string>      # 仅 skipped 时填写，如"无 bash 权限"、"pytest 未安装"
+blocking_issues:
+  - id: 1
+    description: |
+      <single-paragraph plain language>
+    attribution: <plan_defect | executor_limit>  # MANDATORY, choose one
+    severity: <conceptual | architectural | structural | implementation>  # conceptual=设计哲学(如身份危机); architectural=架构设计(如数据耦合); structural=结构组织(如目录划分); implementation=实现细节(如算法错误)
+    plan_amendment_required: <true | false>
+    location: <plan section reference or N/A>
+    rubric_gap: <true | false>  # 标注时填写 true，表示 Rubric 维度未覆盖此问题
+suggestion_issues:  # non-blocking, will NOT block convergence
+  - description: ...
+    drift_detected: <true | false>  # 可选，仅当意图漂移检查激活且发现漂移时标注
+antipattern_observations:  # Round 1 时仅可填写设计层反模式（前置自检中发现）；Round ≥ 2 时填写所有检测到的反模式（executor + design + orchestrator 层）
+  - round_referenced: 3
+    type: <minimum_patch | solution_anchoring | over_compromise | past_commitment_anchoring | report_hallucination | false_generality | identity_crisis | data_tool_coupling | environment_lock-in | archaeology_leftover | iterative_sediment | orchestrator_self_review | silent_merge>  # 枚举与 refs/antipatterns.md 的 id 全集逐字同步；新增/归档条目时本行同步更新（归档条目保留在枚举中——历史 retrospective 仍可能引用）
+    evidence: |
+      <quote from attempts.md>
+rubric_scores:              # 仅当 contract 中定义了维度时填写
+  - dimension: <维度名>
+    score: <1-5>
+    evidence: "<一句话引用具体证据>"
+contract_amendment_required: <true | false>  # 仅当 contract 有缺口时标 true
+```
+
+### 盲审 Output format
+
+```yaml
+round: blind-recheck
+verdict: <可执行 | 阻断需修复>
+blocking_issues:
+  - id: 1
+    description: |
+      <single-paragraph plain language>
+    attribution: pending
+    severity: <conceptual | architectural | structural | implementation>
+    plan_amendment_required: <true | false>
+    location: <artifact section reference or N/A>
+suggestion_issues:
+  - description: ...
+antipattern_observations:
+  - type: <archaeology_leftover | ...>
+    evidence: |
+      <quote from artifact>
+```
+
+## 模式判定
+
+Reviewer 按 Orchestrator 在 prompt 顶部声明的模式应用对应规则集，不做启发式推断。
+
+**Mode 头标**：Orchestrator 在 prompt 顶部固定位置写 `## Mode: <main-loop | blind-recheck | gate-review | ...>` 头标。当前 Mode 值集：
+
+- `main-loop`：主循环 Reviewer
+- `blind-recheck`：盲审复核 Reviewer
+- `gate-review`：L2 gate Reviewer（承载于 `refs/reviewer-prompt.md` 门控审查模式段，纪律文档仅枚举并指明各自硬纪律继承来源）
+
+新模式增加按既有规则扩值即可。
+
+**兜底条款**：prompt 未声明模式时，Reviewer **不得**自行假定模式，按最保守路径（盲审模式）输出：
+
+- 不填二元归因，attribution 固定 `pending`
+- 不读 attempts.md / round / retrospective
+- 在 `antipattern_observations` 中以 `type: prompt_mode_missing` 报告该流程缺陷（含 evidence 引用具体 prompt 缺失位置）
+
+**信号自判旁路**：若 Reviewer 收到的上下文（attempts.md / escalated_issues 等）与 prompt 头标模式冲突，可在 `antipattern_observations` 中以 `prompt_mode_signal_conflict` 标注，仍以头标为准。
+
+## severity 四档定义
+
+severity 四档（`conceptual` / `architectural` / `structural` / `implementation`）是 blocking issue 的严重度分类。每条 blocking 必须标注其中一档；`MODE_SWITCH_REQUIRED` 等机械后果由 `budget_gate.py` 根据 severity 分布驱动。
+
+### conceptual — 设计哲学
+
+**含义**：产物在身份、定位或设计哲学层面存在根本性矛盾。
+
+**边界**：不是"写得不好"，而是"产物不清楚自己要做什么"或"声称做 A 实际做 B"。
+
+**例**：身份危机——产物同时声称是通用工具和特定领域解决方案，两者不可调和。
+
+**判定问句**：产物的核心身份或设计哲学是否存在自相矛盾，导致无法判断它到底要解决什么问题？
+
+### architectural — 架构设计
+
+**含义**：产物在架构层面存在结构性缺陷，如数据耦合、职责错位或层次混乱。
+
+**边界**：不是单个实现细节错误，而是组件之间的关系或数据流设计有问题。
+
+**例**：数据耦合——两个本应独立的模块通过共享内部状态而非接口通信。
+
+**判定问句**：产物的架构设计是否存在组件间不合理的依赖或耦合，导致修改一处必须连带修改多处？
+
+### structural — 结构组织
+
+**含义**：产物在文件、目录或文档结构层面存在组织问题。
+
+**边界**：不是内容错误，而是内容的组织方式导致可读性、可维护性或可发现性受损。
+
+**例**：目录划分——相关文件散落在不相关的目录中，或同一职责的文件被拆分到多个位置无明确理由。
+
+**判定问句**：产物的结构组织是否导致使用者难以找到所需内容，或导致同一职责的定义散落多处？
+
+### implementation — 实现细节
+
+**含义**：产物在具体实现层面存在细节错误，如算法错误、逻辑遗漏或格式问题。
+
+**边界**：不是架构或结构问题，而是具体代码、文本或配置中的可定位错误。
+
+**例**：算法错误——边界条件未处理导致特定输入下结果错误。
+
+**判定问句**：产物中是否存在可定位的具体错误（代码逻辑、文本表述、配置值等），修正后不影响整体架构？
+
 ## 盲审复核纪律
 
 > 盲审（Blank-Slate Recertification）是收敛循环的一种特殊审查模式。当主循环经历 ≥2 轮后签发"可执行"时，Orchestrator 会 spawn 一个使用本纪律的 fresh Reviewer 做最终复核。盲审 Reviewer 不读取 attempts.md、不读取轮次日志、不读取 retrospective——以完全空白的视角审查产物。
@@ -94,9 +212,8 @@ orchestrator 会先回写 plan 本体再让 executor 改下游。
 按顺序：
 
 1. 待审查产物（plan 文件）
-2. 本 converge SKILL 定义
-3. 验收合同（如存在）
-4. 原始背景材料（如存在）
+2. 验收合同（如存在）
+3. 原始背景材料（如存在）
 
 **不读 attempts.md、不读 round 文件、不读 retrospective。**
 
@@ -121,27 +238,6 @@ orchestrator 会先回写 plan 本体再让 executor 改下游。
   - `deferred` = 问题存在但不属于本轮审查范围（如涉及尚未进入的模块），需说明理由
 - **禁止沉默**：不允许不标记、不回应。每条 escalated issue 必须在 blocking_issues 或 suggestion_issues 中可见
 - **盲审来源 pending 归因落定**：若 escalated issue 标注了 `attribution: pending`（来源为盲审复核，id 前缀 `BR-`），三态标记之外**必须同时落定二元归因**（plan_defect / executor_limit）——"回应"不等于"补归因"，pending 状态必须在本轮终结，不得跨轮存活
-
-### Output format
-
-```yaml
-round: blind-recheck
-verdict: <可执行 | 阻断需修复>
-blocking_issues:
-  - id: 1
-    description: |
-      <single-paragraph plain language>
-    attribution: pending
-    severity: <conceptual | architectural | structural | implementation>
-    plan_amendment_required: <true | false>
-    location: <artifact section reference or N/A>
-suggestion_issues:
-  - description: ...
-antipattern_observations:
-  - type: <archaeology_leftover | ...>
-    evidence: |
-      <quote from artifact>
-```
 
 ### 硬纪律
 
