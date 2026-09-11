@@ -1,0 +1,45 @@
+# Task: 子计划 A 计划 · 第 5 轮 fresh 独立评议
+
+你是本收敛对象的 fresh 独立 Reviewer（跨厂商，与前几轮无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读，不得修改任何文件。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（刚经第 4 轮修订，含"穷举扫描附录"）
+
+## 必读
+
+1. 上述 `plan.md`
+2. 同目录 `round-4.md`（上轮：P1-P4 闭合、新增阻断 N1 + 非阻断 N2/N3/N4、第五节最小修订）
+3. 同目录 `round-1.md`、`round-2.md`、`round-3.md`、`attempts.md`
+4. 代码事实：`tests/`（全量）、`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`CONSTITUTION.md`
+
+## 背景（前几轮的失效模式）
+
+前四轮反复出现的阻断属**同一类**：新增机制（D2 漂移门 / D3 声明门 / D3 finish 降级）会打断既有测试调用点，而 File Matrix/Phase **未完整枚举**。本轮作者被要求做**穷举扫描**并写成附录表。
+
+## 评审重点
+
+1. **穷举性独立验证（本轮最关键）**：请**自己**重新扫描 `tests/` 与 `scripts/` 中所有
+   - 直调 `budget_gate` 记账子命令（reserve/settle/ingest-verdict/summary）；
+   - `orchest` 的 `reserve-round`/`register-round`/`finish` 调用点；
+   逐个判定其是否受 D2 漂移门 / D3 声明门 / D3 finish 降级影响，并与计划附录表**逐条比对**。若有计划未列而会被打断的点 → 阻断（并给出文件:行）。
+2. **N1 是否闭合**（`:425`/`:438` 补 `--acknowledge-manual-fallback` + DEGRADED 断言；finish 扫描位于 step 3 之后、归档之前；`--dry-run` 语义写死）。
+3. **N2/N3/N4 是否落实**。
+4. **是否引入新矛盾**；符号名/行号逐条实开核对。
+5. **可执行性**：Phase bounded、每步产物与验证明确；Acceptance 条条可机械判定。
+6. **收窄合法性**：是否仍不触碰 `CONSTITUTION.md` 第三部规范句。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-a-tooling-hardening\round-5.md`
+
+必须包含：
+- 首行 verdict：`可执行` 或 `阻断需修复`
+- 前置自检逐项结论
+- **独立扫描结果表**（文件:行 → 机制 → 是否受影响 → 与计划表是否一致）
+- N1-N4 确认清单（yes/no + 证据）
+- 若仍有问题：编号 + 级别 + 文件:行 + 原文 + **单选**建议
+- 若 `可执行`：实施前必须满足的前置条件清单（可为空）
+- 结尾：是否需升级 ultraverge（是/否 + 理由）
+
+判定纪律：穷举性已独立验证、全部 blocking 闭合、行号符号准确、Acceptance 可机械判定 → 给 `可执行`。不为凑问题把 wording 升为阻断；也不因轮次多而放行。

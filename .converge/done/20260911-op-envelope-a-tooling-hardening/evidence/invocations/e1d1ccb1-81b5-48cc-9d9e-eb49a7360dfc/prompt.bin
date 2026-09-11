@@ -1,0 +1,46 @@
+# Task: 实施子计划 A（O2 + O4 + O7 工具与纪律硬化）
+
+你是本收敛对象的 Implementation Executor（fresh、跨厂商）。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows，bash shell）。UTF-8 读写。**禁止 git 写操作**（只读 `git diff`/`git status` 允许）。
+
+## 规格（唯一权威）
+
+必须完整读并严格按它实施：`.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（32,690 B）。辅助：同目录 `attempts.md`（含穷举扫描表）、`round-5.md`（已判 `可执行`）。
+
+**Exact File Matrix 是唯一授权改动范围**。特别地：`refs/orchestrator-guide.md`、`refs/state-schema.md` **不得修改**（若实现中发现必须改 → 立即停止，写出报告交回，不要改）。
+
+## 实施顺序（严格按 plan 的 Bounded Implementation Sequence）
+
+- **Phase 1 扫描**：grep 全 `scripts/`、`tests/` 的直调记账命令与编排调用点；逐处决定是否补声明（`ingest-verdict` 不补）；结果追加到 `attempts.md`。若发现需补声明却未列入矩阵的文件 → 停止并报告。
+- **Phase 2 O4/D2**：`budget_gate.py` 实现 `next_contiguous_round`/`contiguous_missing` 单一权威 + `cmd_reserve` 预约号钉定（门禁次序：`canonical_round` → 重复 rid → 漂移门 → `double_target` → 预算裁决 → `MODE_SWITCH`，失败码 `FAIL_CLOSED:target_round_drift:<scope>`）；`orchest._finish_step1_missing` 改为复用 `budget_gate.contiguous_missing`；并按 plan 的"既有预算用例适配"逐条改 `tests/test_budget_gate.py`（注意 `test_failed_releases_scope` 是改 `rnd=1` 且**不落产物**，不要照搬落产物）。
+- **Phase 3 O2/D1**：`orchest.py`（`_reserve_continue` 透传、reserve dry-run 展示联动、`finish --evidence-mode`、步骤 3 崩溃恢复点**缺省继承对应 invocation-started 的 `prompt_evidence.evidence_mode`**、`--evidence-mode` 仅作显式覆盖）、`ocsr_spawn_adapter.py`（dispatch 默认策略与透传）、`converge_loop.py`（loop-spec 顶层新键 `evidence_mode`，默认 `metadata-only`，用 `archive_contract.model.EVIDENCE_MODES` 校验，由 `Driver.reserve`/`Driver.register` 透传）、`scripts/README.md`。**全篇统一口径：默认 metadata-only；material/终局绑定轮由调用方显式传 exact。**
+- **Phase 4 O7/D3**：`budget_gate.py` 对 `reserve`/`settle` 加来源声明门（`--orchest-managed` 与 `--manual-fallback <reason>` 恰好一个，否则 fail-closed `FAIL_CLOSED:naked_state_transition`；**门置于 `cmd_companion_for` 分派之前**；`ingest-verdict` **不设门**）+ `[manual-fallback]` 落 `attempts.md`；`orchest.py`/`ocsr_spawn_adapter.py`（含 `_ensure_te_companion`）注入 `--orchest-managed`；`orchest finish` 扫描 manual-fallback 并在**步骤 3 之后、归档之前**显式降级（`DEGRADED:manual-fallback=N` + 需 `--acknowledge-manual-fallback`；`--dry-run` 下同样生效）；按扫描结果与矩阵补测试声明，含 `tests/test_orchest.py:425`/`:438` 补 `--acknowledge-manual-fallback` 且断言 `DEGRADED:manual-fallback=1`。
+- **Phase 5 验证**：定向 → 全量 → `py_compile` → `git diff --check` → 静态防回退检查。
+
+## 硬性约束
+
+- **不得**改动预算裁决/计数语义（`realized()`/`pending()`/`effective_usage()`）、不得改 ledger 事件类型与字段、不得改归档契约模块 `scripts/archive_contract/*`。
+- 采用 TDD：先红后绿。
+- 只改 Exact File Matrix 授权文件；不改 `.converge/**` 的既有产物（只能追加 `attempts.md`）。
+- 若任何一步需要扩范围或改 `refs/*` → **停止并报告**，不要自行扩。
+
+## 关键环境事项（务必遵守，否则会得到假失败）
+
+- 运行测试时必须用**长路径** TEMP/TMP：
+  `TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`
+  （默认 8.3 短路径 `ADMINI~1` 会造成 4 项假失败；`TEMP=C:\Temp` 会造成 13 项假失败。）
+- 全量测试基线：本仓库当前应为全绿；若出现与本次改动无关的既有失败，如实报告，不要掩盖。
+
+## 产物
+
+1. 按矩阵修改的源码与测试文件。
+2. 追加 `attempts.md`：Phase 1 扫描结果 + 实施记录 + 测试结果。
+3. 报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-impl-report.md`，含：
+   - 改动文件清单（每个文件的改动摘要）
+   - 定向测试与全量测试的命令原文与结果（通过/失败数，skipped 数）
+   - `py_compile` 与 `git diff --check` 结果
+   - 逐条 Acceptance 对照（plan 的 Acceptance 节）
+   - 偏差、未决项、以及任何你未能完成的部分（不得虚报）
+
+## 回执（你的最后一条消息）
+
+改动文件列表；全量测试通过/失败/skipped 数；Acceptance 逐条 pass/fail；是否触碰 `refs/*`（应为否）；未决项。

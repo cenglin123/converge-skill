@@ -1,0 +1,40 @@
+# Task: 子计划 A 实施 · 独立 fresh 审计（对抗式）
+
+你是 fresh 独立审计者（跨厂商，未参与计划编写与实施）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows，bash）。**只读**：不得修改任何仓库文件（可运行测试/命令）。UTF-8。
+
+## 目的
+
+对已完成的实施做**对抗式**验证：不信任实施者的自述报告，自己从 `git diff` 与文件内容核实。
+
+## 受审对象
+
+- 规格：`.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（verdict=可执行；含 Exact File Matrix、Bounded Implementation Sequence、Acceptance）
+- 实施：当前工作树相对 HEAD `529e691` 的未提交改动（`git diff`）
+- 实施者自述：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-impl-report.md`（**仅作参考，不可信其结论**）
+
+## 必须核实（逐条给结论 + 证据）
+
+1. **范围纪律**：`git status --short` 与 `git diff --stat`；改动是否**只**落在 Exact File Matrix 授权文件内；`refs/*`、`SKILL.md`、`CONSTITUTION.md`、`scripts/archive_contract/*` 是否确实未改。
+2. **语义守恒**：`scripts/budget_gate.py` 的 diff 是否**未**改动预算计数语义（`realized()`/`pending()`/`effective_usage()`）、未改 ledger 事件类型与字段。请指认具体函数/行。
+3. **D2**：`next_contiguous_round`/`contiguous_missing` 是否为唯一权威；`validate_integrity` 与 `orchest._finish_step1_missing` 是否确实复用；`cmd_reserve` 门禁次序是否与计划一致（`canonical_round` → 重复 rid → 漂移门 → `double_target` → 预算裁决 → `MODE_SWITCH`）；失败码是否为 `FAIL_CLOSED:target_round_drift:<scope>` 且零 ledger 写入；既有用例适配是否如计划（尤其 `test_failed_releases_scope` 改 `rnd=1` 且**不落产物**）。
+4. **D1**：`orchest` 的 continue 写出点/dry-run 展示串是否真的由参数驱动；`finish --evidence-mode` 默认是否为 `None` 且缺省**继承 started 的 `prompt_evidence.evidence_mode`**；`converge_loop` 是否新增 loop-spec 顶层 `evidence_mode` 并用 `archive_contract.model.EVIDENCE_MODES` 校验、由 `Driver.reserve`/`Driver.register` 透传；`README.md` 口径是否为"默认 metadata-only / material 必需 exact"。
+5. **D3**：`reserve` 声明门是否置于 `cmd_companion_for` 分派**之前**；`settle` 门是否在 `Lock` 之前；`ingest-verdict` 是否**未**设门；`--orchest-managed`/`--manual-fallback` 是否"恰好一个"，否则 fail-closed；`[manual-fallback]` 是否落 `attempts.md`；`orchest`/适配器（含 `_ensure_te_companion`）是否注入 `--orchest-managed`；`finish` 的 manual-fallback 扫描是否位于**步骤 3 之后**、`--dry-run` 下是否同样生效、`--acknowledge-manual-fallback` 缺失时是否拒绝。
+6. **测试质量（对抗重点）**：新增/修改的测试是否**真的有判别力**（非空断言、非恒真、确实会在实现缺失时失败）。请抽查至少 5 处，指出可疑的空洞断言或自我实现的断言。特别检查 `tests/test_process_controller_contract.py` 的防回退静态检查是否可被轻易绕过（例如按符号锚定失效、负例排除过宽）。
+7. **Acceptance 逐条**：把 plan 的 Acceptance 每条映射到具体证据（测试名/命令/文件:行），判定 pass/fail。
+8. **独立复跑**：自己执行
+   `TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`
+   并报告真实通过/失败/skipped 数（与实施者自述比对）。
+9. **遗留风险**：指出你认为仍未闭合、可能在后续对象（C/B）或真实运行中爆发的点。
+
+## 输出
+
+- 报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-audit.md`：
+  - 首行 verdict：`通过` 或 `不通过`
+  - 逐条结论（1-9）+ 证据（文件:行 / 命令 / 测试名）
+  - blocking 问题列表（若有）+ **单选**修复建议
+  - 非阻断观察
+- 同时在 `.converge\active\20260911-op-envelope-a-tooling-hardening\attempts.md` **追加**一节 `## Phase 5 · 独立审计结论`（verdict + blocking 摘要 + 复跑数字）。追加前先读该文件尾部，不要覆盖既有内容。
+
+## 回执
+
+verdict；blocking 数与摘要；你复跑的全量测试数字；你认为最值得担心的 1-2 点。

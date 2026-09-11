@@ -1,0 +1,495 @@
+# Attempts · 20260911-op-envelope-a-tooling-hardening
+
+> 跨轮 attempt log。历史 entry 不改写，只追加 annotation。
+> 本文件由 R1 评议（round-1.md，verdict=阻断需修复）后的计划修订轮创建；格式依 `refs/state-schema.md` §二 Attempt Log。
+
+## Round 1 attempt · issue B1
+- source: converge_loop
+- reviewer_backend: opencode
+- Issue: "D2/D3 以当前形态触及 CONSTITUTION 第三部治理文档（refs/orchestrator-guide.md 的 "spawn 经 orchest" 规范句强化；refs/state-schema.md §二 attempts.md 的 [manual-fallback] 披露契约；D2 "作废声明" 若入 ledger/state 则触及归档契约），按第四部必须走 ultraverge，但 plan 的 review_mode 仍是 standard-review 入口且把升级留给"评议时判定"，未落定。plan 也未显式收窄 D2/D3 以留在 standard-review。此边界未决使执行路径非法（在错误评议模式下实施治理文档修改）。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 按评议 B1 的收窄分支落定 `review_mode: standard-review`：D3 只做 orchest/budget_gate 脚本机制（裸转移拒绝 / 强制 `[manual-fallback]` 声明 + finish 归档显式降级），把 D3 的规范句归属移出本计划（Non-Goal）；D2 不引入新 ledger 事件/字段。新增硬升级闸门：若必须改 CONSTITUTION 第三部 `refs/*` 规范句才能成立则停止并升级 ultraverge。文件矩阵 `refs/orchestrator-guide.md`/`refs/state-schema.md` 两行改为"不修改（若需要则升级）"。
+- Rejected alternatives: 拒绝保持"评议时判定"的未决边界；拒绝以 D2/D3 现状直接升级 ultraverge（本可收窄，保留 standard-review）；拒绝在不改 refs 的前提下宣称 D3 规范句已落地。
+- Upstream scope check: 上溯到 CONSTITUTION 第三部治理文档清单与第四部修改程序、refs/orchestrator-guide.md:231（"每次 spawn 经 orchest.py"建议句）、refs/state-schema.md §二 Attempt Log；结论：收窄后可留在 standard-review，规范句归属显式移出。
+- Diff: plan frontmatter `review_mode`；新增"范围与治理边界（收窄决定，回应 B1）"节；决策 D3；Exact File Matrix 两行 refs；Non-Goals；Risks；Bounded Sequence Phase 0。
+- R1 verdict: Accepted
+
+## Round 1 attempt · issue B2
+- source: converge_loop
+- reviewer_backend: opencode
+- Issue: "D2 的"连续编号"不变量在两处实现：budget_gate.py:903-907（validate_ledger）与 orchest.py:999-1010（_finish_step1_missing，finish 步骤 1 :1465-1469 调用）。Exact File Matrix 只把 D2 指派给 scripts/budget_gate.py，scripts/orchest.py 行只写 D1/D3。若 Phase 2 只改 budget_gate.py，finish 步骤 1 仍按文件系统产物判 gap，Acceptance"取消预约后不再产生 round_gap"在官方收尾路径上不成立；两处职责形成"都以为对方管"的灰区（前置自检 Q4 不通过）。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采用 single-source 方案——在 `budget_gate.py` 新增单一权威 `contiguous_missing(active, scope)`；`validate_ledger` 与 `orchest._finish_step1_missing` 均复用同一实现，调用方向 orchest → budget_gate（orchest 已 import budget_gate）。在两处一致的基础上补回归：同一 fixture 上断言两处给出相同缺口集合。
+- Rejected alternatives: 拒绝"两处各自实现、靠人工保持同步"；拒绝只改 budget_gate 而放任 finish 步骤 1 的重复判定；拒绝让 orchest 反向成为权威（与既有 import 方向相反）。
+- Upstream scope check: 上溯到 budget_gate.py:533-543/903-907、orchest.py:999-1010 与 finish 步骤 1 :1465-1470；两处同源重复已确认。
+- Diff: 决策 D2 的"两处一致"段；Exact File Matrix `scripts/budget_gate.py`/`scripts/orchest.py` 行；Phase 2；Acceptance 第 3 条；tests 行。
+- R1 verdict: Accepted
+
+## Round 1 attempt · issue B3
+- source: converge_loop
+- reviewer_backend: opencode
+- Issue: "D2 的机制未定义且诊断与真实机制不符：(a) "改为基于成功结算的轮次集合，或允许显式声明该轮号作废"用"或"把两种不同方案并列，未选定，executor 无法实施；(b) 连续编号检查当前完全基于文件系统产物（budget_gate.py:533-543 + :903-907），不读 ledger，cancelled 不"占号"；(c) r2 的 round_gap 真因是预约 target_round（成功值 {1,2,4,5}，见 gate-ledger.jsonl :14/:28/:38/:48，3 为 pre_execution cancelled :40）与产物文件名 round-1..4 的错位，按 target_round 重算反而不连续。按 (a) 实施既可能不消除错位根因，也可能以 ledger 集合替换 FS 检查从而放松"忘写 round-N.md"不变量（orchest.py 模块 docstring :27 明确该检查防此错）。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 废弃原诊断与"或"并列，选定唯一方案：把预约 `target_round` 钉到 FS 推导的下一个连续轮号（`next_contiguous_round`），`cmd_reserve` 对 CONTIGUOUS_SCOPES 强制 `target_round == next_contiguous_round`，违反即 `FAIL_CLOSED:target_round_drift`。该方案从机制上消除"预约轮号 vs 产物名"错位（pre_execution cancelled 不改变 realized，下一预约只能重用同一轮号，不被"烧掉"），同时原样保留 FS 连续编号检查，不放松"忘写 round-N.md"。
+- Rejected alternatives: 拒绝"改用成功结算的轮次集合"（r2 成功集 {1,2,4,5} 更不连续，且放松既有不变量）；拒绝"允许显式声明轮号作废"（引入新 ledger 事件/字段，触归档契约）；拒绝保留"或"并列。
+- Upstream scope check: 上溯到 budget_gate.realized_round_numbers/SCOPE_PRODUCT/CONTIGUOUS_SCOPES、orchest._finish_step1_missing 及模块 docstring，以及 r2 账本 reservation `8f7d80e83731`（target 4 → round-3.md）/`4bd2541195c7`（target 5 → round-5.md 归位 round-4.md）；根因确为预约号与产物号错位。
+- Diff: 决策 D2 全节重写；证据 O4 全节重写；Exact File Matrix；Phase 2；Acceptance 第 3 条；Risks 第 2 条。
+- R1 verdict: Accepted
+
+## Round 1 attempt · issue B4
+- source: converge_loop
+- reviewer_backend: opencode
+- Issue: "D1 范围与默认策略均未闭合：(a) Acceptance 要求"需要 exact evidence 的路径全部由 CLI 参数驱动"，但 orchest.py:1535（finish 步骤 3 崩溃恢复的 complete-invocation）硬编码 metadata-only，无 CLI 覆盖点；对 material 轮，该恢复产物不满足 exact 两权威同字节绑定，恢复路径无法成功（虽 fail-closed，但正是 O2 要消除的官方路径摩擦）。计划"清点三处入口"未点名该点。(b) D1 决策为"默认 metadata-only"（plan:29），Risks 却写"D1 '默认 exact'"（plan:82），自相矛盾，executor 无法确定默认档（前置自检 Q5 不通过）。另 :392 的 continue begin 也硬编码 metadata-only，是否需 exact 未判定。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: (a) 点名 `orchest.py:1535` finish 崩溃恢复写出点并纳入方案：给 `finish` 新增 `--evidence-mode`（默认 metadata-only），恢复点改为 `getattr(args, "evidence_mode", "metadata-only")`，material/终局轮由调用方显式传 exact；同时收口 `_reserve_continue`（:392）与 reserve dry-run 展示串（:576）。(b) 统一单处表述："默认 metadata-only；material/终局绑定轮由调用方显式传 exact"（决策与 Risks 一致）。另 line ref 全部改用符号名并修正为当前行号。
+- Rejected alternatives: 拒绝保留 finish 恢复点不可声明的硬编码；拒绝仅靠静态检查"允许例外"而不给 CLI 覆盖点；拒绝在 Risks 保留"默认 exact"的相反表述。
+- Upstream scope check: 上溯到 orchest.py 的 `_reserve_continue`/`cmd_reserve_round`/`cmd_register_round`/`_register_continue`/`cmd_finish` 全部 evidence-mode 写出点、CLI 定义、ocsr_spawn_adapter.py:441/480/538/733、converge_loop.py:453-477；确认 converge_loop 当前完全没传 `--evidence-mode`。
+- Diff: 决策 D1 全节；证据 O2 全节（改符号名 + 现行号）；Exact File Matrix；Phase 3；Acceptance 第 1 条；Risks 第 1 条。
+- R1 verdict: Accepted
+
+## Round 1 attempt · plan revision (B1-B4 + 事实修正)
+- source: converge_loop
+- reviewer_backend: opencode
+- Issue: "R1 评议 verdict=阻断需修复；B1-B4 四条 blocking 均归因 plan_defect 且 plan_amendment_required=true；另有 5 条 Suggestions（过期行号、D3 可区分机制、D2 限定 validate 层、静态检查负例、README 措辞）。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 原地重写 plan.md：落定 standard-review 收窄（B1）、D2 single-source + 两处一致回归（B2）、D2 唯一轮号钉定方案并废弃原诊断（B3）、D1 默认值统一与 finish 漏点收口（B4）；全部行号改用符号名并校准为当前文件；采纳 5 条 Suggestions（含静态检查负例、D2 限定 validate/不动预算计数、D3 锚点说明）。
+- Rejected alternatives: 拒绝升级 ultraverge（收窄后标准评议成立）；拒绝用"或"并列未选定方案；拒绝新增 ledger 事件/字段；拒绝改 `refs/*` 规范句。
+- Upstream scope check: 上溯到 CONSTITUTION 第三部/第四部、orchest.py/budget_gate.py/ocsr_spawn_adapter.py/converge_loop.py 全部相关符号、scripts/README.md、refs/state-schema.md §二、refs/orchestrator-guide.md:231；确认收窄边界成立。
+- Diff: plan.md 全文件重写（frontmatter、范围与治理边界、证据、D1/D2/D3、Exact File Matrix、Bounded Sequence、Acceptance、Non-Goals、Risks）；本 attempts.md 新建。
+- R1 verdict: Accepted
+
+## Round 1 · dispatch misclassification disclosure（如实记录，不回填）
+- source: converge_loop
+- reviewer_backend: orchestrator_self（process self-disclosure，无 Reviewer 参与）
+- Issue: 本轮有 1 次 executor 派发**在模型白名单校验阶段即失败**（`deepseek/deepseek-flash` 当时不在 OCSR 白名单），**模型从未被调用**；但 gate 账本记为 `spawn_failed` 且 `pre_execution=false`、`reason=timeout`，属预执行失败被误分类（应为 `pre_execution=true`），会污染 `model_invocation` 计数（`budget_gate.model_invocation` 把 `spawn_failed && !pre_execution` 计入真实调用）。
+- Issue 归因: implementation_defect（账本 `spawn_failed.pre_execution` 分类机制误判）
+- plan_amendment_required: false
+- Evidence: reservation `813bc923511a`；invocation `4a6bcfee-1a9f-4cb8-a4bf-743043ba088c`；事件序列 3/4（`gate-ledger.jsonl` 第 3 行 reserved、第 4 行 `spawn_failed pre_execution=false reason=timeout`）。
+- Approach: 仅在本 attempts.md 如实披露该预执行失败误分类及其对 `model_invocation` 的污染，**不回填、不改写既有 ledger 事件**（历史 append-only）；本计划不实现该分类修复（见 plan Non-Goals），供后续对象评估。
+- Rejected alternatives: 拒绝事后改写事件 4 的 `pre_execution`；拒绝在无授权下把该修复并入本计划范围。
+- Upstream scope check: 上溯到 `budget_gate._reservation_status`/`model_invocation`/`cmd_settle` 对 `pre_execution` 的取值路径；结论为本轮只披露。
+- Diff: 本 entry（无 plan 字节变更）。
+- R1 verdict: Accepted
+
+---
+
+# Round 2 attempts（回应 round-2.md，verdict=阻断需修复）
+
+> B5-B8 为 round-2 阻断，S1-S5 为 round-2 建议。逐条按评议的**单选建议**处置，不改脚本/测试/治理文档（本工作仅改 plan.md 与本 attempts.md）。所有符号名/行号已实际打开 HEAD 文件核对。
+
+## Round 2 attempt · issue B5
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D3 的 `ingest-verdict` 声明门与治理文档既有规范句冲突……把 `ingest-verdict` 从 D3 的声明门集合中移除，D3 只覆盖 `reserve` / `settle`。保留的这两条已有 `refs/orchestrator-guide.md:232` 的既有禁令作为规范依据，`--manual-fallback` 则是 `SKILL.md:215` 既有 `[manual-fallback]` 义务的脚本化执行——二者均无需新增/修改第三部规范句。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——从 D3 声明门移除 `ingest-verdict`，D3 只覆盖 `reserve`/`settle`；plan 中所有"三命令"表述改为两命令，并明确保留项的规范依据为 `refs/orchestrator-guide.md:232` 既有禁令 + `SKILL.md:215` 既有义务（**不新增**第三部规范句）。Non-Goals 增列"不对 `ingest-verdict` 设门"。
+- Rejected alternatives: 拒绝保留 `ingest-verdict` 声明门（会 fail-closed 冲突 guide:248，必然触发升级闸门）；拒绝把 `ingest-verdict` 门禁转入 ultraverge。
+- Upstream scope check: 上溯到 `CONSTITUTION.md:72`（第三部清单）/:94（修改程序）；`refs/orchestrator-guide.md:248`（ingest-verdict 直调指令）；`:231/:232`（既有强制句）。结论：仅移除 `ingest-verdict` 即可闭合收窄。
+- Diff: plan:25（范围与治理边界）、D3 覆盖范围/披露/对抗回归、Exact File Matrix `budget_gate.py` 行、Non-Goals、Acceptance。已核对 `refs/orchestrator-guide.md:248` 原文与 `SKILL.md:215`。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue B6
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D3 的 `settle` 声明门会打断未列入 File Matrix 的测试文件……将 `tests/test_loop_a_coverage.py` 加入 Exact File Matrix 的 D3 测试行，并在 Phase 1 明确其 `run_gate("settle")` / 直接 subprocess settle 处注入合法声明（模拟手工路径时用 `--manual-fallback <reason>`）；同时在矩阵备注里声明'任何直调 gate 记账命令的既有测试须同步补声明'的扫描步骤。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——`tests/test_loop_a_coverage.py` 新增入 Exact File Matrix，明确 `:263`（`run_gate("settle")`）与 `:800`（直接 subprocess settle）注入 `--manual-fallback <reason>`；在矩阵下方新增"扫描义务"备注，并把扫描列为 Phase 1 首个动作；扫描结果写入本 attempts.md（见文末扫描节）。
+- Rejected alternatives: 拒绝只改实现而放任既有测试变红；拒绝把 test_loop_a_coverage 的失败作为"已知红"豁免。
+- Upstream scope check: 实测 `tests/test_loop_a_coverage.py:263` 与 `:800` 的 settle 形态；扫描（grep）覆盖 `scripts/` 与 `tests/` 全部直调记账命令。结论：所有需补声明的文件均已落入矩阵范围。
+- Diff: Exact File Matrix 新增 `tests/test_loop_a_coverage.py` 行并补测试行备注；Bounded Sequence Phase 1/Phase 4；Acceptance 第 4 条；扫描节。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue B7
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D3 的 ocsr 适配器注入点不完整，遗漏 `_ensure_te_companion`……把 `_ensure_te_companion` 的 `reserve --companion-for` 调用一并列入 D3 注入点（与 `_gate_reserve` / `_gate_settle` 同级），并显式规定 `cmd_reserve` 的声明门置于 `cmd_companion_for` 分派**之前**，使 companion 路径同受 `--orchest-managed` 约束。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——`ocsr_spawn_adapter.py:_ensure_te_companion`（`:264`，其 `reserve --companion-for` 在 `:296-299`）与 `_gate_reserve`（`:83`）/`_gate_settle`（`:97`）同列为 D3 注入点；显式规定 `cmd_reserve` 声明门置于 `cmd_companion_for` 分派（`budget_gate.py:1012-1013`）之前，`settle` 门置于进入 `Lock`（`:1171`）之前。
+- Rejected alternatives: 拒绝把声明门放在 `cmd_companion_for` 分派之后（会让 companion 路径成为漏网点）；拒绝排除 companion 路径。
+- Upstream scope check: 实测 `budget_gate.py:1012-1013` 分派位置、`ocsr_spawn_adapter.py:264/296-299`、`cmd_companion_for`（`budget_gate.py:1214`）为独立写 ledger 函数。结论：门前置 + 适配器三处注入可闭合。
+- Diff: D3 声明门节新增"companion 路径同受门禁"；Exact File Matrix `ocsr_spawn_adapter.py` 行；Phase 4。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue B8
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "核心不变量函数名 `validate_ledger` 不存在于 `budget_gate.py`……把 plan:42/71/72/120 的 `validate_ledger` 全部改为 `validate_integrity`（并保留连续编号段的 `budget_gate.py:903-907` 行号）……"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——plan 中全部 `validate_ledger` 改为 `validate_integrity`（`budget_gate.py:843`，连续编号段 `:903-907` 行号保留）；新增符号消歧句，声明归档契约的同名函数必须以全限定名 `archive_contract.model.validate_ledger`（`archive_contract/model.py:594`）引用，本计划不引用/不修改归档契约模块。
+- Rejected alternatives: 拒绝保留 `validate_ledger` 简名（存在误改归档契约模块风险）；拒绝借此改动归档契约模块。
+- Upstream scope check: 实测 `budget_gate.py` 无 `def validate_ledger`，`:843` 为 `def validate_integrity`、`:903-907` 为其连续编号检查；`archive_contract/model.py:594` 才有 `def validate_ledger`。结论：全部改名并加消歧。
+- Diff: 证据 O4 节、D2"不放松既有不变量"/"两处一致"/"不改 ledger"/新增消歧 bullet、Acceptance 第 3 条。`grep validate_ledger plan.md` 现为 0 命中。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue S1
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "`converge_loop.py` 的 evidence-mode 来源未选定（'或'并列）……选定单一来源——在 loop-spec 顶层新增 `evidence_mode`（默认 `metadata-only`，取值校验 `archive_contract.model.EVIDENCE_MODES`），由 `Driver.reserve`/`Driver.register` 透传……`meta` 通道（`converge_loop.py:515-519`）语义是 ocsr `--meta` KV，用它承载 evidence-mode 属职责倒置。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳建议——删除 `spec` 键/meta 通道并列表述，选定**唯一来源**为 loop-spec 顶层新键 `evidence_mode`（默认 `metadata-only`，校验 `archive_contract.model.EVIDENCE_MODES`，`archive_contract/model.py:27`）；`Driver.reserve`/`Driver.register` 透传；明确禁止用 meta 通道承载。
+- Rejected alternatives: 拒绝 meta 通道承载；拒绝复用 spec 既有键；拒绝保留"或"并列。
+- Upstream scope check: 实测 `converge_loop.py:178` `validate_spec` 对未知顶层键不报错（`FORBIDDEN_SPEC_KEYS` 仅禁轮号，`:49`）；`:515-519` 为 ocsr `--meta`；`Driver.reserve`（`:453-468`）/`register`（`:470-477`）当前未传 `--evidence-mode`。结论：顶层新键不触版本语义。
+- Diff: D1 第 6 点重写；Exact File Matrix `converge_loop.py` 行。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue S2
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "`[manual-fallback]` 的规范出处引用错误……`refs/state-schema.md` 全文 0 处 `manual-fallback`，§二（state-schema.md:133-162）只定义 Round attempt entry 字段格式。真正出处为 `SKILL.md:215`。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳建议——D3 披露记录出处改引 `SKILL.md:215`，删除对 `refs/state-schema.md §二` 的错误引用，并注明 §二只定义 attempt entry 字段格式、本机制的规范性归属已被显式移出。
+- Rejected alternatives: 拒绝继续引用 §二；拒绝以 §二 格式校验本机制。
+- Upstream scope check: 实测 `refs/state-schema.md` `grep -c manual-fallback` = 0，§二 位于 `:133-162`（Attempt Log 字段格式）；`SKILL.md:215` 含 `[manual-fallback]` 义务句。结论：唯一出处为 SKILL.md:215。
+- Diff: D3 披露记录 bullet。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue S3
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "对 `orchestrator-guide.md` 既有句强度的描述失真……改写为'D3 的 reserve/settle 部分是对 guide:231/232 既有强制禁令的脚本化执行，不存在新增规范句'，以巩固 standard-review 的合法性（并与 B5 的 ingest-verdict 例外并列言明）。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳建议——范围与治理边界节改写为"对 `refs/orchestrator-guide.md:231/232` 既有强制禁令的脚本化执行，不新增规范句"，并如实标注 `ingest-verdict` 已按 B5 移出。
+- Rejected alternatives: 拒绝保留"从既有建议句升级为强制句"的失真表述（该句本已是强制句）。
+- Upstream scope check: 实测 `refs/orchestrator-guide.md:231` 为"每次 spawn 经 orchest.py（收敛循环内）"、`:232` 为"不得手跑裸 budget_gate.py reserve/settle 序列"，均为强制句。结论：D3 属执行既有规范。
+- Diff: plan:25（范围与治理边界）。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue S4
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "'取消后重用轮号'未限定骨架状态……将验收句限定为'`pre_execution` / 纯骨架删除路径下，被取消轮号被重用'。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳建议——D2 回归句与 Acceptance 第 3 条限定为"`pre_execution` / 纯骨架删除路径（`orchest._cancel_skeleton`）下被取消轮号被重用"，并注明已写实质内容的取消不重用轮号（保留的 `round-N.md` 计入 realized，下一轮为 N+1）。
+- Rejected alternatives: 拒绝以绝对句断言所有取消都重用轮号（会误判实质内容取消的 fixture）。
+- Upstream scope check: 实测 `orchest._cancel_skeleton`（`orchest.py:282-300`）仅在 rid 匹配 + 无 `reviewer_instance_id` + 正文逐字等于 `SKELETON_BODY` 时删除；否则标注 `status: cancelled` 保留。结论：限定语必要。
+- Diff: D2 末条回归；Acceptance 第 3 条。
+- R2 verdict: Accepted
+
+## Round 2 attempt · issue S5
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "finish 崩溃恢复的 evidence-mode 由调用方声明，而非继承 started 事件……finish 步骤 3 恢复的 `--evidence-mode` 默认继承对应 invocation-started 的 `prompt_evidence.evidence_mode`；`--evidence-mode` 仍保留为显式覆盖。是否采纳留待人工判断。"
+- Issue 归因（reviewer 判定）: plan_defect（design trade-off，本轮采纳建议）
+- plan_amendment_required: true
+- Approach: **orchestrator decision——采纳 reviewer S5 建议**（见下条 orchestrator decision）：finish 步骤 3 崩溃恢复缺省继承对应 invocation-started 的 `prompt_evidence.evidence_mode`，`--evidence-mode` 仅作显式覆盖。plan 的 D1 第 3 点、Exact File Matrix、Phase 3、Acceptance 第 1 条、Risks、scripts/README.md 口径同步。
+- Rejected alternatives: 拒绝"finish 恢复缺省 metadata-only、需调用方显式传 exact"（会产生与 started 记录不一致的 terminal，诱发 material gate 摩擦）。
+- Upstream scope check: 实测 `orchest._started_of`（`orchest.py:311-314`）可读 started；material gate 读 `prompt_evidence.evidence_mode`（`orchest.py:1224-1230`）。结论：继承与既有判定同源，方案自洽。
+- Diff: D1 默认策略例外、D1 第 3 点、Exact File Matrix `orchest.py` 与 `scripts/README.md` 行、Phase 3、Acceptance 第 1 条、Risks 第 1 条。
+- R2 verdict: Accepted
+
+## Round 2 · orchestrator decision（采纳 reviewer S5 建议）
+- source: converge_loop
+- reviewer_backend: orchestrator_self（人工判断项，采纳 round-2 S5 建议）
+- Decision: **finish 步骤 3 崩溃恢复的 `--evidence-mode` 缺省继承对应 invocation-started 的 `prompt_evidence.evidence_mode`；`--evidence-mode` 仅作显式覆盖。**
+- Rationale: 与 `orchest._validate_material_gate`（`orchest.py:1224-1230`）同源读取，避免恢复终端与 started 记录不一致导致的官方路径摩擦；避免新增"调用方必须记得传 exact"的隐式纪律。
+- Diff: 已在 S5 attempt 的 Diff 中列明；本 decision 仅作显式记录。
+- R2 verdict: Accepted
+
+---
+
+## Round 2 · direct gate accounting command scan（round-2 B6 扫描义务）
+
+扫描命令（HEAD 工作树）：对 `scripts/`、`tests/` 全量 grep（含双引号/单引号/函数名 `_gate_reserve`/`_gate_settle`/`run_gate`/`_run_gate`）直调 `budget_gate` 记账子命令 `reserve` / `settle` / `ingest-verdict` 的位置。D3 声明门只覆盖 `reserve` / `settle`（B5），故 `ingest-verdict` 位置一律不补声明。
+
+### scripts/ 侧（经编排 → 注入 `--orchest-managed`）
+
+| 位置 | 命令 | 处置 |
+|---|---|---|
+| `scripts/orchest.py:196` `_settle_te_companion_for_continue` | `settle` | 注入（`_gate`） |
+| `scripts/orchest.py:612` `cmd_reserve_round` | `reserve` | 注入（`_gate`） |
+| `scripts/orchest.py:719` `cmd_register_round`（崩溃窗口补 settle） | `settle` | 注入（`_gate`） |
+| `scripts/orchest.py:771` `cmd_register_round`（主路径 settle） | `settle` | 注入（`_gate`） |
+| `scripts/orchest.py:845` `cmd_cancel_round`（崩溃窗口补 settle） | `settle` | 注入（`_gate`） |
+| `scripts/orchest.py:881` `cmd_cancel_round`（主路径 settle） | `settle` | 注入（`_gate`） |
+| `scripts/orchest.py:972` `cmd_record_verdict` | `ingest-verdict` | **不设门、不注入**（B5） |
+| `scripts/ocsr_spawn_adapter.py:86` `_gate_reserve` | `reserve` | 注入 |
+| `scripts/ocsr_spawn_adapter.py:100` `_gate_settle` | `settle` | 注入 |
+| `scripts/ocsr_spawn_adapter.py:296` `_ensure_te_companion` | `reserve --companion-for` | 注入（B7） |
+
+### tests/ 侧（手工/直调路径 → 补 `--manual-fallback <reason>`）
+
+| 位置 | 命令 | 处置 |
+|---|---|---|
+| `tests/test_budget_gate.py:40`（helper `reserve`） | `reserve` | 补 |
+| `tests/test_budget_gate.py:47`（helper `settle`） | `settle` | 补 |
+| `tests/test_budget_gate.py:715` | `reserve` | 补 |
+| `tests/test_budget_gate.py:2015` | `reserve` | 补 |
+| `tests/test_budget_gate.py:233/:243/:304/:309/:312/:883` | `ingest-verdict` | **不补**（B5） |
+| `tests/test_converge_loop.py:1064` | `reserve` | 补 |
+| `tests/test_loop_a_coverage.py:263`（`run_gate("settle")`） | `settle` | 补（B6 明列） |
+| `tests/test_loop_a_coverage.py:800`（直接 subprocess settle） | `settle` | 补（B6 明列） |
+| `tests/test_ocsr_spawn_adapter.py:446/:723/:835/:846/:882` | `reserve` | 补 |
+| `tests/test_ocsr_spawn_adapter.py:737` | `settle` | 补 |
+| `tests/test_orchest.py:413` | `settle` | 补 |
+
+### 无需改动 / 说明
+
+- `tests/test_continue_extension.py`（`:52`/`:208`/`:237`）：只调 `orchest reserve-round`（非直调 gate），编排层已注入 `--orchest-managed`，无需改。
+- `tests/test_process_controller_contract.py`：只做静态文本/契约断言，无直调记账命令；本计划在其中追加防回退断言。
+- `scripts/hooks/kimi_pretooluse_shim.py`、`scripts/hooks/stale-check.py`、`scripts/distill_antipatterns.py`：引用/import `budget_gate` 但无 `reserve`/`settle`/`ingest-verdict` 子命令直调，无需改。
+- **结论**：扫描识别的全部需补声明文件均已落入 Exact File Matrix（`test_budget_gate.py`/`test_converge_loop.py`/`test_loop_a_coverage.py`/`test_ocsr_spawn_adapter.py`/`test_orchest.py`），**无未授权文件**；无需触发"停止交回 orchestrator"分支。
+
+---
+
+# Round 3 attempts（回应 round-3.md，verdict=阻断需修复）
+
+> P1 为 round-3 唯一阻断，P2/P3/P4 为非阻断。逐条按评议的**单选建议**处置，不改脚本/测试/治理文档（本工作仅改 plan.md 与本 attempts.md）。所有新增/改动符号名与行号均已实际打开 HEAD 工作树文件核对。
+
+## Round 3 attempt · issue P1（阻断）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D2 的预约号钉定落在 `budget_gate.cmd_reserve`，会打断既有 `tests/test_budget_gate.py` 用例，而计划未把受影响用例列入 File Matrix。`next_contiguous_round` 只读 `round-{n}.md` 文件系统产物；直调 gate 且不落产物的用例 realized 恒为空、`next_contiguous_round` 恒为 1，任何 `target_round>=2` 的预约被新门禁拒绝。Phase 2 将卡死、Acceptance'全量测试绿'不可机械达成。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——门禁保持在 `budget_gate.cmd_reserve`；在 Exact File Matrix `tests/test_budget_gate.py` 行（plan:108）与 Phase 2（plan:129）**显式枚举**受影响的既有用例并写明更新方式，使 `next_contiguous_round` 与实际预约号一致、`effective_usage` 预算语义不变（依据 `budget_gate.py:550-567`）：
+  - **`TestScopeBudget.test_outer_boundary`（`tests/test_budget_gate.py:85-94`）**：`:89` 后写 `round-1.md`、`:91` 后写 `round-2.md`。写产物后 `pending()` 跳过已落盘轮、`realized` 补位，`effective_usage` 不变：`:90` 的 `r2` 仍 `usage 1 < 2` → PROCEED，`:92` 的 `r3` 仍 → `BLOCK:budget_exhausted`。
+  - **`TestScopeBudget.test_failed_releases_scope`（`:96-103`）**：`:102` 第二预约改 `rnd=1`（＝`next_contiguous_round`）。评议示例的"落 `round-1.md`"经实核**不可用于本用例**：r1 已 `spawn_failed`，`pending()` 排除之（`budget_gate.py:556`），落产物会把失败轮计入 `realized` 致 `effective_usage=1`，令 `max_outer_loops=1` 的第二预约变 `BLOCK:budget_exhausted`，破坏"失败释放 scope 额度"语义；改 target 为 `next_contiguous_round` 是评议 §四"或把不同 target 改为 `next_contiguous_round`"授权的等价做法，且正好体现 D2"失败后重用轮号"。plan 与 Phase 2 明写"**不落产物**"。
+  - **`TestAdversarial.test_duplicate_reservation_id_blocked`（`:270-277`）**：把漂移门显式排在重复 rid 校验**之后**（D2 执行次序：`canonical_round`→重复 rid→漂移门→`double_target`→预算裁决→`MODE_SWITCH`），`:275` 先返回 `FAIL_CLOSED:duplicate_reservation_id`；**无需改 fixture**。
+  - **实核补充（评议"至少"之外，同属直调 gate 不落产物的受影响 outer 用例）**：`TestModeSwitch.test_impl_streak_triggers_mode_switch`（`:230-238`）与 `test_structural_streak_no_switch`（`:240-247`）：`:236`/`:246` 预约 `rnd=3` 前写 `round-1.md`/`round-2.md`，使 `next_contiguous_round==3`；`mode_switch_required` 只读 `state.fsm.severities`（`budget_gate.py:979-992`），不受产物影响，故 MODE_SWITCH/PROCEED 期望不变。此补充不扩大实现范围（仍限授权文件 `tests/test_budget_gate.py`），为确保 Acceptance"全量测试绿"可达成所必需。
+- Rejected alternatives: 拒绝把门禁挪到 `orchest`（偏离计划并让直接回退路径漏网）；拒绝静默改写既有预算用例语义；拒绝在 `test_failed_releases_scope` 机械照搬"落产物"（会令该用例由 PROCEED 变 BLOCK）。
+- Upstream scope check: 实核 `budget_gate.realized_round_numbers`（`:533-543`）、`pending`/`effective_usage`（`:550-567`）、`cmd_reserve` 入口与次序（`:1006-1019`）、`ROLE_CONSUMES`（`:97-137`，仅 `outer`/`blind` 连续）、`mode_switch_required`（`:979-992`）；并逐条扫 `tests/test_budget_gate.py` 全部 `reserve(...,rnd>=2)` 点，确认仅上述用例（其余要么已落产物、要么在 `validate_integrity` 阶段先失败、要么 `consumes=none`）。`orchest reserve-round` 官方路径仍连续推进、不受影响（评议对照结论复核）。
+- Diff: plan:108（File Matrix `tests/test_budget_gate.py` 行枚举）；新增矩阵后注"既有预算用例适配（round-3 P1）"；plan:129（Phase 2 适配步）；plan:139（Acceptance 第 3 条同步绿期望）。
+- R3 verdict: 待评（本轮修订后重评）
+
+## Round 3 attempt · issue P2（非阻断）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D2 门禁的'非 `--resume-reservation`'限定在 `budget_gate` 层不成立：`--resume-reservation` 是 `orchest reserve-round` 的参数（`orchest.py:1764-1765`），其 resume 分支不调用 `_gate reserve`；`budget_gate.cmd_reserve` 无此 flag。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——删除 plan:71 括号限定，改为"（resume 路径不经本命令，见 `orchest.py:594-610`；`budget_gate.cmd_reserve` 无 `--resume-reservation` 概念。）"，语义落在 orchest 层。
+- Rejected alternatives: 拒绝在 `budget_gate` 增加 resume 概念（该层无从感知）。
+- Upstream scope check: 实核 `orchest.py:586`（resume 分支起点）、`:594-610`（resume 校验体）、`:611-616`（非 resume 的 `else` 才调 `_gate reserve`）。结论：限定语应落在 orchest 层。
+- Diff: plan:71。
+- R3 verdict: 待评
+
+## Round 3 attempt · issue P3（非阻断）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "Acceptance'两处给出相同缺口集合'对 `validate_integrity` 不可直接观测：其缺口分支只 `raise FailClosed("round_gap:{scope}")`（`budget_gate.py:903-907`），不暴露集合；只有 `orchest._finish_step1_missing` 返回文件名单。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——改写为两段式可判定：(a) 断言 `budget_gate.contiguous_missing(active, scope)` 等于预期整数列表；(b) 对同一 fixture 断言 `validate_integrity` 抛 `round_gap:{scope}`、`orchest._finish_step1_missing` 返回与 (a) 对应的文件名单（`SCOPE_PRODUCT[scope].format(n=n)`）。以"结构同源 + 各自可观测输出"替代不可观测的"相同集合"。
+- Rejected alternatives: 拒绝保留"两处相同集合"的字面表述（不可机械判定）。
+- Upstream scope check: 实核 `budget_gate.py:903-907` 只抛异常；`orchest.py:999-1010` 返回 `missing` 文件名单；两者将同源复用 `contiguous_missing`。结论：两段式可判定。
+- Diff: plan:75-77（D2"两处一致"）、plan:80（补回归）、plan:139（Acceptance 第 3 条）。
+- R3 verdict: 待评
+
+## Round 3 attempt · issue P4（非阻断）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "外部参考驱动器直调 `budget_gate reserve/settle` 的兼容性未进入边界诚实表述：`refs/orchestrator-guide.md:536` 所述 vault 侧驱动器两者皆非，只能声明 `--manual-fallback`；计划边界诚实（plan:94）只声明 archive 侧 caller 不可区分。但经核实**不**触发 ultraverge。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——在"边界诚实"段补一句：外部参考驱动器（`refs/orchestrator-guide.md:536`，实现在 vault 侧、不在本仓库）须同步以 `--manual-fallback <reason>`（或后续对象改走 `orchest`）适配 D3 门禁；此适配属 out-of-repo，不改本计划文件、不触发升级闸门。
+- Rejected alternatives: 拒绝把该 out-of-repo 适配列为本计划文件改动或据此升级 ultraverge。
+- Upstream scope check: 实核 `refs/orchestrator-guide.md:530-536`（驱动器归调用方适配层、提供 reserve/settle 包装）；无新增/修改第三部规范句。结论：仅补边界说明。
+- Diff: plan:94。
+- R3 verdict: 待评
+
+## Round 3 · 附带 bookkeeping（非评议项）
+- source: converge_loop
+- reviewer_backend: n/a
+- Issue: 前两轮修订均在 plan frontmatter `source_evidence` 追加当轮评议文件；本轮同样追加 `round-3.md`，保持产物身份自洽与溯源完整。
+- Issue 归因: plan_bookkeeping
+- plan_amendment_required: false
+- Approach: plan:13 追加一行 `round-3.md（R3 评议，阻断 P1 + 非阻断 P2/P3/P4）`。不改动其他 frontmatter 字段。
+- Diff: plan frontmatter `source_evidence`。
+- R3 verdict: n/a
+
+---
+
+# Round 4 attempts（回应 round-4.md，verdict=阻断需修复）
+
+> N1 为 round-4 唯一阻断，N2/N3/N4 为非阻断精度项。逐条按评议的**单选建议**处置，不改脚本/测试/治理文档（本工作仅改 plan.md 与本 attempts.md）。所有符号名/行号已实际打开 HEAD 工作树（`529e691`）文件核对。
+
+## Round 4 attempt · issue N1（阻断）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "D3 的 `finish` 显式降级会打断'测试侧新增 `--manual-fallback` 声明'之后的既有 `finish` 成功用例，File Matrix/Phase 未枚举受影响调用点。`tests/test_orchest.py:413` 直调 settle 补 `--manual-fallback` 后，`self.active/attempts.md` 落一条 `[manual-fallback]`；`:425`（dry-run）与 `:438`（real）两条 finish 会输出 `DEGRADED:manual-fallback=1` 并停止，`assertEqual(rc,0)` 必红。plan:93 只说'归档前'，未限定扫描位于 step 3 之后，可能打断 `tests/test_loop_a_coverage.py:275-278` 的'产物无法解析'先发生；`--dry-run` 语义也未写死。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选三项，全部实核后写死：
+  - **(i) 显式枚举 finish 确认点**：File Matrix `tests/test_orchest.py` 行与 Phase 4/5 明列 `:425`（`--dry-run`）与 `:438`（real）两条 finish 补 `--acknowledge-manual-fallback`（调用形如 `self.finish(FINAL_VERDICT, "--dry-run", "--acknowledge-manual-fallback")` / `self.finish(FINAL_VERDICT, "--acknowledge-manual-fallback")`），并在 `TestFinishRecoveryCancelledSettle` 内显式断言 `DEGRADED:manual-fallback=1` 仍被打印。
+  - **(ii) 扫描位置写死**：`orchest finish` 的 manual-fallback 扫描置于 **step 3（异常恢复循环，含 `orchest.py:1523-1525` 的"产物无法解析"早退）之后、step 3.5（`:1549`）之前**，位于归档（步骤 7，`:1656-1662`）之前；故 `tests/test_loop_a_coverage.py:275` 先在步骤 3 fail，`:277-278` 的 `assertIn("产物无法解析", combined)` 保持；`:289` 前 `attempts.md` 已在 `:283-284` 覆写，两处 finish 均无需 `--acknowledge-manual-fallback`。
+  - **(iii) `--dry-run` 语义择一写死：生效**。插入点位于 dry-run 早退分支（`orchest.py:1628`）之前，故 dry-run 下同样打印 `DEGRADED:manual-fallback=N` 且缺 `--acknowledge-manual-fallback` 时非零退出；扫描只读，dry-run"零写入"不变量不受影响。`finish` 子命令 parser（`:1820-1828`）新增该 boolean 开关。
+- Rejected alternatives：拒绝 scan 放在 step 3 之前（会打断 `test_loop_a_coverage.py:275-278`）；拒绝 dry-run 豁免（会使 `:425` 的 D3 验收不可判定，且与 N1-i 要求 `:425` 补确认相矛盾）；拒绝不枚举 `:425`/`:438` 而留给 executor 运行时自行决定。
+- Upstream scope check: 实核 `tests/test_orchest.py:405-452`（`TestFinishRecoveryCancelledSettle`：`:413` settle、`:425`/`:438` finish、`:426`/`:439` `assertEqual(rc,0)`）、`tests/test_loop_a_coverage.py:257-291`（`:263` settle、`:275`/`:289` finish、`:277-278` 断言、`:283-284` 覆写）、`scripts/orchest.py:1440-1672`（finish 步骤 0→8 与 `:1628` dry-run 早退）。结论：按上处置可机械达成"全量测试绿"，无范围外文件。
+- Diff: plan:94-97（D3 归档显式降级三项写死）、plan:113（File Matrix `tests/test_orchest.py` 行）、plan:116（`tests/test_loop_a_coverage.py` 行说明）、plan:135-136（Phase 4/5）、plan:142（Acceptance 第 2 条）、新增附录 A（穷举扫描）。
+- R4 verdict: 待评（本轮修订后重评）
+
+## Round 4 attempt · issue N2（非阻断 · wording）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "`EXIT_USAGE` 不是现有常量。实核 `budget_gate.py:46-56` 无 `EXIT_USAGE`（现有 PROCEED=0 / BLOCK 10-15 / MODE_SWITCH=20 / DENY 21-22 / FAIL_CLOSED=30）。"
+- Issue 归因（reviewer 判定）: plan_defect（措辞/实现细节）
+- plan_amendment_required: true
+- Approach: 采纳单选——改为**新常量 `EXIT_USAGE = 2`**（加入 `budget_gate.py` 退出码区 `:46-56`，与 `argparse` 用法错误退出码一致）；"两者同传 → 用法错误（新常量 `EXIT_USAGE = 2`，零 ledger 写入）"。
+- Rejected alternatives：拒绝保留未定义常量名；拒绝改用"argparse 自动 exit 2"而不落常量（无法静态断言）。
+- Upstream scope check: 实核 `budget_gate.py:46-56` 退出码集合。
+- Diff: plan:91。
+- R4 verdict: 待评
+
+## Round 4 attempt · issue N3（非阻断 · wording）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "`finish --evidence-mode` 的缺省值未明写。若照搬 `reserve-round`/`register-round` 的 `default=\"metadata-only\"`（`orchest.py:1766`/`:1789`），缺省恒被覆盖、继承失效。"
+- Issue 归因（reviewer 判定）: plan_defect
+- plan_amendment_required: true
+- Approach: 采纳单选——D1 第 3 点明写 **`default=None`（哨兵值）**，`None ⇒ 继承 started 的 `prompt_evidence.evidence_mode`；`--evidence-mode` 仅显式覆盖；并注明不得沿用 `reserve-round`/`register-round` 的 `default="metadata-only"`。
+- Rejected alternatives：拒绝缺省 `metadata-only`（会使继承失效）；拒绝无缺省（argparse 必填会破坏既有 finish 调用）。
+- Upstream scope check: 实核 `orchest.py:1766`/`:1789`（reserve/register 默认）与 `:1820-1828`（finish parser 无 `--evidence-mode`）。
+- Diff: plan:58。
+- R4 verdict: 待评
+
+## Round 4 attempt · issue N4（非阻断 · wording）
+- source: converge_loop
+- reviewer_backend: fresh-independent
+- Issue: "plan:108 把 `tests/test_budget_gate.py:2015` 称作 'reserve/settle helper'。实核 `:2015` 是 `_companion_for`（内部 `run(\"reserve\", …, \"--companion-for\", …)`），非 `reserve`/`settle` helper。"
+- Issue 归因（reviewer 判定）: plan_defect（措辞）
+- plan_amendment_required: true
+- Approach: 采纳单选——File Matrix 改为"既有直调 `reserve` helper（`:40`）、`settle` helper（`:47`）、`:715`、`_companion_for`（`:2015`，内部 `run(\"reserve\", \"--companion-for\", …)`，非 `reserve`/`settle` helper）"。
+- Rejected alternatives：拒绝保留"reserve/settle helper"笼统措辞。
+- Upstream scope check: 实核 `tests/test_budget_gate.py:39-53`（helper `reserve`/`settle`）与 `:2014-2017`（`_companion_for`）。
+- Diff: plan:112。
+- R4 verdict: 待评
+
+## Round 4 · 穷举扫描（本轮的硬要求）
+
+- 目的：一次断掉"每轮再冒一个受影响测试点"的循环；独立执行全仓库扫描，结果作为 plan.md 附录 A。
+- 扫描命令（原文，与 plan.md 附录 A.0 一致）：
+
+```
+rg -n --no-heading -e '"reserve"' -e '"settle"' -e '"ingest-verdict"' -e '"summary"' \
+  -e "'reserve'" -e "'settle'" -e "'ingest-verdict'" -e "'summary'" \
+  -e 'reserve_round' -e 'cmd_reserve' -e 'cmd_settle' tests/ scripts/ --glob '*.py'
+rg -n --no-heading -e 'reserve-round' -e 'register-round' -e 'cancel-round' \
+  -e '"finish"' -e "'finish'" -e '\.finish\(' -e 'def finish' tests/ scripts/ --glob '*.py'
+rg -n --no-heading -e 'def run_gate' -e 'def _run_gate' -e 'def run_cli' -e 'run_cli\(GATE' \
+  -e 'run_gate\(' -e '_run_gate\(' -e 'GATE =' -e 'ORCHEST =' -e 'def run_orchest' tests/ scripts/ --glob '*.py'
+rg -n -i 'finish|orchest' tests/test_budget_gate.py tests/test_ocsr_spawn_adapter.py
+rg -n 'blind-reviewer' tests/*.py
+rg -n 'round_no=[2-9]|--round", "[2-9]|--target-round", "[2-9]|rnd=[2-9]' tests/*.py
+```
+
+- 逐条判定方法：对每个直调 `reserve`/`settle`/`finish` 点实开文件核对角色/scope/`target_round`/产物是否落盘/`attempts.md` 是否含 `[manual-fallback]`，判 **D2 漂移门**（scope ∈ {outer,blind} 且 `target_round ≥ 2` 且不落产物）、**D3 声明门**（裸 reserve/settle）、**D3 finish 降级**（finish 前 attempts.md 含 `[manual-fallback]`）。
+- 扫描摘要（详见 plan.md 附录 A.1-A.4）：
+  - **D2 受影响**：仅 `tests/test_budget_gate.py` 的 4 条用例 5 个调用点（`:90`/`:92`/`:102`/`:236`/`:246`），与 plan:108/plan:129 既有枚举一致，**无新增**；其余 9 个 outer/blind `target_round ≥ 2` 直调/编排点均判"否"（已落产物、或 `validate_integrity`/重复 rid 先失败、或 driver 由 `next_round` 推导）。
+  - **D3 声明门受影响**：A.2 所列全部直调 `reserve`/`settle`（`test_budget_gate.py:40`/`:47`/`:715`/`:2015`、`test_converge_loop.py:1064`、`test_ocsr_spawn_adapter.py:446`/`:723`/`:737`/`:835`/`:846`/`:882`、`test_loop_a_coverage.py:263`/`:800`、`test_orchest.py:413`），全部已在 Exact File Matrix 授权文件内；`ingest-verdict`/`summary` 不设门。
+  - **D3 finish 降级受影响**：仅 `tests/test_orchest.py:425`/`:438`（`:413` 落 1 条 `[manual-fallback]`）；`tests/test_loop_a_coverage.py:275`/`:289` 分别因"步骤 3 先失败"与"attempts.md 覆写"判否；`tests/test_budget_gate.py`/`test_ocsr_spawn_adapter.py` 无 `orchest finish`（rg 命中 0）。
+  - **范围外点**：**无**；所有受影响点均在授权文件内。
+  - **不可机械保证项（显式标出）**：`tests/test_orchest.py:625`/`:663` 依赖 out-of-repo fixture（`KB_VAULT_ROOT/.meta/converge/done/20260815-embeddings-cleanup`，skip-if-absent）；本轮实核该 fixture `attempts.md` **0 条** `[manual-fallback]`，故当前不受影响；若 fixture 将来替换为含 `[manual-fallback]` 的对象则需 `--acknowledge-manual-fallback`，属 out-of-repo 数据变更，不在授权范围，已显式记录。
+- Upstream scope check: 实核 `budget_gate.py:139`（`CONTIGUOUS_SCOPES = ("outer","blind")`）、`:1018`/`:1030-1043`（cmd_reserve 次序）、`:1167-1171`（cmd_settle/Lock）、`orchest.py:548-665`（reserve-round 官方路径）、`:1440-1672`（finish）、`converge_loop.py:331-333`/`:453-477`（next_round/Driver.reserve）。
+- Diff: plan.md 新增"附录 A"整节；本 attempts.md 本节。
+- R4 verdict: 待评
+
+## Round 4 · 附带 bookkeeping（非评议项）
+- source: converge_loop
+- reviewer_backend: n/a
+- Issue: 保持产物身份自洽与溯源完整：前三轮修订均在 plan frontmatter `source_evidence` 追加当轮评议文件。
+- Issue 归因: plan_bookkeeping
+- plan_amendment_required: false
+- Approach: plan:14 追加一行 `round-4.md（R4 评议，阻断 N1 + 非阻断 N2/N3/N4）`。不改动其他 frontmatter 字段。
+- Diff: plan frontmatter `source_evidence`。
+- R4 verdict: n/a
+
+---
+
+# Implementation attempts（实施子计划 A：O2 + O4 + O7；round-5 verdict=可执行）
+
+> source: converge_loop · implementation executor（fresh、跨厂商）· 仓库 HEAD `529e691`。
+> 本工作仅改 Exact File Matrix 授权文件；**未触碰 `refs/*`**（升级闸门未触发）；
+> `.converge/` 仅追加本 attempts.md。采用 TDD（先红后绿）。
+
+## Phase 1 · 直调记账命令与编排调用点扫描（round-2 B6 / plan 附录 A）
+
+在 HEAD 工作树（`529e691`）上执行 plan 附录 A.0 的全部 grep/rg 命令并逐条实开文件核对。结果与 plan 附录 A.1–A.5 **逐条一致**：
+
+- **scripts/ 侧记账调用点**：`orchest.py`（`_gate` 定义、`_settle_te_companion_for_continue`、`cmd_reserve_round`、`cmd_register_round` 两处 settle、`cmd_cancel_round` 两处 settle、`cmd_record_verdict` 的 ingest-verdict）与 `ocsr_spawn_adapter.py`（`_gate_reserve`/`_gate_settle`/`_ensure_te_companion`）。经编排 → 本轮统一由 `_gate`/适配器注入 `--orchest-managed`；`ingest-verdict` 不注入、不设门（B5）。
+- **tests/ 侧直调记账子命令**：`test_budget_gate.py:40`（reserve helper）、`:47`（settle helper）、`:715`、`:2015`（`_companion_for`）；`test_converge_loop.py:1064`；`test_ocsr_spawn_adapter.py:446/:723/:737/:835/:846/:882`；`test_loop_a_coverage.py:263`（`run_gate("settle")`）与 `:800`（subprocess settle）；`test_orchest.py:413`。全部补 `--manual-fallback <reason>`。`ingest-verdict`（`test_budget_gate.py:233/:243/:304/:309/:312/:883`）与 `summary`（`:741/:1903/:1928`、adapter `:421`、loop_a `:745/:772`）一律不补。
+- **D2 漂移门判定**：`CONTIGUOUS_SCOPES` 且 `target_round ≥ 2` 的直调点共 4 条用例 / 5 个调用点（`test_budget_gate.py:90/:92/:102/:236/:246`），与 plan:108/129 枚举一致；其余点因已落产物 / `validate_integrity` 先失败 / 重复 rid 先返回 / 或由 `next_round` 推导恒等而判否。
+- **D3 finish 降级判定**：仅 `test_orchest.py:425/:438` 受影响（`:413` 直调 settle 补声明后 attempts.md 落 1 条）；`test_loop_a_coverage.py:275/:289` 因"步骤 3 先失败"与"attempts.md 覆写"判否。
+- **O3 边界记录（非漏网）**：`orchest.py:424`（`_reserve_continue` 的 task-envelope companion）是进程内直接 `budget_gate.append_ledger`，不经 `budget_gate` CLI，故不在 D3 CLI 声明门定义域内；它是 orchest 官方路径内部写入，非"手工裸转移"，计划未列它属正确。
+- **范围外点**：**无**。扫描未发现需补声明却未列入 Exact File Matrix 的文件。
+
+### Phase 1 · 实施中新暴露的受影响点（如实记录，非静默）
+
+独立复扫 + 实跑发现 plan 附录 A.3 **遗漏一处 D2 受影响点**：`tests/test_ocsr_spawn_adapter.py::TestBudgetAccounting.test_outer_scope_reservation_blocks_at_ceiling`（`:376-401`）经适配器以 `outer-reviewer` 预约 round 1..9，但 fake ocsr 把产物写到 `output_dir`（非 active 根），故 `realized_round_numbers` 恒空、`next_contiguous_round` 恒 1；D2 漂移门会在 round≥2 时 fail-closed，用例必红，与 Acceptance"全量测试绿"冲突。
+
+- 处置：该文件已在 Exact File Matrix 授权范围内（D1/D3 行），故按与 `tests/test_budget_gate.py` 既有适配 **同类的 fixture 适配** 处理——让该用例的产物落到 active 根（`output_dir=str(self.active)`），使预约号钉定成立，同时保持用例原意（outer scope 到 ceiling 时 BLOCK；events=16、`observed_usage=8` 断言不变）。
+- 性质：**plan 枚举缺口**（非授权文件缺口）；未新增文件、未改 `refs/*`、未触发升级闸门。已在实施报告中显式列为偏差。
+
+## Phase 2 · O4/D2 实施记录
+
+- `budget_gate.py` 新增单一权威 helper：`next_contiguous_round(active, scope)` = `max(realized_round_numbers)+1`（无产物 1）；`contiguous_missing(active, scope)` = 缺口整数列表唯一实现。
+- `validate_integrity` 的顺序 scope 连续编号检查改为复用 `contiguous_missing`（行为不变：非空且缺号 → `round_gap:{scope}`）。
+- `cmd_reserve` 新增漂移门，执行次序 **`validate_integrity` → `canonical_round` → 重复 rid → 漂移门 → `double_target` → 预算裁决 → `MODE_SWITCH`**；违反 → `FAIL_CLOSED:target_round_drift:<scope>`（零 ledger 写入）。
+- `orchest._finish_step1_missing` 改为复用 `budget_gate.contiguous_missing`（orchest → budget_gate 单一来源）。
+- `tests/test_budget_gate.py` 既有用例适配：`test_outer_boundary` 落 `round-1.md`/`round-2.md`；`test_failed_releases_scope` 第二预约为 `rnd=1` 且**不落产物**；`TestModeSwitch` 两条在 `rnd=3` 前落 `round-1.md`/`round-2.md`；`test_duplicate_reservation_id_blocked` fixture 不变（重复 rid 先于漂移门）。
+- 新增回归：跳号被拒（零 ledger）、`pre_execution` 取消重用轮号、实质内容取消不重用、(a)/(b) 两段缺口断言（`contiguous_missing` 列表 + `validate_integrity` 抛 `round_gap:outer` + `_finish_step1_missing` 返回 `["round-2.md"]`）。
+
+## Phase 3 · O2/D1 实施记录
+
+- `orchest._reserve_continue` begin 写出点：`"--evidence-mode", getattr(args, "evidence_mode", "metadata-only")`（可声明）。
+- `orchest` reserve dry-run 展示串：联动 `args.evidence_mode`（不再写死）。
+- `orchest finish`：新增 `--evidence-mode`（`default=None` 哨兵，不得沿用 `default="metadata-only"`）；步骤 3 崩溃恢复 complete 缺省继承对应 `invocation-started` 的 `prompt_evidence.evidence_mode`，`--evidence-mode` 仅显式覆盖。
+- `ocsr_spawn_adapter.py`：`args.evidence_mode` 透传保持；只补默认策略文档（CLI default metadata-only）。
+- `converge_loop.py`：loop-spec 顶层新键 `evidence_mode`（默认 `metadata-only`，`validate_spec` 用 `archive_contract.model.EVIDENCE_MODES` 校验）；`Driver.reserve`/`Driver.register` 透传；不使用 meta 通道。
+- `scripts/README.md`：单源记录"默认 metadata-only / material 必需 exact / finish 恢复缺省继承 started / converge_loop 顶层键"。
+
+## Phase 4 · O7/D3 实施记录
+
+- `budget_gate.py`：新常量 `EXIT_USAGE = 2`；`_check_source_declaration` 要求 `reserve`/`settle` 恰好一个来源声明（`--orchest-managed` / `--manual-fallback <reason>`）；两者皆无 → `FAIL_CLOSED:naked_state_transition`（EXIT_FAIL_CLOSED，零 ledger）；两者同传 → `USAGE:conflicting_source_declaration`（EXIT_USAGE=2，零 ledger）。
+- 门位置：`reserve` 门置于 `cmd_companion_for` 分派**之前**；`settle` 门置于进入 `Lock` **之前**；`ingest-verdict` **不设门**。
+- `--manual-fallback` 时 append-only 落一条 `[manual-fallback]` bullet 到 `attempts.md`（命令 + reason + reservation_id + ts；文件不存在时创建）。
+- `orchest._gate` 对 `reserve`/`settle` 注入 `--orchest-managed`（`ingest-verdict` 不注入）；`ocsr_spawn_adapter.py` 的 `_gate_reserve`/`_gate_settle`/`_ensure_te_companion` 同级注入。
+- `orchest finish`：新增 `--acknowledge-manual-fallback`；在**步骤 3 之后、步骤 3.5 之前**扫描 `attempts.md` 的 `[manual-fallback]`，命中即打印 `DEGRADED:manual-fallback=N`，缺确认则停止（零归档写入）；**`--dry-run` 下同样生效**（扫描位于 dry-run 早退之前）。
+- 测试适配：`test_orchest.py:413` 补 `--manual-fallback`；`:425`（dry-run）/`:438`（real）两条 finish 补 `--acknowledge-manual-fallback` 且断言 `DEGRADED:manual-fallback=1`；新增"缺确认被拒"用例。`test_loop_a_coverage.py:263`/`:800`、`test_ocsr_spawn_adapter.py`、`test_converge_loop.py`、`test_budget_gate.py` 的直调点全部补声明。
+- 静态防回退（`tests/test_process_controller_contract.py`，按函数/调用点锚定）：orchest 两个 exact 写出点不得回退字面量 `metadata-only`（含负例：`_validate_material_gate` 读取侧默认值、adapter CLI 默认均不误伤）；`finish --evidence-mode default=None`；adapter/converge_loop 透传；来源声明门位置与 `ingest-verdict` 不设门；`_gate`/adapter 注入 `--orchest-managed`；reserve/settle 直调文件集合 ⊆ 授权文件。
+
+## Phase 5 · 测试与静态检查结果
+
+- 定向（关键文件）：`tests/test_budget_gate.py` **170 passed**（4 subtests）；`tests/test_orchest.py` + `tests/test_process_controller_contract.py` **42 passed, 3 skipped**；`tests/test_ocsr_spawn_adapter.py` + `tests/test_converge_loop.py` + `tests/test_loop_a_coverage.py` + `tests/test_continue_extension.py` **134 passed**。
+- 全量（长路径 TEMP/TMP）：`450 passed, 5 skipped`（基线）→ 实施后 **478 passed, 5 skipped, 11 subtests passed**（新增/适配测试净 +28）。
+- `py_compile`（10 个改动文件）：OK。
+- `git diff --check`：无空白/行尾错误（exit 0）。
+- D3 定向：`TestFinishRecoveryCancelledSettle` 两条 finish（dry-run/real）带 `--acknowledge-manual-fallback` 绿且 `DEGRADED:manual-fallback=1` 命中；`test_loop_a_coverage.py` 步骤 3「产物无法解析」断言仍先发生；`ingest-verdict` 直调不受门禁影响。
+
+## Phase 6 · 治理边界
+
+未触发升级闸门：`refs/orchestrator-guide.md` / `refs/state-schema.md` 未修改；`SKILL.md`、`CONSTITUTION.md`、`archive_contract/*` 未修改。规范依据为 `refs/orchestrator-guide.md:232` 既有禁令 + `SKILL.md:215` 既有 `[manual-fallback]` 义务（脚本化执行，不新增规范句）。
+- [manual-fallback] settle reservation_id=871cc12196b2 reason=in-flight adapter process was the pre-change version; budget_gate D3 declaration gate landed mid-dispatch, so the running adapter's settle was rejected; orchestrator completed settlement manually; product attempts.md landed (56620B), full suite 478 passed ts=2026-09-11T16:59:20.617204+00:00
+
+---
+
+## Phase 5 · 独立审计结论
+
+> source: fresh-independent（对抗式，未参与计划编写与实施）· 仓库 HEAD `529e691` · 只读审计（仅运行测试/命令）
+> 报告全文：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-audit.md`
+
+- **verdict: 通过**（无阻断项；8 条非阻断观察）
+- **blocking：0**。范围纪律、语义守恒、D1/D2/D3、Acceptance 1–5 全部 PASS。
+- **独立复跑全量**：`TEMP/TMP=Temp python -m pytest tests -q` → **478 passed, 5 skipped, 11 subtests passed in 280.23s**（失败 0；与实施者自述 478/5/11 逐项一致）。`tests/test_process_controller_contract.py -k OpEnvelope` → 8 passed, 7 deselected。基线 `450 passed` 未独立复现（复现需回退工作树，超出只读边界）。
+- **核实要点**：`git status --short` 仅 Matrix 内 11 文件；`refs/*`/`SKILL.md`/`CONSTITUTION.md`/`scripts/archive_contract/*` 零改动；`realized()/pending()/effective_usage()`（`budget_gate.py:572/576/592`）无 hunk；`cmd_reserve` 次序 `validate_integrity→canonical_round→重复 rid→漂移门(:1112-1117)→double_target→预算→MODE_SWITCH`；`finish` 扫描位于步骤 3 后、步骤 3.5 前且 dry-run 生效。
+- **非阻断观察摘要**（详见报告 §N1–N8）：
+  - N1（高可见）：`orchest.py:1566` 以子串 `count("[manual-fallback]")` 计数，本对象 attempts.md 实含 13 处字面量（仅 1 条 bullet），真实 finish 将报 `DEGRADED:manual-fallback=13`，N 失真（fail-safe，但建议按 `^[ \t]*- \[manual-fallback\]` 正则计数）。
+  - N2：`contiguous_missing`（`budget_gate.py:930-932`）丢失对别名重复（`round-01.md`+`round-1.md`）的 `round_gap` 检测，极边缘。
+  - N3/N4：`test_reserve_dry_run_display_is_parameter_linked` 仅负例断言；直调扫描正则 `["'](reserve|settle)["']\s*,\s*["']--active-dir["']` 可被换参数次序/f-string 绕过。
+  - N5：`_check_source_declaration` 在裁决前写披露 bullet，失败的 reserve/settle 也留 `[manual-fallback]`。
+  - N6：`test_converge_loop._driver_with_capture` 在 `TemporaryDirectory` 退出后返回 driver（仅靠 stub `_orchest` 幸存）。
+  - N7：`docs/plans/active/` 4 个未跟踪计划文档（mtime 早于实施完成、内容为 R1 前旧版/伞形索引，非本次实施产物）不在 Matrix 且未被 gitignore。
+  - N8：out-of-repo vault 侧驱动器（`refs/orchestrator-guide.md:536`）须先适配 `--manual-fallback`，否则真实运行将 `FAIL_CLOSED:naked_state_transition`——最值得担心的运行期风险。
+- **最值得担心的 1–2 点**：(1) out-of-repo 驱动器未适配即被 D3 门禁 fail-closed（部署期即时爆发）；(2) `[manual-fallback]` 计数过宽导致 DEGRADED 门在被规划正文引用的对象上持续误触发、N 失真。

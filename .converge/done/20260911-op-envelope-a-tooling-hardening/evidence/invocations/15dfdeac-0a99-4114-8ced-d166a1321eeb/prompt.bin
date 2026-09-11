@@ -1,0 +1,36 @@
+# Task: 子计划 A 计划 · 第 4 轮 fresh 独立评议
+
+你是本收敛对象的 fresh 独立 Reviewer（跨厂商，与前几轮无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读，不得修改任何文件。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（刚经第 3 轮修订）
+
+## 必读
+
+1. 上述 `plan.md`
+2. 同目录 `round-3.md`（上轮：唯一阻断 P1 + 非阻断 P2/P3/P4，第四节给出最小修订）
+3. 同目录 `round-1.md`、`round-2.md`、`attempts.md`
+4. 代码事实：`scripts/budget_gate.py`、`scripts/orchest.py`、`tests/test_budget_gate.py`、`tests/test_loop_a_coverage.py`、`scripts/converge_loop.py`、`scripts/ocsr_spawn_adapter.py`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`CONSTITUTION.md`
+
+## 评审重点
+
+1. **P1 是否闭合**：`tests/test_budget_gate.py` 受影响既有用例（`test_outer_boundary`、`test_failed_releases_scope`、`test_duplicate_reservation_id`，以及任何其他直调 reserve 且不落产物的用例）是否已被显式枚举并规定更新方式；新门禁与既有"重复 rid 校验/预算裁决"的执行次序是否明确且能保住既有期望（尤其 `FAIL_CLOSED:duplicate_reservation_id`）；"全量测试绿"是否可达。请**自行 grep** `tests/` 找全直调 `reserve`/`settle` 的用例，核对是否仍有遗漏（这是 P1 的实质要求，不接受只列三条）。
+2. **P2/P3/P4 是否落实**且表述准确。
+3. **是否引入新缺陷**（符号名/行号逐条实开核对）。
+4. **可执行性**：Phase 序列 bounded、每步产物与验证明确；Acceptance 条条可机械判定。
+5. **收窄合法性**：是否仍不触碰 `CONSTITUTION.md` 第三部规范句。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-a-tooling-hardening\round-4.md`
+
+必须包含：
+- 首行 verdict：`可执行` 或 `阻断需修复`
+- 前置自检逐项结论
+- P1-P4 确认清单（yes/no + 文件:行 证据）
+- 若仍有问题：编号 + 级别 + 证据 + **单选**建议
+- 若 `可执行`：实施前必须满足的前置条件清单（可为空）
+- 结尾：是否需升级 ultraverge（是/否 + 理由）
+
+判定纪律：全部 blocking 闭合、无自相矛盾、行号符号实核准确、Acceptance 可机械判定 → 给 `可执行`。不为凑问题把 wording 升为阻断，也不因"改了很多轮"而放行。

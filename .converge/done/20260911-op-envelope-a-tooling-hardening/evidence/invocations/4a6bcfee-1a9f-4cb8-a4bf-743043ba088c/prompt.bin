@@ -1,0 +1,51 @@
+# Task: 修订子计划 A 计划（响应评议阻断 B1-B4）
+
+你是本收敛对象的 Plan Executor（fresh、跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8 读写；不得执行 git 写操作。
+
+## 输入（必读）
+
+1. `C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（待修订）
+2. 同目录 `round-1.md`（fresh Reviewer 的评议结论与逐条证据）
+3. `CONSTITUTION.md`（第三部治理文档清单、第四部修改程序）
+4. 事实核验：`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`scripts/README.md`、`refs/state-schema.md`、`refs/orchestrator-guide.md`
+
+## 编排层的范围决定（必须遵守）
+
+为把本计划保留在 **standard-review**，按评议 B1 给出的分支执行**收窄**：
+
+- **D3（O7）只做脚本机制**：允许在 orchest/budget_gate 层实现"裸状态转移被拒绝或强制 `[manual-fallback]` 声明 + 归档显式降级"，**不得**新增/修改 `refs/orchestrator-guide.md` 或 `refs/state-schema.md` 的规范句。
+- **D2（O4）不得引入新的 ledger 事件类型或 state 字段**（与 Non-Goals 对齐）。
+- 计划必须新增一条**升级闸门**：若实现中发现必须改 `refs/*`（`CONSTITUTION.md` 第三部清单）才能成立，**停止并交回升级 ultraverge**，不得自行扩范围。
+- 由此，Exact File Matrix 中 `refs/orchestrator-guide.md` / `refs/state-schema.md` 两行改为"不修改（若需要则升级）"。
+
+## 必须修复的阻断
+
+- **B1**：边界未决 → 按上面收窄落定 `review_mode: standard-review`，并把 D3 的规范句归属显式移出本计划（作为 Non-Goal / 升级条件）。
+- **B2**：连续编号不变量**两处实现**——`scripts/budget_gate.py`（validate_ledger）与 `scripts/orchest.py`（`_finish_step1_missing`，被 finish 步骤 1 调用）。文件矩阵必须同时覆盖两处（或明确 single-source 方案：让一处复用另一处的判定，并说明调用方向），并给出"两处一致"的回归测试。
+- **B3**：**重写 O4 的诊断与方案**。评议已证伪原诊断：
+  - 连续编号检查基于**文件系统产物**（`budget_gate.py` 的 `realized_round_numbers` 对 SCOPE_PRODUCT glob），**不读 ledger**，`cancelled` 并不"占号"；
+  - `cancelled` 仅在 `double_target` 判定被跳过（预算预约侧）；
+  - r2 的 `round_gap:outer` 真因是**预约 target_round 与产物文件名的错位**（成功预约 target_round {1,2,4,5}，落盘产物 round-1..4，操作者把 in-flight 的 round-5.md 归位为 round-4.md 才绕过）；
+  - 因此"改用成功结算的轮次集合"会**更不连续**，且可能放松"忘写 round-N.md"这一既有不变量（`orchest.py` 模块 docstring 明确该检查防此错）。
+  - 修订后必须**选定唯一方案**（不得用"或"并列两个未选定方案），并明确它如何消除"预约轮号 vs 产物名"错位根因、且不放松既有不变量。若判定无法在不改 state/ledger 语义的前提下成立，则把 D2 降级为"仅记录、本计划不实现"并说明理由。
+- **B4**：D1 的默认值前后矛盾（决策节"默认 metadata-only，material/终局相关轮必须 exact" vs Risks 节"默认 exact"）。统一为一处表述：**默认 metadata-only；material/终局绑定相关轮由调用方显式传 exact**。
+- **事实修正**：删除/替换过期行号（评议给出实际位置：`orchest.py` 写出点为 `_reserve_continue`、`reserve-round` dry-run 展示串、以及 **finish 步骤 3 崩溃恢复的 complete-invocation**；透传点为 spawn 主路径 getattr 写法；CLI 定义在新行号；`converge_loop.py` 目前**完全没传** `--evidence-mode`）。计划中优先用**符号名**而非行号，行号须与当前文件一致。
+- **补漏路径**：`orchest.py` finish 崩溃恢复的 metadata-only 写出点必须被点名并纳入方案（它无法经 CLI 参数声明，需给出明确处置：改为显式 exact 或论证保持 metadata-only 并说明为何不冲突）。
+
+## 产物（必须真实写入）
+
+1. **修订后的** `...\20260911-op-envelope-a-tooling-hardening\plan.md`（原地覆盖）。
+2. **新建/追加** `...\20260911-op-envelope-a-tooling-hardening\attempts.md`：
+   - 按 `refs/state-schema.md` §二 Attempt Log 的字段格式；
+   - 逐条记录 round-1 的 blocking（含 `Issue 归因: plan_defect`、`plan_amendment_required`、`Approach`、`Rejected alternatives`、`Upstream scope check`、`Diff`、`R1 verdict`）；
+   - 追加本轮"计划修订"条目（source: converge_loop）。
+3. 过程报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-revision-report.md`（列出改动点与 B1-B4 逐条处置）。
+
+## 边界
+
+- 只改上述两个文件；不得改任何脚本、测试、治理文档、其他 `.converge` 内容。
+- 不实现代码；本任务只改计划。
+
+## 回执
+
+给出：plan.md 的新 SHA-256 与字节数、B1-B4 逐条处置、你选定的 O4 方案一句话、以及是否需要升级 ultraverge（应当为"否"，除非你论证无法收窄）。

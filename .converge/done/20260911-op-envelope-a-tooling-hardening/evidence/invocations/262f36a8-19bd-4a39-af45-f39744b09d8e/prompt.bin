@@ -1,0 +1,40 @@
+# Task: 子计划 A 计划 · 第 3 轮 fresh 独立评议
+
+你是本收敛对象的 fresh 独立 Reviewer（跨厂商，与 plan 作者及前两轮 reviewer 无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读，**不得修改任何文件**。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（当前 25,006 B，SHA-256 前缀 `88c17e5fd3ce9a2b`）
+
+## 必读
+
+1. 上述 `plan.md`
+2. 同目录 `round-1.md`、`round-2.md`、`attempts.md`
+3. `CONSTITUTION.md`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`SKILL.md`
+4. 代码事实：`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`tests/test_loop_a_coverage.py`、`scripts/archive_contract/model.py`
+
+## 评审重点
+
+1. **B5-B8 是否真正闭合**（逐条 yes/no + 文件:行 证据 + 原文）：
+   - B5：`ingest-verdict` 是否已彻底移出 D3 声明门，且计划不再宣称会改 `refs/*`；reserve/settle 的规范依据是否为既有句（guide:232 / SKILL.md:215）。
+   - B6：`tests/test_loop_a_coverage.py` 是否入矩阵，其 settle 调用点是否都被点名并给出合法声明注入；直调 gate 记账命令的扫描义务是否可执行。
+   - B7：`_ensure_te_companion` 是否入 D3 注入点，声明门相对 `cmd_companion_for` 的位置是否明确（必须之前）。
+   - B8：`validate_ledger` 是否已全部改为 `validate_integrity`；若引用归档契约函数是否用全限定名。
+   - S1-S5 是否按单选建议落实（特别 S5 的"继承 invocation-started 的 evidence_mode"）。
+2. **是否引入新缺陷/新矛盾**（行号与符号是否与 HEAD 一致——前两轮均因此被阻断，请逐条实开文件核对）。
+3. **可执行性**：Phase 序列是否 bounded、每步有明确产物与验证；Acceptance 每条是否可机械判定（命令+期望）。
+4. **收窄合法性复核**：是否仍会触碰 `CONSTITUTION.md` 第三部清单内规范句（若会，必须升 ultraverge，指出具体行）。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-a-tooling-hardening\round-3.md`
+
+必须包含：
+- 首行 verdict：`可执行` 或 `阻断需修复`
+- 前置自检逐项结论
+- 逐条问题：编号 + 严重级别 + 文件:行 + 原文 + 影响 + **单选**建议
+- B5-B8 与 S1-S5 确认闭合清单（yes/no + 证据）
+- 若 `可执行`：给出"实施前必须满足的前置条件"清单（可为空）
+- 结尾：是否需升级 ultraverge（是/否 + 理由）
+
+判定标准：只有当全部 blocking 闭合、无自相矛盾、行号与符号经实核准确、Acceptance 可机械判定时才给 `可执行`。不得因"看起来改好了"而放行；也不得为凑问题而把 wording 级问题升为阻断。

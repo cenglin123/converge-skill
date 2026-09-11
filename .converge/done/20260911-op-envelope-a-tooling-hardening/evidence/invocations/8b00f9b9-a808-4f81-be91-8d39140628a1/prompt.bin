@@ -1,0 +1,68 @@
+# Task: Converge 评议（deliberate）—— 子计划 A「工具与纪律硬化」
+
+你是一次 fresh Reviewer，对被评议的计划做单轮**评议（deliberate）**。你与实现方跨厂商、fresh context：本对话之外没有共享上下文，所有约束都在本文件与仓库文件中。
+
+## 硬规则
+
+- **只读仓库**，唯一允许写入的文件是：
+  `C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-a-tooling-hardening\round-1.md`
+  必须真实写入该绝对路径（这是派发方监看的唯一产物）；未写入即视为失败。
+- 不得修改 plan.md、源码、测试、`.converge` 其他内容；不得执行 git 写操作（commit/checkout/restore/reset/stash）。
+- 你的知识截止可能早于今天（2026-09）。无法核实的断言标 `[UNCERTAIN]`，不要臆测。
+
+## 被评议对象
+
+`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`
+（子计划 A：修 O2 exact evidence 工具化、O4 轮号语义、O7 手工状态转移约束）
+
+## 必读（按需）
+
+1. 被评议 plan.md（全文）。
+2. `refs/reviewer-prompt.md`（评议模板：5 个设计层前置自检 + 标准输出格式）与 `refs/reviewer-discipline.md`（纪律）。
+3. `CONSTITUTION.md`（尤其第三部治理文档清单与第四部修改程序）。
+4. 事实核验来源：`scripts/orchest.py`、`scripts/budget_gate.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`scripts/README.md`、`refs/state-schema.md`。
+5. 计划中引用的 r2 证据：`.converge/done/20260910-process-controller-consolidation/retrospective.md`、同目录 `attempts.md`。
+
+## 你要判断的（逐个给出结论）
+
+1. **前置自检 5 问**（产物身份自洽 / 边界诚实 / 数据纯度 / 职责边界自洽 / 命名一致性）——按 `refs/reviewer-prompt.md` 定义。
+2. **事实核对**：计划对 O2/O4/O7 的现状描述是否与代码一致？（逐条给 file:line 证据）特别是：`orchest.py` 是否仍有硬编码 `metadata-only` 且哪些路径需要 exact；`budget_gate.py` 的连续编号判定是否确实由文件系统产物驱动、`cancelled` 是否确实占号。
+3. **治理边界分类**：本计划是否触及 `CONSTITUTION.md` 第三部的治理文档（例如是否需要修改 `refs/orchestrator-guide.md` 或 `refs/state-schema.md` 的规范句）？若触及，明确写出"必须升级 ultraverge"；若不触及，说明 D3 只靠脚本机制即可。
+4. **可实现性与范围**：文件矩阵与实施序列是否完整、可执行、无隐藏依赖？是否过度设计或遗漏关键测试？
+5. **回归风险**：D2 改连续编号判定是否可能放松既有不变量；D1 "默认 exact" 是否破坏历史归档只读兼容。
+6. **验收可核验性**：Acceptance 是否机械可验；是否与 Non-Goals 自洽。
+
+## 输出格式
+
+写入的 `round-1.md` 必须包含：
+
+```markdown
+---
+round: 1
+verdict: 可执行 | 阻断需修复 | 需重新设计
+---
+
+## 前置自检
+（5 问逐条：通过 / 不通过 + 一句理由）
+
+## 事实核对
+（逐条 file:line 证据）
+
+## 治理边界判定
+（standard-review 足够 / 必须 ultraverge + 理由）
+
+## Blocking Issues
+（YAML 列表：id/description/severity(conceptual|architectural|structural|implementation)/plan_amendment_required/location；无则空列表）
+
+## Suggestions
+（YAML 列表或"无"）
+
+## 验收核对
+（Acceptance 逐条 pass/fail/uncertain）
+```
+
+`可执行` 要求零 blocking。blocking 必须可由文件/行号或可复现命令支撑；不得以"建议更完善"充当阻断。
+
+## 报告回执
+
+最终回复里给出：verdict、blocking 数、治理边界判定结论、以及你写入文件的绝对路径与字节大小。

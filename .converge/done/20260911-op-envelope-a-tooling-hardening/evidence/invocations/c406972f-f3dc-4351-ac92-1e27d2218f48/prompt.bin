@@ -1,0 +1,32 @@
+# Task: 子计划 A 计划 · 第 3 轮修订（响应 round-3 阻断 P1 + 非阻断 P2/P3/P4）
+
+你是本收敛对象的 Plan Executor（fresh、跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8。不得 git 写操作。本轮是**机械修订**，改动应最小、精准。
+
+## 输入
+
+1. `.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（25,006 B）
+2. 同目录 `round-3.md`（本轮评议；P1 阻断、P2/P3/P4 非阻断、第四节"最小修订"）
+3. 事实文件：`tests/test_budget_gate.py`、`scripts/budget_gate.py`、`scripts/orchest.py`、`refs/orchestrator-guide.md`
+
+## 必须落地的修订（严格按评议单选建议）
+
+- **P1（阻断）**：在 Exact File Matrix 的 `tests/test_budget_gate.py` 行与 Phase 2 中**显式枚举**受影响的既有用例（至少 `test_outer_boundary`（`tests/test_budget_gate.py:85-94`）、`test_failed_releases_scope`（`:96-103`）、`test_duplicate_reservation_id`（`:270-277`）），并写明更新方式：**在这些用例的连续预约之间写入对应 `round-N.md` 产物**（如 `:89` 后写 `round-1.md`、`:91` 后写 `round-2.md`），使 `next_contiguous_round` 与实际预约号一致，且不改变 `effective_usage` 预算语义（依据 `budget_gate.py:550-567`）。门禁**保持在 `budget_gate.cmd_reserve`**。另需明确新门禁与既有"重复 rid 校验 / 预算裁决"的**执行次序**（`test_duplicate_reservation_id` 的期望必须仍是 `FAIL_CLOSED:duplicate_reservation_id`）。
+- **P2（非阻断）**：删除 plan:70 的"（非 `--resume-reservation`）"限定，或改为"（resume 路径不经本命令，见 `orchest.py:594-610`）"，语义落在 orchest 层。
+- **P3（非阻断）**：把"两处给出相同缺口集合"改写为两段式可判定：(a) 断言 `budget_gate.contiguous_missing(active, scope)` 等于预期整数列表；(b) 断言 `validate_integrity` 对同一 fixture 抛 `round_gap:{scope}`、`orchest._finish_step1_missing` 返回与 (a) 对应文件名单。
+- **P4（非阻断）**：在"边界诚实"段补一句：外部参考驱动器（`refs/orchestrator-guide.md:536`，实现在 vault 侧、不在本仓库）须同步以 `--manual-fallback <reason>`（或后续对象改走 `orchest`）适配 D3 门禁；此适配属 out-of-repo，不改本计划文件、不触发升级闸门。
+
+## 质量要求
+
+- 所有新增/改动的符号名与行号必须**实开文件核对**。
+- 不得引入新方案、不得扩大范围、不得改动其他内容。
+- Acceptance 仍须条条可机械判定。
+
+## 产物
+
+1. 原地更新 `plan.md`。
+2. 追加 `attempts.md`：P1-P4 逐条处置。
+3. 报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-revision3-report.md`。
+
+## 回执
+
+plan.md 新 SHA-256 与字节数；P1-P4 处置一句话；确认未改其他内容。

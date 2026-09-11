@@ -1,0 +1,44 @@
+# Task: 子计划 A 计划 · 第 2 轮修订（响应 round-2 阻断 B5-B8 + S1-S5）
+
+你是本收敛对象的 Plan Executor（fresh、跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8。不得 git 写操作。
+
+## 输入（必读）
+
+1. `.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（待修订）
+2. 同目录 `round-2.md`（本轮评议，含 B5-B8 与 S1-S5 的原文证据）
+3. 同目录 `round-1.md`、`attempts.md`
+4. `CONSTITUTION.md`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`SKILL.md`
+5. 代码事实：`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`tests/test_loop_a_coverage.py`、`scripts/archive_contract/model.py`
+
+## 必须按评议的**单选建议**逐条修复（不得另立方案）
+
+- **B5**：把 `ingest-verdict` 从 D3 的声明门集合中**移除**；D3 只覆盖 `reserve` / `settle`。同步修正计划里"D3 覆盖三命令"的表述，并明确保留 reserve/settle 的规范依据是 `refs/orchestrator-guide.md:232` 既有禁令 + `SKILL.md:215` 的 `[manual-fallback]` 义务（**不新增**第三部规范句）。
+- **B6**：把 `tests/test_loop_a_coverage.py` 加入 Exact File Matrix 的 D3 测试行；Phase 中明确对其 `run_gate("settle")`（约 :263）与直接 subprocess settle（约 :800）注入合法声明（手工路径用 `--manual-fallback <reason>`）。并在计划里增加一个**扫描步骤**：实施前用 grep 找出 `scripts/`、`tests/` 中所有直调 gate 记账命令（`reserve`/`settle`/`ingest-verdict`）的位置，逐处决定是否补声明；把扫描结果写入 attempts.md。
+- **B7**：把 `ocsr_spawn_adapter.py:_ensure_te_companion`（约 :296-299 的 `reserve ... --companion-for`）与 `_gate_reserve`/`_gate_settle` 同列为 D3 注入点；并显式规定 `cmd_reserve` 的声明门置于 `cmd_companion_for` 分派（`budget_gate.py:1012-1013`）**之前**，使 companion 路径同受约束。
+- **B8**：把 plan:42/71/72/120 的 `validate_ledger` **全部改为 `validate_integrity`**（`budget_gate.py:843`，连续编号段 :903-907 行号保留）；如需引用归档契约模块的函数，必须写全限定名 `archive_contract.model.validate_ledger`（`:594`）以免误改。
+- **S1**：选定单一来源——loop-spec 顶层新增 `evidence_mode`（默认 `metadata-only`，取值校验 `archive_contract.model.EVIDENCE_MODES`），由 `Driver.reserve`/`Driver.register` 透传 `--evidence-mode`；删除"`spec` 键或既有 meta 通道"的并列表述（不得用 meta 通道承载）。
+- **S2**：`[manual-fallback]` 的出处改引 `SKILL.md:215`，删除对 `refs/state-schema.md §二` 的错误引用。
+- **S3**：改写 plan:24 附近的表述为"D3 的 reserve/settle 部分是对 `refs/orchestrator-guide.md:231/232` **既有强制禁令**的脚本化执行，不新增规范句"，并如实标注 `ingest-verdict` 已被移出（B5）。
+- **S4**：把"取消后重用轮号"的验收句限定为"`pre_execution` / 纯骨架删除路径（`orchest._cancel_skeleton`）下被取消轮号被重用"；并注明已写实质内容的取消不重用轮号。
+- **S5（编排层决定，请采纳）**：`finish` 步骤 3 崩溃恢复的 `--evidence-mode` 缺省**继承对应 invocation-started 的 `prompt_evidence.evidence_mode`**，`--evidence-mode` 仅作显式覆盖。请在 attempts.md 记为"orchestrator decision（采纳 reviewer S5 建议）"。
+
+## 质量要求
+
+- 逐条把计划中所有符号名/行号**实际打开文件核对**（上两轮均因符号名/行号失真被阻断）；优先用符号名。
+- Acceptance 每条必须可机械判定（命令 + 期望输出）。
+- 全篇不得出现"或"并列的未选定方案。
+- D5 表述：D3 门禁失败必须是 fail-closed，并给出明确的错误码/文案（如 `FAIL_CLOSED:naked_state_transition`）。
+
+## 产物
+
+1. 原地更新 `plan.md`。
+2. 追加 `attempts.md`：本轮 B5-B8 逐条处置 + S1-S5 处置 + orchestrator decision（S5）+ 直调 gate 记账命令扫描结果。
+3. 过程报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-revision2-report.md`。
+
+## 边界
+
+只改上述 `plan.md` 与 `attempts.md`；不得改任何脚本、测试、治理文档。不实现代码。
+
+## 回执
+
+plan.md 新 SHA-256 与字节数、B5-B8 与 S1-S5 逐条处置、以及你实际核对过行号的文件清单。

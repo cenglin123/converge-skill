@@ -1,0 +1,14 @@
+{
+  "defaults_version": 2,
+  "config": {},
+  "extensions": [],
+  "fsm": {
+    "mode": "standard",
+    "severities": {
+      "1": [
+        "conceptual",
+        "architectural"
+      ]
+    }
+  }
+}

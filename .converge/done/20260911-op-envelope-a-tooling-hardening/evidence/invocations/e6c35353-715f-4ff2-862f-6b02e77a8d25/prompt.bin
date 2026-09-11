@@ -1,0 +1,45 @@
+# Task: 子计划 A 计划 · 第 4 轮修订（N1 阻断 + N2/N3/N4 精度项 + 穷举扫描）
+
+你是本收敛对象的 Plan Executor（fresh、跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8。不得 git 写操作。本轮目标：**一次断掉"每轮再冒一个受影响测试点"的循环**。
+
+## 输入
+
+1. `.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（30,466 B）
+2. 同目录 `round-4.md`（N1 阻断 + N2/N3/N4 非阻断 + 第五节最小修订）
+3. 事实文件：`tests/`（全量）、`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`refs/state-schema.md`
+
+## 必做修订
+
+- **N1（阻断）** 严格按其单选建议：
+  (i) File Matrix `tests/test_orchest.py` 行与 Phase 4/5 显式枚举 `tests/test_orchest.py:425`（dry-run）与 `:438`（real）两条 `finish` 调用补 `--acknowledge-manual-fallback`，并在该 TestCase 中显式断言 `DEGRADED:manual-fallback=1` 仍被打印；
+  (ii) 在 plan:93 明确 `orchest finish` 的 manual-fallback 扫描位于 **step 3 之后、归档之前**（保住 `tests/test_loop_a_coverage.py:275-278` 的"产物无法解析"先发生）；
+  (iii) 明确 `--dry-run` 下该扫描的语义（生效或豁免，择一写死）。
+- **N2/N3/N4（非阻断）**：按 round-4.md 第四节各自的**单选**建议落实。
+
+## 穷举扫描（本轮的硬要求，必须做）
+
+独立执行一次全仓库扫描，并把它作为**附录表**写进 `plan.md`（或作为 `attempts.md` 的等价表并在 plan 中引用）：
+
+1. 用 grep/rg 找全 `tests/` 与 `scripts/` 中**直调** `budget_gate` 记账子命令（`reserve` / `settle` / `ingest-verdict` / `summary`）的位置；
+2. 找全 `orchest` 的 `reserve-round` / `register-round` / `finish` 调用点（含测试 helper 内部）；
+3. 逐个判定：是否受 **D2 漂移门**影响（scope ∈ CONTIGUOUS_SCOPES 且 target_round ≥ 2 且不落产物）、是否受 **D3 声明门**影响（裸 reserve/settle）、是否受 **D3 finish 降级**影响（finish 前 attempts.md 存在 `[manual-fallback]`）；
+4. 对每个受影响点写出：`文件:行 → 机制 → 是否受影响 → 处置`（补声明 / 补 `--acknowledge-manual-fallback` / 落 `round-N.md` / 无需改）；
+5. 表必须**逐条实开文件核对**，不得凭记忆。
+
+要求：该表覆盖后，不应再存在"未枚举但会被新机制打断"的既有测试点。若有**无法在授权范围内处置**的点，必须显式标出并说明理由（不得静默略过）。
+
+## 质量要求
+
+- 所有符号名/行号实开核对。
+- 不得引入新方案、不得扩范围。
+- Acceptance 条条可机械判定。
+
+## 产物
+
+1. 原地更新 `plan.md`（含穷举扫描附录）。
+2. 追加 `attempts.md`：N1 + N2/N3/N4 处置 + 扫描表摘要 + 扫描命令原文。
+3. 报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-revision4-report.md`。
+
+## 回执
+
+plan.md 新 SHA-256 与字节数；N1-N4 处置；扫描命中的受影响点总数与是否仍有范围外点；确认未改其他内容。

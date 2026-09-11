@@ -1,0 +1,37 @@
+# Task: 子计划 A 审计后修复 · N1（`[manual-fallback]` 计数过宽）
+
+你是 fresh 修复 Executor（跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows/bash）。UTF-8。不得 git 写操作。**只做这一处修复**，改动最小。
+
+## 背景与缺陷（已由独立审计确认）
+
+- 独立审计报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-audit.md`（见其中 N1）。
+- 缺陷：`scripts/orchest.py` 的 `finish` 在扫描 manual-fallback 时以**子串** `count("[manual-fallback]")` 计数（约 `:1566`）。本对象 `attempts.md` 在**正文**里 18 次引用该字面量（真实 bullet 仅 1 条），导致 `DEGRADED:manual-fallback=18`，计数失真、门在"正文引用过该字面量"的对象上持续误触发。
+- 真实 bullet 的格式（由 `budget_gate._record_manual_fallback` 写入）：行首（可含空白）以 `- [manual-fallback]` 开头。
+
+## 修复要求（唯一）
+
+1. 把计数改为**按行锚定**的判定，例如正则 `^[ \t]*- \[manual-fallback\]`（`re.MULTILINE`）；正文引用不再计数，真实 bullet 仍计数。
+2. 在 `tests/test_orchest.py` 增加一条回归测试，断言：
+   - 一份 attempts.md 若仅在正文出现若干次 `[manual-fallback]` 字面量（非行首 bullet）→ `DEGRADED` 计数为 0；
+   - 含 N 条真实 bullet（行首 `- [manual-fallback]`）→ 计数为 N；
+   - 缺失 `--acknowledge-manual-fallback` 时仍拒绝归档、带确认时通过（保持既有语义）。
+3. 不改动任何其它行为；不动 `budget_gate.py` 的 bullet 写入格式；不动其它文件。
+
+## 验证（必须自行执行并报告原文与数字）
+
+```bash
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests/test_orchest.py -q
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q
+python -m py_compile scripts/orchest.py tests/test_orchest.py
+git diff --check
+```
+
+## 产物
+
+- 修改 `scripts/orchest.py` 与 `tests/test_orchest.py`（仅此两个文件）。
+- 追加 `.converge\active\20260911-op-envelope-a-tooling-hardening\attempts.md` 一节 `## Phase 5b · 审计后修复 N1`（说明修复内容 + 测试数字）。
+- 报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-a-n1fix-report.md`。
+
+## 回执
+
+改动摘要；定向与全量测试数字（通过/失败/skipped）；`git status --short` 是否只含这两个文件（相对本轮）。

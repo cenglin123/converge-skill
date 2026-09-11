@@ -1,0 +1,42 @@
+# Task: 子计划 A 计划 · 第 2 轮 fresh 独立评议
+
+你是本收敛对象的 fresh 独立 Reviewer（跨厂商、与 plan 作者及上轮 reviewer 无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读评审，**不得修改任何文件**。UTF-8。
+
+## 受审对象
+
+`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-a-tooling-hardening\plan.md`（刚被 Executor 修订，17,936 B）
+
+## 必读
+
+1. 上述 `plan.md`（当前版本）
+2. 同目录 `round-1.md`（上轮评议：verdict=阻断需修复，B1-B4 + 5 Suggestions）
+3. 同目录 `attempts.md`（Executor 的处置记录）
+4. 仓库 `CONSTITUTION.md`（第三部治理文档清单、第四部修改程序）
+5. 事实核验（凡计划中的行号/符号/行为断言，必须实际打开文件核对）：
+   `scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/ocsr_spawn_adapter.py`、`scripts/converge_loop.py`、`scripts/README.md`、`tests/`（相关用例）、`refs/`（涉及哪些规范句）
+
+## 评审重点（必须逐条给出结论）
+
+1. **B1-B4 是否真正闭合**（不是"提到了"，而是可执行、无自相矛盾、与代码事实一致）。
+2. **收窄决定的合法性**：计划选择"保留 standard-review + 收窄 D1/D2/D3 到脚本机制 + 加升级闸门"，是否真的不触碰 `CONSTITUTION.md` 第三部清单内的规范句？若仍会触，必须升 ultraverge，请明确指出具体行。
+3. **O4 新方案的正确性**：把预约 `target_round` 钉到 FS 推导的下一个连续轮号（`next_contiguous_round`）+ `cmd_reserve` 对 CONTIGUOUS_SCOPES 强制相等 + fail-closed。核对：是否真的消除"预约号 vs 产物名"错位根因；是否放松了既有"忘写 round-N.md"不变量；`double_target` 跳过路径是否仍正确；对已存在的历史 ledger 是否兼容（不得凭空假设，要看 `validate_ledger`/`cmd_reserve` 实现）。
+4. **B2 的 single-source 方案**：`budget_gate.contiguous_missing` 作为唯一权威、`orchest._finish_step1_missing` 与 `validate_ledger` 复用，调用方向 orchest→budget_gate 是否可行（有无循环导入/职责倒置/py_compile 问题）；是否有回归测试覆盖"两处一致"。
+5. **D1 evidence-mode 收口完整性**：对照 `orchest.py` 实际写出点，逐个核对计划清单是否**无遗漏**（重点：finish 崩溃恢复、dry-run 展示串、读取默认值、spawn 主路径 getattr、CLI）；默认策略是否全篇一致；`converge_loop.py` 未传 `--evidence-mode` 是否被纳入。
+6. **验收标准可判定性**：Acceptance 每一条是否可机械验证（命令 + 期望）；有无无法判定的措辞。
+7. **范围纪律**：是否仍存在"一个计划塞多个机制"的灰区；Non-Goals 是否覆盖本计划不做的部分。
+8. **事实与行号**：逐个核对计划引用的行号/符号当前是否准确（上轮曾出现偏差 ~150-180 行）。
+
+## 输出格式（严格）
+
+文件：`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-a-tooling-hardening\round-2.md`
+
+必须包含：
+- 首行 verdict：`可执行` 或 `阻断需修复`（二选一，不得模糊）
+- 前置自检逐项（含"职责边界自洽""命名一致性""事实核验""验收可判定"）
+- 逐条问题：编号 + 严重级别（conceptual / architectural / implementation / wording / evidence）+ 事实证据（文件:行 + 原文）+ 影响 + 建议
+- 确认闭合项清单（B1-B4 逐条 yes/no + 证据）
+- 未决/待人工判断项
+- 结尾：是否建议升级 ultraverge（是/否 + 理由）
+
+若判定 `可执行`，必须同时给出一条明确的"实施前必须满足的前置条件"清单（可为空）。
+不得使用"或"并列多个未选定方案作为建议。
