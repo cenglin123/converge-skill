@@ -108,6 +108,14 @@ class EventLock:
                 except FileNotFoundError:
                     self._unlink_with_retry()
                     continue
+                except json.JSONDecodeError:
+                    # Malformed/partially-written owner data: another writer may have
+                    # created the lock via O_EXCL but not finished writing JSON.
+                    # Fail closed — do NOT delete the lock (that would permit two
+                    # writers into the critical section).
+                    raise ArchiveError("lock-conflict",
+                        "Event lock owner record is malformed; refusing to delete unknown lock.",
+                        self.path.name) from exc
                 raise ArchiveError("lock-conflict", "Another live archive writer owns the event lock.", self.path.name) from exc
             # `O_EXCL` 成功即已独占，所以**先登记再写内容**：若把登记放在 fsync 之后，
             # 中间那段窗口里本进程另一线程会看到「pid 是我、却没人持锁」，判成残骸把

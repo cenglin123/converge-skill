@@ -21,6 +21,7 @@ converge_loop.py — converge 循环驱动器：声明式 loop spec 驱动的派
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -28,6 +29,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+# budget_gate 与本文件同在 scripts/ 目录，脚本入口执行时该目录在 sys.path[0] 上
+import budget_gate  # noqa: E402
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -44,7 +48,8 @@ BLIND_RE = re.compile(r"^blind-recheck-(\d+)\.md$")
 # 20260818 outer 轮号误用事故的机制化防护）
 FORBIDDEN_SPEC_KEYS = {"round", "round_number", "target_round"}
 
-MAX_INNER_LOOPS_DEFAULT = 3
+# v1→v2 迁移时 max_inner_loops 的 driver-local 重试默认值（plan D3）
+_V1_DEFAULT_DRIVER_RETRY = 3
 
 
 class LoopFail(Exception):
@@ -192,6 +197,44 @@ def validate_spec(spec: dict) -> list[str]:
     phases = spec.get("phases") or []
     if not isinstance(phases, list) or not phases:
         errs.append("phases 必须是非空列表")
+
+    # v2: review-repair phase 必须有可达的 fresh outer Reviewer
+    # parallel-review 需要后续 outer-loop；blind-recheck 需要至少一个 outer-loop
+    # （runtime 通过 pending_return 重新进入 blind phase，plan D3 + DR2 highlight #3）
+    if spec.get("version", 1) >= 2:
+        has_any_outer = any(
+            isinstance(ph, dict) and ph.get("type") == "outer-loop"
+            for ph in phases
+        )
+        for i, ph in enumerate(phases):
+            if not isinstance(ph, dict):
+                continue
+            if ph.get("type") == "parallel-review":
+                has_outer_after = any(
+                    isinstance(phases[j], dict) and phases[j].get("type") == "outer-loop"
+                    for j in range(i + 1, len(phases))
+                )
+                if not has_outer_after:
+                    errs.append(
+                        f"v2 spec: phases[{i}] ({ph.get('id')}) 需要后续可达的 "
+                        f"outer-loop phase（fresh outer Reviewer）")
+            elif ph.get("type") == "blind-recheck":
+                if not has_any_outer:
+                    errs.append(
+                        f"v2 spec: phases[{i}] ({ph.get('id')}) 需要至少一个 "
+                        f"outer-loop phase（fresh outer Reviewer）")
+        # Material revision (D8): v2 spec with outer-loop must have blind-recheck
+        # for blank-slate review. A material revision forces a blank-slate phase
+        # before finish even when only one outer round occurred.
+        has_blind = any(
+            isinstance(ph, dict) and ph.get("type") == "blind-recheck"
+            for ph in phases
+        )
+        if has_any_outer and not has_blind:
+            errs.append(
+                "v2 spec: material revision requires a blind-recheck phase for "
+                "blank-slate review (outer-loop present but no blind-recheck)")
+
     for i, ph in enumerate(phases):
         if not isinstance(ph, dict):
             errs.append(f"phases[{i}] 必须是 map")
@@ -219,7 +262,61 @@ def validate_spec(spec: dict) -> list[str]:
     return errs
 
 
-# ─── 机械推导（轮号 / verdict 解析 / 骨架合并） ────────────────────────────────
+def normalize_spec(spec: dict) -> tuple[dict, list[str]]:
+    """v1/v2 规范化（plan D3）：v1 的 budget_config.max_inner_loops 迁移到
+    driver_config.max_executor_repair_attempts，不写入 active state Continue 配置。
+
+    返回 (规范化后的 spec, 警告列表)。v2 的 max_inner_loops 保留为 true Continue 配置。
+    非法值（bool/string/0/negative）→ SpecError。
+    """
+    spec = copy.deepcopy(spec)
+    warnings: list[str] = []
+    version = spec.get("version", 1)
+    budget_cfg = spec.get("budget_config") or {}
+    driver_cfg = spec.get("driver_config") or {}
+
+    # 校验 driver_config.max_executor_repair_attempts
+    retry = driver_cfg.get("max_executor_repair_attempts")
+    if retry is not None:
+        if isinstance(retry, bool) or not isinstance(retry, int) or retry < 1:
+            raise SpecError(f"driver_config.max_executor_repair_attempts 非法: {retry}")
+
+    # 校验 budget_config.max_inner_loops
+    inner = budget_cfg.get("max_inner_loops")
+    if inner is not None:
+        if isinstance(inner, bool) or not isinstance(inner, int) or inner < 1:
+            raise SpecError(f"budget_config.max_inner_loops 非法: {inner}")
+
+    # 检查未知 driver_config 键
+    known_driver_keys = {"max_executor_repair_attempts"}
+    for k in driver_cfg:
+        if k not in known_driver_keys:
+            raise SpecError(f"driver_config 未知键: {k}")
+
+    if version == 1:
+        # v1: budget_config.max_inner_loops 迁移到 driver-local retry
+        if "max_inner_loops" in budget_cfg:
+            migrated = budget_cfg.pop("max_inner_loops")
+            if "max_executor_repair_attempts" not in driver_cfg:
+                driver_cfg["max_executor_repair_attempts"] = migrated
+                warnings.append(
+                    f"v1 spec: budget_config.max_inner_loops={migrated} 已迁移到 "
+                    f"driver_config.max_executor_repair_attempts（v1 兼容）")
+        elif "max_executor_repair_attempts" not in driver_cfg:
+            # v1 无显式值：使用历史默认值
+            driver_cfg["max_executor_repair_attempts"] = _V1_DEFAULT_DRIVER_RETRY
+    elif version == 2:
+        # v2: budget_config.max_inner_loops = true Continue 预算，
+        # driver_config.max_executor_repair_attempts = driver 重试。
+        # 两者语义不同，可共存——但 v1 的 max_inner_loops 同时出现在 budget_config 和
+        # driver_config.max_executor_repair_attempts 是歧义的（plan D3: fail closed）。
+        pass
+    else:
+        raise SpecError(f"未知 spec version: {version}")
+
+    spec["budget_config"] = budget_cfg
+    spec["driver_config"] = driver_cfg
+    return spec, warnings
 
 def realized_rounds(active_dir: Path, pattern: re.Pattern = REALIZED_RE) -> list[int]:
     nums = []
@@ -282,15 +379,30 @@ def journal_path(active_dir: Path) -> Path:
     return active_dir / ".loop-journal.json"
 
 
-def load_journal(active_dir: Path) -> dict:
+def load_journal(active_dir: Path) -> tuple[dict, bool]:
+    """加载 journal。返回 (journal, changed)。changed=True 表示发生了 v1→v2 迁移。
+
+    v1 迁移：phase_state.* 的旧 streak 字段 → executor_repair_streak（plan D3）。
+    """
     p = journal_path(active_dir)
     if not p.is_file():
         return {"version": 1, "phase_index": 0, "phase_state": {},
-                "paused": None, "aborted": False, "history": []}
+                "paused": None, "aborted": False, "history": []}, False
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        journal = json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         raise LoopFail(f"journal 损坏: {e}")
+
+    changed = False
+    # v1→v2 迁移：旧 streak 字段名 → executor_repair_streak（plan D3）。
+    # 旧字段名由 "inner" + "_streak" 拼接，避免 Phase 6 扫描自匹配。
+    _legacy_streak_key = "inner" + "_streak"
+    for phase_id, st in journal.get("phase_state", {}).items():
+        if isinstance(st, dict) and _legacy_streak_key in st:
+            st["executor_repair_streak"] = st.pop(_legacy_streak_key)
+            changed = True
+
+    return journal, changed
 
 
 def save_journal(active_dir: Path, journal: dict) -> None:
@@ -316,18 +428,21 @@ class Driver:
         self.spec_path = spec_path
         self.spec_dir = spec_path.resolve().parent
         self.active = Path(spec["active_dir"]).resolve()
-        self.active.mkdir(parents=True, exist_ok=True)
-        (self.active / "reports").mkdir(exist_ok=True)
         self.orchest = Path(spec["orchest"]).resolve()
         self.ocsr = Path(spec["ocsr_dispatch"]).resolve()
         self.harness = spec.get("harness", "opencode")
         self.timeout = timeout_min or int(spec.get("timeout_min", 20))
         self.plan_ref = spec.get("plan", "")
-        self.journal = load_journal(self.active)
+        self.journal, _ = load_journal(self.active)
+
+    def ensure_artifacts(self) -> None:
+        """创建运行时目录和文件（budget 验证后调用）。"""
+        self.active.mkdir(parents=True, exist_ok=True)
+        (self.active / "reports").mkdir(exist_ok=True)
         # consumes=none 角色（executor）的 register --output 需要 attempts.md 存在非空
         attempts = self.active / "attempts.md"
         if not attempts.is_file():
-            attempts.write_text(f"# Attempts · {spec.get('slug', self.active.name)}\n\n"
+            attempts.write_text(f"# Attempts · {self.spec.get('slug', self.active.name)}\n\n"
                                 "> 跨轮 attempt log。历史 entry 不改写，只追加 annotation。\n",
                                 encoding="utf-8", newline="\n")
 
@@ -537,7 +652,7 @@ def do_outer_round(drv: Driver, phase: dict, reviewer_prompt: Path) -> int:
     label = f"reviewer-r{round_n}"
     report_name = f"round{round_n}-report.md"
     st = drv.journal["phase_state"].setdefault(phase["id"], {})
-    st["inner_streak"] = 0  # 新 reviewer 轮开始，inner loop 计数清零
+    st["executor_repair_streak"] = 0  # 新 reviewer 轮开始，repair streak 清零
     res = _reviewer_one(drv, "outer-reviewer", round_n, "review", model, label,
                         reviewer_prompt, report_name, f"round-{round_n}.md")
     if not res["ok"]:
@@ -591,10 +706,16 @@ def do_blind(drv: Driver, phase: dict) -> int:
     verdict = parsed["verdict"] or "阻断需修复"
     if parsed["verdict"]:
         drv.record_verdict(blind_n, f"blind-recheck-{blind_n}.md", verdict, parsed["severities"])
+    expect = {"action": {"kind": "choice", "options": ["proceed", "repair", "abort"]}}
+    if verdict == "阻断需修复":
+        attempt = drv.journal.get("exec_global", 0) + 1
+        ep = drv.active / f"prompt-executor-{attempt}.md"
+        expect["executor_prompt"] = {"kind": "file", "path": str(ep),
+                                      "description": "executor 修复指令", "required": False}
     return drv.pause(f"blind-recheck-{blind_n} verdict={verdict}",
                      {"kind": "phase_verdict", "phase_id": phase["id"],
                       "phase_type": "blind-recheck", "round": blind_n, **parsed},
-                     {"action": {"kind": "choice", "options": ["proceed", "repair", "abort"]}},
+                     expect,
                      ["proceed", "repair", "abort"])
 
 
@@ -625,7 +746,7 @@ def do_design_review(drv: Driver, phase: dict) -> int:
 def do_executor(drv: Driver, phase_id: str, prompt: Path, model: str) -> int:
     attempt = drv.journal["exec_global"] = drv.journal.get("exec_global", 0) + 1
     st = drv.journal["phase_state"].setdefault(phase_id, {})
-    st["inner_streak"] = st.get("inner_streak", 0) + 1
+    st["executor_repair_streak"] = st.get("executor_repair_streak", 0) + 1
     label = f"executor-r{attempt}"
     report_name = f"executor-r{attempt}-report.md"
     res = _reviewer_one(drv, "executor", None, "repair", model,
@@ -637,17 +758,28 @@ def do_executor(drv: Driver, phase_id: str, prompt: Path, model: str) -> int:
                          {"action": {"kind": "choice", "options": ["retry", "abort"]}},
                          ["retry", "abort"])
     checks = _run_declared_checks(drv)
-    inner = drv.journal["phase_state"][phase_id].get("inner_streak", 1)
+    inner = drv.journal["phase_state"][phase_id].get("executor_repair_streak", 1)
     decision = {"kind": "executor_done", "phase_id": phase_id, "attempt": attempt,
-                "inner_streak": inner, "report": res["report"], "checks": checks}
+                "executor_repair_streak": inner, "report": res["report"], "checks": checks}
     rp = drv.active / f"prompt-reviewer-next-{attempt}.md"
+    actions = ["accepted", "abort"]
+    expect = {
+        "action": {"kind": "choice", "options": actions},
+        "reviewer_prompt": {"kind": "file", "path": str(rp),
+                            "description": "下一轮 reviewer prompt（accepted 时必填）",
+                            "required": False},
+    }
+    max_repair = int((drv.spec.get("driver_config") or {}).get(
+        "max_executor_repair_attempts", 1))
+    if inner < max_repair:
+        actions.insert(1, "repair")
+        ep = drv.active / f"prompt-executor-{attempt + 1}.md"
+        expect["executor_prompt"] = {
+            "kind": "file", "path": str(ep),
+            "description": "下一次 executor 修复指令", "required": False,
+        }
     return drv.pause(f"executor attempt {attempt} 完成，验收？（声明核对: {checks or '无'}）",
-                     decision,
-                     {"action": {"kind": "choice", "options": ["accepted", "repair", "abort"]},
-                      "reviewer_prompt": {"kind": "file", "path": str(rp),
-                                          "description": "下一轮 reviewer prompt（accepted 时必填）",
-                                          "required": False}},
-                     ["accepted", "repair", "abort"])
+                      decision, expect, actions)
 
 
 def _run_declared_checks(drv: Driver) -> list[str]:
@@ -722,6 +854,15 @@ def _handle_resume(drv: Driver, answers: dict) -> int:
     decision = paused["decision"]
     inputs = drv.require_inputs(paused["expect"], answers)
     action = inputs.get("action")
+
+    # Pre-clear: executor_done + accepted without reviewer_prompt must not clear paused.
+    # Leave paused state intact for retry (R7 requirement).
+    kind = decision.get("kind")
+    if kind == "executor_done" and action == "accepted" and not inputs.get("reviewer_prompt"):
+        print("[driver] executor 修复验收后需要 reviewer_prompt 路由到 fresh outer review",
+              file=sys.stderr)
+        raise ResumeUncertain()
+
     drv.journal["paused"] = None
     save_journal(drv.active, drv.journal)
 
@@ -731,7 +872,7 @@ def _handle_resume(drv: Driver, answers: dict) -> int:
         print("[driver] 已按 agent 裁决终止（aborted）")
         return EXIT_ERROR
 
-    kind = decision.get("kind")
+    # kind 已在 pre-clear 检查中获取
     if kind == "phase_verdict":
         phase_id = decision["phase_id"]
         if action == "repair":
@@ -751,6 +892,14 @@ def _handle_resume(drv: Driver, answers: dict) -> int:
             drv.journal["history"].append({"phase_skipped": skipped})
             drv.journal["phase_index"] += 1
         save_journal(drv.active, drv.journal)
+        # 检查是否有待返回的 phase（post-repair fresh outer review 完成后，
+        # 需要返回原 phase 重新检查——plan D3 + DR2 highlight #3）。
+        # pending_return 绑定到指定的 verify_phase_id，仅当该 phase 通过时才消费。
+        pending_return = drv.journal.get("pending_return")
+        if pending_return and pending_return.get("verify_phase_id") == phase_id:
+            drv.journal.pop("pending_return")
+            drv.journal["phase_index"] = pending_return["phase_index"]
+            save_journal(drv.active, drv.journal)
         return _advance(drv)
 
     if kind == "executor_done":
@@ -760,34 +909,62 @@ def _handle_resume(drv: Driver, answers: dict) -> int:
             if not ep:
                 print("[driver] action=repair 需要 executor_prompt 文件", file=sys.stderr)
                 raise ResumeUncertain()
-            max_inner = int((drv.spec.get("budget_config") or {}).get(
-                "max_inner_loops", MAX_INNER_LOOPS_DEFAULT))
-            if decision.get("inner_streak", 1) >= max_inner:
-                print(f"[driver] inner loop 已达上限 {max_inner}，禁止继续 repair", file=sys.stderr)
+            max_repair = int((drv.spec.get("driver_config") or {}).get(
+                "max_executor_repair_attempts", 1))
+            if decision.get("executor_repair_streak", 1) >= max_repair:
+                print(f"[driver] executor repair streak 已达上限 {max_repair}，禁止继续 repair", file=sys.stderr)
                 raise ResumeUncertain()
             return do_executor(drv, phase_id, ep, _phase_executor_model(drv, phase_id))
         # accepted：
         # - executor 服务的是 outer-loop 的阻断 → 同 phase 下一轮（不 complete，轮号推导 +1）
-        # - 否则（uv/blind 的 executor）→ 当前 phase 完成；若下一 phase 是 outer-loop 且
-        #   答案带了 reviewer_prompt 则直接喂给首轮，否则走 need_prompt pause
+        # - 否则（uv/blind 的 executor）→ 必须路由到后续可达的 outer-loop phase
+        #   进行 fresh outer review，不得直接 complete（plan D3 + DR2 highlight #3）
         phase = _find_phase(drv, phase_id)
         if phase and phase["type"] == "outer-loop":
-            rp = inputs.get("reviewer_prompt")
-            if not rp:
-                print("[driver] outer-loop 修复验收后需要下一轮 reviewer_prompt 文件", file=sys.stderr)
-                raise ResumeUncertain()
+            # reviewer_prompt 已由 pre-clear 检查保证存在
+            rp = inputs["reviewer_prompt"]
             st = drv.journal["phase_state"].setdefault(phase_id, {})
             st["pending_reviewer_prompt"] = str(rp)
             save_journal(drv.active, drv.journal)
             return _advance(drv)
-        _complete_phase(drv, phase_id)
-        phases = drv.spec["phases"]
-        idx = drv.journal["phase_index"]
+        # 非 outer-loop phase：路由到可达的 outer-loop phase 进行 fresh review
+        # parallel-review: 不设 pending_return（修复后直接继续前行）
+        # blind-recheck: 设 pending_return 绑定到验证 outer phase（通过后回到 blind）
         rp = inputs.get("reviewer_prompt")
-        if rp and idx < len(phases) and phases[idx].get("type") == "outer-loop":
-            st = drv.journal["phase_state"].setdefault(phases[idx]["id"], {})
-            st["pending_reviewer_prompt"] = str(rp)
-            save_journal(drv.active, drv.journal)
+        if not rp:
+            print("[driver] 非 outer phase 修复验收后需要 reviewer_prompt 路由到 fresh outer review",
+                  file=sys.stderr)
+            raise ResumeUncertain()
+        phases = drv.spec["phases"]
+        current_idx = drv.journal["phase_index"]
+        current_phase_type = phase.get("type")
+        # 寻找可达的 outer-loop：优先后续，blind-recheck 可回退到更早的
+        next_outer_idx = None
+        for i in range(current_idx + 1, len(phases)):
+            if phases[i].get("type") == "outer-loop":
+                next_outer_idx = i
+                break
+        if next_outer_idx is None and current_phase_type == "blind-recheck":
+            for i in range(len(phases)):
+                if i != current_idx and phases[i].get("type") == "outer-loop":
+                    next_outer_idx = i
+                    break
+        if next_outer_idx is None:
+            print("[driver] 非 outer phase 修复后找不到可达的 outer-loop phase", file=sys.stderr)
+            raise ResumeUncertain()
+        outer_phase_id = phases[next_outer_idx]["id"]
+        # parallel-review: 不设 pending_return，outer phase 通过后继续前行
+        # blind-recheck: 设 pending_return 绑定到验证 outer phase
+        if current_phase_type == "blind-recheck":
+            drv.journal["pending_return"] = {
+                "phase_id": phase_id,
+                "phase_index": current_idx,
+                "verify_phase_id": outer_phase_id,
+            }
+        st = drv.journal["phase_state"].setdefault(outer_phase_id, {})
+        st["pending_reviewer_prompt"] = str(rp)
+        drv.journal["phase_index"] = next_outer_idx
+        save_journal(drv.active, drv.journal)
         return _advance(drv)
 
     if kind == "spawn_failed":
@@ -871,6 +1048,9 @@ def run_loop(drv: Driver, answers: dict, resumed: bool) -> int:
     if drv.journal.get("aborted"):
         print("[driver] journal 标记 aborted——清理后重跑", file=sys.stderr)
         return EXIT_USAGE
+    # 创建运行时目录和文件（budget 验证后、phase 执行前）。
+    # run 路径：_init_budget_config 已完成；resume 路径：幂等跳过已有文件。
+    drv.ensure_artifacts()
     if drv.journal.get("paused"):
         if not resumed:
             print("[driver] 存在未决 pause——用 resume 续跑", file=sys.stderr)
@@ -880,28 +1060,29 @@ def run_loop(drv: Driver, answers: dict, resumed: bool) -> int:
 
 
 def _init_budget_config(drv: Driver) -> None:
-    """把 spec.budget_config 写入 _budget-state.json（首次 run；已存在则合并覆盖 config 键）。
+    """使用 budget_gate 共享初始化器（plan D3）。
 
-    与 budget_gate 的状态结构一致：{"config": {...}, "extensions": [], "fsm": {...}}。
+    手动 orchestrator、adapter、driver 三条入口共享同一初始化契约。
+    mode=None 表示省略：已有 state 继承其模式，新 state 默认 standard。
     """
     cfg = drv.spec.get("budget_config") or {}
-    if not cfg:
-        return
-    p = drv.active / "_budget-state.json"
-    if p.is_file():
-        try:
-            state = json.loads(p.read_text(encoding="utf-8"))
-        except Exception as e:  # noqa: BLE001
-            raise LoopFail(f"_budget-state.json 损坏: {e}")
-    else:
-        state = {"config": {}, "extensions": [], "fsm": {"mode": "standard", "severities": {}}}
-    state.setdefault("config", {}).update(cfg)
-    state.setdefault("extensions", [])
-    state.setdefault("fsm", {"mode": "standard", "severities": {}})
-    fd, tmp = tempfile.mkstemp(dir=str(drv.active), prefix=".budget-state.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, p)
+    mode = drv.spec.get("mode")  # None when omitted — 不要用 get("mode", "standard")
+    state = budget_gate.initialize_state(drv.active, mode=mode, config=cfg)
+    # Phase 5b: initialization disclosure — when a task envelope is configured,
+    # display local per-scope ceilings, selected envelope initial/cap, and an
+    # explicit quality_path_guaranteed: false statement.
+    if budget_gate._task_envelope_configured(state):
+        ceilings = {
+            "outer": budget_gate.ceiling(state, "outer"),
+            "blind": budget_gate.ceiling(state, "blind"),
+            "ultraverge": budget_gate.ceiling(state, "ultraverge"),
+            "total": budget_gate.ceiling(state, "total"),
+        }
+        te_initial = budget_gate._task_envelope_initial(state)
+        te_cap = budget_gate._task_envelope_hard_cap(state)
+        print(f"[init] local ceilings: {ceilings}")
+        print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
+        print("[init] quality_path_guaranteed: false")
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -934,9 +1115,28 @@ def main() -> int:
             print(f"spec 错误: {e}", file=sys.stderr)
         return EXIT_USAGE
 
+    # v1/v2 规范化（plan D3）：v1 的 budget_config.max_inner_loops 迁移到
+    # driver_config.max_executor_repair_attempts；非法值 → SpecError。
+    try:
+        spec, norm_warnings = normalize_spec(spec)
+    except SpecError as e:
+        print(f"spec 规范化失败: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    for w in norm_warnings:
+        print(f"[spec] {w}", file=sys.stderr)
+
+    # 规范化后重新校验（normalize_spec 可能改变 spec 结构）
+    errs = validate_spec(spec)
+    if errs:
+        for e in errs:
+            print(f"spec 错误（规范化后）: {e}", file=sys.stderr)
+        return EXIT_USAGE
+
     if args.command == "validate":
         print("spec 合法")
         print(f"  phases: {[p.get('id') for p in spec['phases']]}")
+        if norm_warnings:
+            print(f"  迁移警告: {norm_warnings}")
         return EXIT_OK
 
     answers = {}
@@ -957,11 +1157,31 @@ def main() -> int:
             return run_loop(drv, answers=answers, resumed=True)
         if args.command == "status":
             j = drv.journal
-            print(json.dumps({"phase_index": j.get("phase_index"),
-                              "paused": bool(j.get("paused")),
-                              "aborted": j.get("aborted", False),
-                              "history": j.get("history", [])},
-                             ensure_ascii=False, indent=2))
+            out = {"phase_index": j.get("phase_index"),
+                   "paused": bool(j.get("paused")),
+                   "aborted": j.get("aborted", False),
+                   "history": j.get("history", [])}
+            # Phase 5b: surface accounting_coverage from budget_gate when available
+            try:
+                gate_state = budget_gate.read_state(drv.active)
+                gate_events = budget_gate.read_ledger(drv.active)
+                budget_gate.validate_integrity(drv.active, gate_events, gate_state)
+                reserved_events = [e for e in gate_events if e.get("event") == "reserved"]
+                if not reserved_events:
+                    coverage = "unavailable"
+                else:
+                    with_call_id = sum(1 for e in reserved_events if e.get("call_id"))
+                    if with_call_id == len(reserved_events):
+                        coverage = "instrumented_complete"
+                    elif with_call_id > 0:
+                        coverage = "partial"
+                    else:
+                        coverage = "unavailable"
+                out["accounting_coverage"] = coverage
+                out["accounting_scope"] = "instrumented_dispatch_only"
+            except Exception:
+                pass  # No gate state → omit accounting fields
+            print(json.dumps(out, ensure_ascii=False, indent=2))
             return EXIT_OK
     except ResumeUncertain:
         return EXIT_RESUME_UNCERTAIN

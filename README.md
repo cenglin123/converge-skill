@@ -70,6 +70,35 @@ reserve → Agent spawn → settle → ingest-verdict
 
 > `best-effort guarded` **不是** `enforced`——只强制**总 spawn cap**：不执行 per-scope reserve/settle（仍由 Orchestrator 驱动）、不防主动删除或篡改 hook/binding、hook 不写 ledger 也不与 ledger 双计。它解决的是漂移、遗忘和 compaction 后失控。
 
+### 预算 profile
+
+| 模式 | outer | blind | Continue | 总量 cap |
+|------|-------|-------|----------|----------|
+| standard（默认） / ultraverge | 8 | 3 | 3 | 63 |
+
+- Stock 默认 `8/3/3` 为 evidence-restored 止损上限（`scripts/budget_gate.py` DEFAULTS 为单一权威源）：普通任务通常在 2-3 轮收敛，outer=8/blind=3 是复杂任务的止损上限而非预期用量；inner=3 是已发布兼容保留。standard 与 ultraverge 共用同一组默认值上限，无模式叠加。
+- 总量 cap 由 `scripts/budget_gate.py` DEFAULTS 和 `total_safety=1.5` 的确定性公式推导，具体值以脚本为权威源。
+- 扩容需 `scope=total` extension（须关联真实 BLOCK decision 事件 + 用户原话）。
+
+### 共享初始化
+
+所有入口路径（手动 Orchestrator、`ocsr_spawn_adapter.py config-init`、`converge_loop.py run`）共享同一初始化契约：`budget_gate.initialize_state()`。
+
+- 无 active state → 创建 standard/ultraverge 模式 + 显式 config 写入
+- 已有 state → 校验完整状态/ledger；省略字段继承 active state；显式相等值为幂等 no-op；冲突值 fail-closed
+- standard 与 ultraverge 共用同一组默认值上限，无模式叠加
+- 未知键、布尔伪装整数、负数、字符串数字、malformed shape → fail-closed
+
+### v1/v2 迁移
+
+- 新 loop spec 使用 `version: 2`，`budget_config.max_inner_loops` 仅用于 true Continue，`driver_config.max_executor_repair_attempts` 用于 fresh Executor 重试
+- 已有 `version: 1` spec 仍可加载；v1 的显式 `budget_config.max_inner_loops` 在内存中迁移为 `driver_config.max_executor_repair_attempts`，不写入 active state Continue limit，发出弃用警告
+- v1 spec 和已有 active state 共存时，迁移的重试值保持 driver-local，validated active `max_inner_loops` 仍为 Continue limit
+
+### Continue 语义
+
+`max_inner_loops` 含义单一：允许对同一 succeeded Reviewer instance 调用 `orchest.py reserve-round --continue-of` 的次数。`orchest.py` 从 validated active state 读取有效值，不硬编码。`converge_loop.py` 作为 fresh-review scheduler，其重试由 `driver_config.max_executor_repair_attempts`（默认 1）约束，不混同 Continue。
+
 ### 预算阻断处置
 
 达预算上限时 gate 返回 `BLOCK:budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `total_spawn_cap`：**停止**，无有效 `budget_extension`（须关联真实 BLOCK decision 事件 + 用户原话）不得续 spawn。用户选择：扩容续跑 / 接受当前产物（终止-c）/ 简化 plan / 终止。

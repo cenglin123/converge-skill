@@ -30,6 +30,14 @@ description: Use when a plan, code artifact, or other structured output needs it
 - **不适合**：单次快速审查、日常代码 review、lint 级别的检查——这些用更轻量的 review 技能
 - **可组合**：如果存在完整的开发工作流型 SKILL（如 Dynamic Workflows 的 pipeline/parallel 编排），converge 可以作为其中的**质量门控**插入——在 phase 交接处插入独立的"方向性审视"，让指挥部的决策在行动前暴露盲点。门控分两级：L1 轻量信号检测（非 LLM 脚本，零 token 成本）和 L2 单轮对抗审查（按需启动）。详见 `refs/quality-gate.md`
 
+## 控制器边界
+
+Converge **被用户或宿主选为当前工作流时**，是本工作流的**唯一顶层控制器**，负责模式选择、角色转换、预算、独立审查、停止条件和终局裁决。
+
+TDD、系统性调试和完成验证是 **Executor-local** 方法——由 Executor 在其分配的变更范围内自主执行，不归 Orchestrator 或 Reviewer 控制。
+
+Converge **不使生成项目依赖 Converge**——由 `init-agent-docs` 生成的项目不被迫安装或引用 Converge。
+
 ---
 
 > 设计原则、Orchestrator 行为边界、治理文档清单、修改程序详见 `CONSTITUTION.md`。
@@ -82,7 +90,7 @@ Executor 可降档（模型档位下调）至该家族低档执行，**仅当同
 | **终止-a 严格首轮通过** | fresh reviewer 首次审查 verdict = `可执行`，零阻断 | 无需 | 写 retrospective.md，记录 terminal decision，执行单一 `archive` |
 | **终止-b 渐近通过** | blocking_issues 单调下降 + 剩 ≤1 个无争议低级项 | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
 | **终止-c 主观接受** | 未达 a/b，但用户明确说"够了，就这样" | 用户显式确认 | 保存用户原话/source_ref 后记录 terminal decision，执行单一 `archive` |
-| **预算软停**（无终止类型对应） | 达预算上限（默认 8 轮），用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
+| **预算软停**（无终止类型对应） | 达到配置的预算上限，用户决定不续费 | 用户确认不续费 | retrospective.md 注明"未收敛但用户接受" |
 | **振荡硬停**（无终止类型对应） | 触 Type O（推翻≥3）或 R（重复≥5） | 无需 | retrospective.md 填病因 + 建议 |
 
 终止-a 是默认目标。b/c 需用户显式确认。达预算上限后用户接受 → 预算软停；未达上限用户主动接受 → 终止-c。
@@ -165,7 +173,7 @@ ultraverge → 评议（扩域至 DR 7 维 + 前置自检 5 问，≥ultraverge_
   - 实际 spawn 数 ≥2 且 verdict 一致 → 降级为普通评议模式，Orchestrator 标注 `degraded_from: ultraverge` 并告知用户
   - 实际 spawn 数 <2 或 verdict 不一致 → 中止，告知用户原因，由用户决定是否降级为普通评议或稍后重试
 - **完整收敛**：若评议 verdict = 可执行 → 跳过（评议已在扩域下审查完毕，完整收敛新增发现概率极低，只增成本）；若 verdict ≠ 可执行 → 标准流程（Round 0→多轮→收敛）
-- **盲审预算**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 写入 **`max_blind_rechecks=2` 覆盖**（普通 converge 真实默认见 `scripts/budget_gate.py` DEFAULTS = 3）。纯 orchestrator 行为、零代码。
+- **盲审预算**：普通 converge 与 ultraverge 共享同一 stock 默认（由 `scripts/budget_gate.py` 的 `DEFAULTS` 提供，单一权威源）；无模式叠加。
 - **收敛后设计审查**：**强制触发**——跳过常规触发条件（模块数/新约定/系统边界）的判断，直接执行
 
 仅在用户显式使用 `ultraverge` 关键词时触发。**触发边界（明线规则）**：
@@ -297,11 +305,11 @@ verdict=可执行 且 ≥2 轮 →
 1. Executor 完成后，orchestrator 通过 Continue 续命同 reviewer instance——续命经 orchest.py 簿记：
    `reserve-round --continue-of <父rid> --phase inner-review --prompt-file <path>`
    （发射 begin-invocation kind=continue + parent 链；契约规定 continue 不携带 reservation——
-   计数由 events 承载，上限 max_inner_loops=3，不推进 max_outer_loops、不占新 spawn cap；
+   计数由 events 承载，上限由 active state 有效配置（`max_inner_loops`）决定，不推进 max_outer_loops、不占新 spawn cap；
    命令用法见 scripts/README.md）
    → 宿主 Continue 同实例 → `register-round`（continue 轮入口；实例冲突被拒绝——续命同实例；失败/取消 `cancel-round`）
 2. Reviewer 验收修复（★判断）→ 通过则 Accepted，打回则继续修；verdict 经 `record-verdict` 落盘 round 产物
-3. 最多 3 次 Continue（脚本按同父链计数拒绝第 4 次），超过则该轮失败 → 下一 outer loop
+3. Continue 上限由 active state 有效配置（`max_inner_loops`）决定（脚本按同父链计数拒绝超限），超过则该轮失败 → 下一 outer loop
 ```
 
 ### 收敛后修订（用户外部输入）
@@ -423,7 +431,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `max_outer_loops` | 见 budget_gate.py DEFAULTS（单源） | 最大 outer loop 轮数（2026-08-16 调优：原默认 5 下两次真实收敛均 7/12 轮超限打断，实证每轮推进零振荡；简单 plan 仍 2-3 轮完成，达到上限触发预算软停） |
+| `max_outer_loops` | 见 budget_gate.py DEFAULTS（单源） | 成本优先的 outer loop 轮数上限；达到上限时 gate 阻断并进入预算软停，继续执行需取得显式、可审计的 `scope=outer` extension |
 | `max_inner_loops` | 见 budget_gate.py DEFAULTS（单源） | 同轮 inner loop 最大 Continue 次数 |
 | `type_o_threshold` | 3 | Type O 触发硬停的推翻次数 |
 | `type_r_threshold` | 5 | Type R 触发硬停的累计次数 |
@@ -433,23 +441,29 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `gate_l2_mode` | `signal` | 门控 L2 启动方式：`always` / `signal` / `adaptive` |
 | `gate_l2_signal_threshold` | `warn` | 信号触发条件（当前仅支持 `warn`；`info`/`critical` 级别预留给后续 L1 信号扩展） |
 | `gate_max_token_share` | 0.15 | 门控 token 预算占总预算比例上限 |
-| `ultraverge_min_reviewers` | 见 budget_gate.py DEFAULTS（单源） | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整） |
+| `ultraverge_min_reviewers` | 见 budget_gate.py DEFAULTS（单源） | ultraverge 评议阶段最少并行 Reviewer 数（默认 3，来自 ≥3 自动收敛阈值。可随实证数据调整）；standard 与 ultraverge 共用同一组默认值上限，无模式叠加 |
 | `executor_model_tier` | `inherit` | Executor 模型档位。`inherit` = 继承主对话模型；`low` = 该家族低档（对照表见 `refs/model-tiers.md`）。仅当「模型分层」小节三条件满足时可设 `low`。初始策略，随实证数据调整 |
-| `max_blind_rechecks` | 见 budget_gate.py DEFAULTS（单源） [^mbr] | 盲审复核最大次数（独立于 max_outer_loops；2026-08-16 调优：原默认 1 下盲审发现真问题即必打断，3 覆盖「打回→修复→再审」完整周期）。盲审失败后修复轮次共享 max_outer_loops |
+| `max_blind_rechecks` | 见 budget_gate.py DEFAULTS（单源） | 成本优先的盲审复核次数上限，独立于 max_outer_loops；达到上限时 gate 阻断且不自动续跑，继续盲审需取得显式、可审计的 `scope=blind` extension。盲审失败后的修复轮次共享 max_outer_loops |
 | `max_ultraverge_initial` | =`ultraverge_min_reviewers` | ultraverge 并行初审的独立预算上限。扩容需 `scope=ultraverge` 的 extension |
-| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数模式相关（具体值以 `scripts/budget_gate.py` DEFAULTS/公式为准）：**普通 = 63 / ultraverge = 62**。扩容需 `scope=total` extension |
+| `max_total_reserved_spawns` | 确定性公式 | 与角色无关的总 spawn 硬上限（单调，failed 不释放）。默认 = `ceil(total_safety × [3 + ultraverge_min_reviewers + max_outer_loops×(1+max_inner_loops) + max_blind_rechecks + 1])`，stock 参数以 `scripts/budget_gate.py` DEFAULTS 为准（具体值随配置模式变化）。扩容需 `scope=total` extension |
 | `total_safety` | 见 budget_gate.py DEFAULTS（单源） | 总量公式安全系数（含 arbitration 等 consumes:none 触发余量） |
 | `impl_severity_streak_threshold` | 见 budget_gate.py DEFAULTS（单源） | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 见 budget_gate.py DEFAULTS（单源） | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
 | `relay_oscillation_interval` | 3 | 传话编排下振荡裁判的触发间隔（轮）。每 N 轮 spawn 一次性裁判 agent，输入仅 relay-ledger |
-| `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容） |
+| `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容）。初始化时显示 `quality_path_guaranteed: false`——选档是质量-成本权衡，非到达保证 |
 | `task_envelope_initial` / `task_envelope_cap` | 由 `task_tier` 派生 | 直接覆盖任务档的初始额度/一次性授权上限，无需通过 `task_tier` 四档之一；`cap` 须 `>= initial` |
 
-[^mbr]: 普通 converge 的真实默认 `max_blind_rechecks` 见 `scripts/budget_gate.py` DEFAULTS 注释（2026-08-16 调优，原 1→3）；调优历史与实证依据以 `budget_gate.py` DEFAULTS 注释与 git 历史（提交 `0137fce`）为单源，不在 docs/CHANGELOG.md。
-
-> **模式相关行为事实（非默认值单源）**：ultraverge 初始化时，Orchestrator 向 `_budget-state.json` 的 config 覆盖回写 `max_blind_rechecks=2`（纯 orchestrator 行为、零代码）。
-
 > **预算执行**：预算由 `scripts/budget_gate.py` 在每次 spawn 前裁决；trust boundary 三级，逐级能力见 framework-adapters 分册（`refs/framework-adapters/claude-code.md` §A.1 / `refs/framework-adapters/kimi-code.md` §A.6 / `refs/framework-adapters/dsh.md` §A.7）；行为禁令「不得靠记忆计数」规范落在 `refs/orchestrator-guide.md` §六，此处仅指针。
+>
+> **Stock 默认 8/3/3 经验依据**（`scripts/budget_gate.py` DEFAULTS 为单一权威源）：普通任务通常在 2-3 轮收敛（历史数据 `aac95bd`），outer=8/blind=3 是复杂任务的止损上限而非预期用量（两次复杂收敛 outer 7/12、blind 3/4 仍在推进；`d3c82cb` 治理任务至 outer R8 + blind #2 后通过）；inner=3 是已发布兼容保留，不声称同等强度的实证校准。
+>
+> **治理 preflight 机器输入**：`converge.governance-change/v1` 是 Orchestrator/preflight 的唯一机器输入（prose/表格不进入机器解析），详见 `refs/state-schema.md`。
+>
+> **Material revision 两-authority 同字节规则**：material revision 后须两个不同 fresh Spawn（outer + blank-slate）审查相同最终 plan 字节；任何字节变化使两份审查同时失效。详见 `refs/orchestrator-guide.md` §Material revision。
+>
+> **Calibration sample/report**：`converge.calibration-sample/v1`（retrospective 唯一样本）和 `converge.calibration-report/v1`（`distill_antipatterns.py --calibration` 输出）的定位器语法与验证规则见 `refs/state-schema.md`。
+>
+> **Task-envelope 诚实声明**：task-envelope 是用户选定的更严格质量-成本叠加层，可能在本地 8/3/3 上限到达前阻断 instrumented run；它不保证8/3/3 最坏路径可达；在 auditable-only 宿主上无法证明宿主级全量记账。
 >
 > **任务级总信封**（`task_tier`/`task_envelope_initial`/`task_envelope_cap`，consumes=`task-envelope`）是与本表其余参数**不同维度、并行叠加**的粗粒度计量，按一次任务的 OCSR/模型调用总量计量（可跨越多次收敛、多个角色、以及 release executor 等 converge 循环外的调用），不消费、也不受 `max_total_reserved_spawns` 约束。agent 需读的角色摘要见 `refs/state-schema.md` §预算 gate「任务档预算 / task-envelope scope」；机制细节（BLOCK 语义、与 total 的正交性、`summary` 命令等）单一权威源 = `scripts/budget_gate.py`（task-envelope 单一权威源）。
 

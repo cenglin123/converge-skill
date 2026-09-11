@@ -29,6 +29,8 @@ Usage:
     python distill_antipatterns.py                 # dry-run，打印报告
     python distill_antipatterns.py --write         # 回写 antipatterns.md
     python distill_antipatterns.py --done DIR --registry FILE
+    python distill_antipatterns.py --calibration [--root DIR] [--output FILE]
+                                                   # 只读 calibration 报告（plan r2 D7）
 
 Exit code: 0 正常（含「有条目降级」）；1 仅在 registry 解析失败时。
 parse 失败的单份 retrospective → skip + warning，不中断其余（defensive parsing）。
@@ -39,7 +41,10 @@ parse 失败的单份 retrospective → skip + warning，不中断其余（defen
 """
 
 import argparse
+import hashlib
+import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -557,6 +562,404 @@ def print_report(convs, changes, new_entries, new_candidates, wrote: bool):
 
 
 # ========================================================================
+# Calibration 报告模式（plan r2 D7，只读；--output 才落盘）
+# ========================================================================
+#
+# 扫描 <root>/.converge/done/*/retrospective.md，提取每篇**当前 revision**（文件内
+# 最后一个样本块；append-only 约定下新修订样本追加在后）的
+# `converge.calibration-sample/v1` fenced JSON 块，做唯一性/schema/必填字段校验与
+# 绑定交叉核验（state/ledger/round products/attempts 的记录存在则复算 SHA-256 比对；
+# 旧样本无绑定或绑定记录缺失记 unverifiable）。productive_at_or_after_limit 的
+# true/false 必须带可解析 evidence_refs（非空字符串列表），否则强制 unavailable——
+# 绝不默认 false。
+#
+# 输出 canonical JSON 报告（converge.calibration-report/v1）：UTF-8、sorted keys、
+# compact separators、恰好一个尾随 LF。缺失/畸形/不可绑定样本列入 corpus 但不进
+# 定量聚合。**本脚本绝不自动推荐任何默认值/阈值。**
+#
+# canonical 字节规则与 locator 语法的规范定义见 refs/state-schema.md
+# §版本化 fenced JSON 机器块契约；budget_gate.py preflight 复算报告 hash 时使用
+# 同一规则（两处实现保持字面一致，契约单源在该文档）。
+
+CAL_SAMPLE_SCHEMA = "converge.calibration-sample/v1"
+CAL_REPORT_SCHEMA = "converge.calibration-report/v1"
+
+_CAL_SAMPLE_REQUIRED = {
+    "schema", "revision_id", "configured_limits", "usage",
+    "productive_at_or_after_limit", "accounting_scope", "accounting_coverage",
+    "model_invocations", "terminal",
+}
+# bindings 单列：旧样本无绑定记 unverifiable 而非 malformed（plan r2 D7）。
+_CAL_SAMPLE_ALLOWED = _CAL_SAMPLE_REQUIRED | {"bindings"}
+_CAL_AXES = ("outer", "blind", "inner")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def canonical_json_bytes(obj) -> bytes:
+    """canonical JSON 字节：UTF-8、sorted keys、compact separators、恰好一个 LF。"""
+    return (json.dumps(obj, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _sha256_hex(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def _strict_json(raw: bytes):
+    """严格 JSON：拒绝重复 key、NaN/Infinity、非 dict 顶层。失败抛 ValueError。"""
+    def _no_dupes(pairs):
+        out = {}
+        for k, v in pairs:
+            if k in out:
+                raise ValueError(f"duplicate_key:{k}")
+            out[k] = v
+        return out
+
+    def _bad_const(x):
+        raise ValueError(f"invalid_constant:{x}")
+
+    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_dupes,
+                     parse_constant=_bad_const)
+    if not isinstance(obj, dict):
+        raise ValueError("top_level_not_object")
+    return obj
+
+
+def extract_json_fences(data: bytes) -> tuple[list[bytes], list[bytes]]:
+    """扫描 ```json fenced 块。返回 (payloads, crlf_payloads)。
+
+    只识别 opening line 为三个反引号紧接 json 的 fence；payload 含 CR（CRLF 污染）
+    的块单独列入 crlf_payloads——字节级一致场景必须 fail，不得静默归一化。
+    未闭合 fence 的残余行不计入（与 budget_gate 历史 preflight 计数行为一致）。
+    """
+    payloads: list[bytes] = []
+    crlf: list[bytes] = []
+    in_fence = False
+    buf: list[bytes] = []
+    for line in data.split(b"\n"):
+        stripped = line.rstrip(b"\r").rstrip()
+        if not in_fence:
+            if stripped == b"```json":
+                in_fence = True
+                buf = []
+            continue
+        if stripped == b"```":
+            payload = b"\n".join(buf)
+            (crlf if b"\r" in payload else payloads).append(payload)
+            in_fence = False
+            buf = []
+            continue
+        buf.append(line)
+    return payloads, crlf
+
+
+class _SampleInvalid(Exception):
+    """样本 schema/必填字段校验失败；reason 供报告。"""
+
+
+def _validate_sample(sample: dict) -> None:
+    unknown = sorted(set(sample) - _CAL_SAMPLE_ALLOWED)
+    if unknown:
+        raise _SampleInvalid(f"bad_schema:unknown_field:{unknown[0]}")
+    missing = sorted(_CAL_SAMPLE_REQUIRED - set(sample))
+    if missing:
+        raise _SampleInvalid(f"bad_schema:missing_field:{missing[0]}")
+    if not (isinstance(sample["revision_id"], str) and sample["revision_id"]):
+        raise _SampleInvalid("bad_schema:revision_id")
+    cl = sample["configured_limits"]
+    if not isinstance(cl, dict):
+        raise _SampleInvalid("bad_schema:configured_limits")
+    for k in _CAL_AXES:
+        v = cl.get(k)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            raise _SampleInvalid(f"bad_schema:configured_limits.{k}")
+    usage = sample["usage"]
+    if not isinstance(usage, dict):
+        raise _SampleInvalid("bad_schema:usage")
+    for k in ("outer", "blind", "inner_max_per_outer"):
+        v = usage.get(k)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            raise _SampleInvalid(f"bad_schema:usage.{k}")
+    prod = sample["productive_at_or_after_limit"]
+    if not isinstance(prod, dict):
+        raise _SampleInvalid("bad_schema:productive_at_or_after_limit")
+    for axis in _CAL_AXES:
+        cell = prod.get(axis)
+        if not isinstance(cell, dict):
+            raise _SampleInvalid(f"bad_schema:productive.{axis}")
+        if cell.get("value") not in (True, False, "unavailable"):
+            raise _SampleInvalid(f"bad_schema:productive.{axis}.value")
+        if not isinstance(cell.get("evidence_refs"), list):
+            raise _SampleInvalid(f"bad_schema:productive.{axis}.evidence_refs")
+    if not isinstance(sample["accounting_scope"], str):
+        raise _SampleInvalid("bad_schema:accounting_scope")
+    if sample["accounting_coverage"] not in ("instrumented_complete", "partial",
+                                             "unavailable"):
+        raise _SampleInvalid("bad_schema:accounting_coverage")
+    mi = sample["model_invocations"]
+    if mi != "unavailable" and (isinstance(mi, bool) or not isinstance(mi, int)
+                                or mi < 0):
+        raise _SampleInvalid("bad_schema:model_invocations")
+    # 数值 model_invocations 只允许 instrumented_complete（plan r2 D10）
+    if isinstance(mi, int) and sample["accounting_coverage"] != "instrumented_complete":
+        raise _SampleInvalid("bad_schema:model_invocations_requires_complete")
+    term = sample["terminal"]
+    if not isinstance(term, dict) or not (isinstance(term.get("value"), str)
+                                          and term["value"]):
+        raise _SampleInvalid("bad_schema:terminal")
+    if not (isinstance(term.get("reviewer_terminal_event_id"), str)
+            and term["reviewer_terminal_event_id"]):
+        raise _SampleInvalid("bad_schema:terminal.reviewer_terminal_event_id")
+
+
+def _enforce_productivity_evidence(sample: dict) -> list[str]:
+    """true/false 必须有可解析 evidence_refs（非空字符串列表），否则强制
+    unavailable（绝不默认 false）。返回被强制的 axis 备注列表。"""
+    notes = []
+    for axis in _CAL_AXES:
+        cell = sample["productive_at_or_after_limit"][axis]
+        if cell["value"] in (True, False):
+            refs = cell["evidence_refs"]
+            if not refs or any(not (isinstance(r, str) and r) for r in refs):
+                cell["value"] = "unavailable"
+                cell["evidence_refs"] = []
+                notes.append(f"{axis}:evidence_refs_unparseable")
+    return notes
+
+
+def _verify_bindings(sample: dict, base: Path) -> tuple[str, dict | None, int | None]:
+    """绑定交叉核验。返回 (status, binding_digests, high_watermark)。
+
+    status: "verified" | "unverifiable:<reason>" | "mismatch:<path>"。
+    记录存在则复算 SHA-256 比对；记录缺失/无绑定 → unverifiable；hash 不一致 →
+    mismatch（调用方据此排除出定量聚合）。
+    """
+    bindings = sample.get("bindings")
+    if bindings is None:
+        return "unverifiable:no_bindings", None, None
+    if not isinstance(bindings, dict):
+        raise _SampleInvalid("bad_schema:bindings")
+
+    def _resolve(rel) -> Path | None:
+        if not isinstance(rel, str) or not rel:
+            return None
+        p = (base / rel).resolve()
+        try:
+            p.relative_to(base.resolve())
+        except ValueError:
+            return None
+        return p
+
+    def _check(entry, need_hw=False):
+        if not isinstance(entry, dict):
+            raise _SampleInvalid("bad_schema:bindings.entry")
+        path = _resolve(entry.get("path"))
+        declared = entry.get("sha256")
+        if not (isinstance(declared, str) and _HEX64.match(declared)):
+            raise _SampleInvalid("bad_schema:bindings.sha256")
+        hw = None
+        if need_hw:
+            hw = entry.get("high_watermark")
+            if isinstance(hw, bool) or not isinstance(hw, int) or hw < 0:
+                raise _SampleInvalid("bad_schema:bindings.gate_ledger.high_watermark")
+        if path is None or not path.is_file():
+            return ("absent", entry.get("path"), None, hw)
+        actual = _sha256_hex(path.read_bytes())
+        if actual != declared:
+            return ("mismatch", entry.get("path"), None, hw)
+        return ("ok", entry.get("path"), actual, hw)
+
+    digests: dict = {}
+    hw_out: int | None = None
+    for key in ("budget_state", "gate_ledger", "attempts"):
+        if key not in bindings:
+            return f"unverifiable:binding_incomplete:{key}", None, None
+        st, rel, actual, hw = _check(bindings[key], need_hw=(key == "gate_ledger"))
+        if st == "absent":
+            return f"unverifiable:binding_records_absent:{rel}", None, None
+        if st == "mismatch":
+            return f"mismatch:{rel}", None, None
+        if key == "gate_ledger":
+            digests["gate_ledger"] = {"sha256": actual, "high_watermark": hw}
+            hw_out = hw
+        else:
+            digests[key] = actual
+    rounds = bindings.get("rounds")
+    if not isinstance(rounds, list):
+        return "unverifiable:binding_incomplete:rounds", None, None
+    rdigests = []
+    for r in rounds:
+        if not isinstance(r, dict) or not (isinstance(r.get("invocation_id"), str)
+                                           and r["invocation_id"]):
+            raise _SampleInvalid("bad_schema:bindings.rounds")
+        st, rel, actual, _ = _check(r)
+        if st == "absent":
+            return f"unverifiable:binding_records_absent:{rel}", None, None
+        if st == "mismatch":
+            return f"mismatch:{rel}", None, None
+        rdigests.append({"path": rel, "sha256": actual})
+    digests["rounds"] = rdigests
+    return "verified", digests, hw_out
+
+
+def _git_head(root: Path) -> str:
+    """repository_head：root 本身是 git 仓库根时才取 HEAD，否则 unavailable。"""
+    if not (root / ".git").exists():
+        return "unavailable"
+    try:
+        r = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                           capture_output=True, timeout=10)
+        head = r.stdout.decode("ascii", "replace").strip()
+        return head if re.fullmatch(r"[0-9a-f]{40}", head) else "unavailable"
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+
+
+def _calibration_entry(retro: Path) -> tuple[dict, int | None]:
+    """处理单份 retrospective，返回 (corpus_entry, declared_high_watermark)。"""
+    slug = retro.parent.name
+    ref = f"done:{slug}"
+    data = retro.read_bytes()
+    payloads, crlf = extract_json_fences(data)
+    if crlf:
+        return {"ref": ref, "quantitative_status": "excluded",
+                "reason": "malformed:crlf_payload"}, None
+
+    blocks: list[dict] = []
+    saw_broken_sample = False
+    for raw in payloads:
+        try:
+            obj = _strict_json(raw)
+        except (ValueError, UnicodeDecodeError):
+            if b"converge.calibration-sample" in raw:
+                saw_broken_sample = True
+            continue
+        if obj.get("schema") == CAL_SAMPLE_SCHEMA:
+            blocks.append(obj)
+
+    if not blocks:
+        if saw_broken_sample:
+            return {"ref": ref, "quantitative_status": "excluded",
+                    "reason": "malformed:json_parse"}, None
+        return {"ref": ref, "quantitative_status": "unavailable",
+                "reason": "no_sample"}, None
+
+    revision_ids = [b.get("revision_id") for b in blocks]
+    if len(set(map(repr, revision_ids))) != len(revision_ids):
+        return {"ref": ref, "quantitative_status": "excluded",
+                "reason": "duplicate_sample"}, None
+
+    # 当前 revision = 文件内最后一个样本块（append-only 约定）
+    sample = blocks[-1]
+    digest = _sha256_hex(canonical_json_bytes(sample))
+    try:
+        _validate_sample(sample)
+    except _SampleInvalid as e:
+        return {"ref": ref, "quantitative_status": "excluded",
+                "reason": str(e), "sample_digest": digest}, None
+
+    notes = _enforce_productivity_evidence(sample)
+    try:
+        bstatus, bdigests, hw = _verify_bindings(sample, retro.parent)
+    except _SampleInvalid as e:
+        return {"ref": ref, "quantitative_status": "excluded",
+                "reason": str(e), "sample_digest": digest}, None
+
+    declared_hw = None
+    b = sample.get("bindings") or {}
+    gl = b.get("gate_ledger") if isinstance(b, dict) else None
+    if isinstance(gl, dict) and isinstance(gl.get("high_watermark"), int):
+        declared_hw = gl["high_watermark"]
+
+    if bstatus.startswith("unverifiable"):
+        return {"ref": ref, "quantitative_status": "unverifiable",
+                "reason": bstatus.split(":", 1)[1],
+                "sample_digest": digest}, declared_hw
+    if bstatus.startswith("mismatch"):
+        return {"ref": ref, "quantitative_status": "excluded",
+                "reason": f"binding_mismatch:{bstatus.split(':', 1)[1]}",
+                "sample_digest": digest}, declared_hw
+
+    entry = {
+        "ref": ref,
+        "quantitative_status": "eligible",
+        "reason": "ok",
+        "revision_id": sample["revision_id"],
+        "sample_digest": digest,
+        "bindings": bdigests,
+        "usage": {k: sample["usage"][k]
+                  for k in ("outer", "blind", "inner_max_per_outer")},
+        "productive": {axis: sample["productive_at_or_after_limit"][axis]["value"]
+                       for axis in _CAL_AXES},
+    }
+    if notes:
+        entry["productivity_notes"] = notes
+    return entry, declared_hw
+
+
+def build_calibration_report(root: Path, report_id: str = "calibration",
+                             source_revision: str = "unavailable") -> dict:
+    """全量重算 calibration 报告（幂等、确定性）。绝不推荐默认值。"""
+    root = Path(root)
+    done_dir = root / ".converge" / "done"
+    entries: list[dict] = []
+    high_water = 0
+    retros = sorted(done_dir.glob("*/retrospective.md")) if done_dir.is_dir() else []
+    if not retros:
+        print(f"warning: {done_dir} 下未找到任何 retrospective.md", file=sys.stderr)
+    for retro in retros:
+        try:
+            entry, hw = _calibration_entry(retro)
+        except OSError as e:
+            entry, hw = ({"ref": f"done:{retro.parent.name}",
+                          "quantitative_status": "excluded",
+                          "reason": f"io_error:{e}"}, None)
+        entries.append(entry)
+        if hw is not None and hw > high_water:
+            high_water = hw
+    entries.sort(key=lambda e: e["ref"])
+
+    eligible = [e for e in entries if e["quantitative_status"] == "eligible"]
+    agg: dict = {"eligible_samples": len(eligible),
+                 "status": "available" if eligible else "unavailable"}
+    if eligible:
+        for axis in ("outer", "blind"):
+            usages = [e["usage"][axis] for e in eligible
+                      if e["productive"][axis] is True]
+            agg[axis] = {
+                "max_productive_usage": max(usages) if usages else None,
+                "productive_samples": len(usages),
+            }
+    return {
+        "schema": CAL_REPORT_SCHEMA,
+        "id": report_id,
+        "scope": "done-corpus",
+        "freshness": {
+            "repository_head": _git_head(root),
+            "source_archive_revision": source_revision,
+            "source_event_high_watermark": high_water,
+        },
+        "corpus": entries,
+        "corpus_digest": _sha256_hex(canonical_json_bytes(entries)),
+        "quantitative_aggregates": agg,
+    }
+
+
+def run_calibration(args) -> int:
+    root = Path(args.root) if args.root else Path(__file__).resolve().parent.parent
+    report = build_calibration_report(root, report_id=args.id,
+                                      source_revision=args.source_revision)
+    raw = canonical_json_bytes(report)
+    if args.output:
+        # 单 LF 已在 canonical 字节内；write_bytes 不做任何换行转换
+        Path(args.output).write_bytes(raw)
+    else:
+        sys.stdout.buffer.write(raw)
+        sys.stdout.buffer.flush()
+    return 0
+
+
+# ========================================================================
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -574,7 +977,25 @@ def main():
                     help="core 类规则休眠阈值（默认 20）")
     ap.add_argument("--core-archive-threshold", type=int, default=40,
                     help="core 类规则归档阈值（默认 40）")
+    ap.add_argument("--calibration", action="store_true",
+                    help="只读 calibration 报告模式（plan r2 D7）：扫描 "
+                         "<root>/.converge/done/*/retrospective.md 的 "
+                         "converge.calibration-sample/v1 块，输出 canonical JSON "
+                         "报告；缺省打印，--output 才落盘")
+    ap.add_argument("--root", default=None,
+                    help="calibration 模式的仓库根（内含 .converge/done；"
+                         "缺省为 skill 根目录）")
+    ap.add_argument("--output", default=None,
+                    help="calibration 报告落盘路径（缺省仅打印到 stdout）")
+    ap.add_argument("--id", default="calibration",
+                    help="calibration 报告的 id 字段（默认 calibration）")
+    ap.add_argument("--source-revision", default="unavailable",
+                    help="calibration 报告 freshness.source_archive_revision"
+                         "（默认 unavailable，不声称来源修订）")
     args = ap.parse_args()
+
+    if args.calibration:
+        sys.exit(run_calibration(args))
 
     run_antipattern = not args.rules or args.write
     run_rules = args.rules

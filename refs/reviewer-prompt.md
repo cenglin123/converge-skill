@@ -73,6 +73,15 @@ contract 路径：<contract_path>
 
 参照 `refs/reviewer-discipline.md`。逐条约束已在此文档中独立维护，Orchestrator 拼装此 prompt 时不再内联纪律正文。
 
+## 治理审查补充（条件激活——当收敛对象涉及治理变更时）
+
+若审查对象包含治理变更（numeric defaults/thresholds/stopping conditions），以下规则生效：
+
+- **机器输入唯一性**：`converge.governance-change/v1` fenced JSON 块是 preflight 的唯一机器输入；prose/表格中的数字不作为机器裁决依据
+- **窄数值经验门**：verified empirical conflict 必须列为 blocking（severity: conceptual），不得降级为 suggestion
+- **质量目标**：输出中必须包含完整原始 `quality_goal_event_id`（UUID）
+- **同字节回显**：material-revision 后的 Reviewer 输出必须回显与 prompt 中 byte-identical 的 `converge.review-target/v1` payload
+
 ## Antipattern 巡查（Round ≥ 2）
 
 读 attempts.md 时主动检查 executor 是否陷入反模式。反模式清单：按需查阅 `refs/antipatterns.md` 中 `status: active` 条目。
@@ -118,6 +127,20 @@ IF 收敛对象是代码项目（而非 plan），在语义审查之前，先尝
 - 是否遵循 TDD 红绿循环？跳过红灯直接写实现 → 列为 suggestion
 - 测试是否覆盖了 Executor 修改的路径？未覆盖的修改路径 → 列为 suggestion
 - 是否有确定性工具无法捕获的逻辑问题（边界条件、竞态、类型安全等）？→ 按 blocking/suggestion 标准判定
+
+### Executor 方法证据审查（条件激活）
+
+若 Executor 在产物中返回了方法证据（TDD 红绿循环、系统调试、完成验证），Reviewer 应审查证据的完整性和一致性：
+
+| 方法 | 期望证据 | 缺失或不一致时 |
+|------|---------|---------------|
+| TDD 红绿循环 | 测试身份、红灯结果、绿灯结果 | 缺少任一环节 → blocking（attribution: executor_limit） |
+| 系统调试 | 复现、证据、假设、修复、回归结果 | 缺少假设或回归 → blocking；其余 → suggestion |
+| 完成验证 | 命令/结果表、exit code、限制说明 | 完全缺失 → blocking；部分缺失 → suggestion |
+
+**不适用豁免**：若 Executor 声明方法不适用（无可执行行为变更、无法构造可靠预变更失败、相关 harness 不可用）并给出确切理由，缺失证据不构成 blocking。Reviewer 应验证豁免理由是否成立——不成立则仍为 blocking。
+
+**独立验证原则**：Executor 的方法证据是自证，不替代 Reviewer 的独立确定性检查。两次运行的价值不同：Executor 确认"修复后通过"，Reviewer 确认"全新上下文独立验证通过"。
 
 ### 占位符（orchestrator 注入）
 

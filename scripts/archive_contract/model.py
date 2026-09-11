@@ -676,6 +676,10 @@ def validate_ledger(root: Path, events: list[dict[str, Any]], *,
             raise ArchiveError("ledger-invocation-open", "Budget-bound Spawn has no terminal event.", "evidence/events")
         settlement = settles[rid]
         expected = {"spawn_succeeded": {"succeeded"}, "spawn_failed": {"failed", "timeout"}, "cancelled": {"cancelled"}}[settlement["event"]]
+        if settlement["event"] == "cancelled" and settlement.get("pre_execution") is True:
+            # pre_execution=true 的 cancelled 结算允许与 failed 恢复终态配对：二者是
+            # 同一事实（模型从未被调用）在预算层与归档层的两种词汇。
+            expected = expected | {"failed"}
         if terminal["terminal_status"] not in expected:
             raise ArchiveError("ledger-status-conflict", "Ledger settlement conflicts with invocation terminal status.", "gate-ledger.jsonl")
         if terminal.get("settlement_ref") != f"gate-ledger.jsonl:{rid}":

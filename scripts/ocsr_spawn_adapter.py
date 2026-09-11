@@ -36,6 +36,12 @@ import sys
 import uuid
 from pathlib import Path
 
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import budget_gate  # noqa: E402
+
 
 EXIT_PROCEED = 0
 EXIT_ARCHIVE_CLI = 3
@@ -255,6 +261,50 @@ def _detect_opencode_version() -> str:
         return "unknown"
 
 
+def _ensure_te_companion(gate_script: Path, active_dir: Path,
+                         role_reservation_id: str, tier: str) -> bool:
+    """D10: Ensure a task-envelope companion exists for a pre-reserved role.
+
+    When --reserved-reservation-id is provided, the adapter bypasses _gate_reserve
+    (which handles atomic companion pairing). This function retroactively creates
+    the companion via the gate's --companion-for mechanism.
+
+    Returns True if companion was created or already exists, False on failure.
+    """
+    try:
+        state = budget_gate.read_state(active_dir)
+    except budget_gate.FailClosed:
+        return True  # Can't read state → skip companion (A8: unconfigured = no-op)
+    if not budget_gate._task_envelope_configured(state):
+        return True  # No envelope configured → no companion needed (A8)
+
+    # Check if companion already exists (forward or reverse lookup)
+    events = budget_gate.read_ledger(active_dir)
+    for ev in events:
+        if (ev.get("event") == "reserved"
+                and ev.get("reservation_id") == role_reservation_id
+                and ev.get("companion_reservation_id") is not None):
+            return True  # Already has companion (forward link on role)
+    # Reverse lookup: companion may reference this role without the role
+    # carrying a forward reference (append-only pre-reserved path)
+    for ev in events:
+        if (ev.get("event") == "reserved"
+                and ev.get("companion_reservation_id") == role_reservation_id):
+            return True  # Already has companion (reverse link from companion)
+
+    # Create companion via gate CLI
+    args = ["reserve", "--active-dir", str(active_dir),
+            "--role", "task-envelope", "--tier", tier,
+            "--companion-for", role_reservation_id]
+    rc, out, err = _run_cli(gate_script, args)
+    if rc == 0 and out.startswith("PROCEED:"):
+        return True
+    if "companion_already_exists" in (out or ""):
+        return True  # Idempotent
+    _err(f"[adapter] companion creation failed (rc={rc}): {out or err}")
+    return False
+
+
 def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -> tuple[str, str, bool]:
     """Map ocsr dispatch outcome to (recover_status, failure_reason_code, pre_execution).
 
@@ -305,29 +355,19 @@ def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -
 def cmd_config_init(args) -> int:
     """Write an initial `_budget-state.json` to the converge active dir.
 
-    budget_gate.py auto-creates a default state on first reserve if absent, but
-    ultraverge mode requires `max_blind_rechecks=2` override *before* any reserve
-    (per SKILL.md §Ultraverge: "纯 orchestrator 行为、零代码"). This subcommand
-    encapsulates that init for reproducibility — orchestrator-side JSON writes are
-    easy to get wrong (typo in key, wrong type) and budget_gate fail-closes on
-    schema violations, so a typed CLI is safer than hand-editing.
-
-    Idempotent: if the state file already exists, returns FAIL_CLOSED without
-    modification (use --force to overwrite). Mirrors budget_gate bind's
-    `already_bound` semantics: re-init in error smells like state loss.
+    Delegates to the shared budget_gate.initialize_state() (plan D3):
+    - Empty state → creates standard/ultraverge mode with explicit config.
+    - Existing state → validates complete state; equal values are idempotent no-op;
+      conflicting values fail closed (--force overrides).
+    - Standard and ultraverge share the same default ceilings (no mode overlay).
     """
+    import budget_gate
+
     active_dir = Path(args.converge_active).resolve()
     if not active_dir.is_dir():
         _err(f"active_dir not a directory: {active_dir}")
         return EXIT_INTERNAL
-    state_path = active_dir / "_budget-state.json"
-    if state_path.exists() and not args.force:
-        _err(f"_budget-state.json already exists at {state_path}; use --force to overwrite")
-        return EXIT_FAIL_CLOSED
 
-    # Build config from defaults + overrides. We deliberately do NOT call
-    # budget_gate.read_state() to avoid importing the gate module; we just write
-    # the JSON the gate expects (its read_state will normalize missing keys).
     config: dict = {}
     if args.max_outer_loops is not None:
         config["max_outer_loops"] = args.max_outer_loops
@@ -337,23 +377,23 @@ def cmd_config_init(args) -> int:
         config["ultraverge_min_reviewers"] = args.ultraverge_min_reviewers
     if args.max_inner_loops is not None:
         config["max_inner_loops"] = args.max_inner_loops
-    if args.mode == "ultraverge":
-        # Ultraverge override per SKILL.md §Ultraverge (zero-code orchestrator
-        # behavior, but typed here so it can't be typo'd):
-        config.setdefault("max_blind_rechecks", 2)
-    state = {
-        "config": config,
-        "extensions": [],
-        "fsm": {"mode": args.mode, "severities": {}},
-    }
-    # LF-pinned write (mirrors budget_gate.write_state): _budget-state.json is
-    # a root-fixed, manifest-hashed file that must stay byte-identical to what
-    # Git checks out under `.gitattributes: * text=auto eol=lf`.
-    state_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2),
-        encoding="utf-8", newline="\n",
-    )
-    print(f"[config-init] wrote {state_path} (mode={args.mode}, config={config})")
+
+    try:
+        state = budget_gate.initialize_state(
+            active_dir, mode=args.mode, config=config, force=args.force)
+    except budget_gate.FailClosed as e:
+        _err(f"FAIL_CLOSED:{e.reason}")
+        return EXIT_FAIL_CLOSED
+    # Phase 5b: initialization disclosure
+    if budget_gate._task_envelope_configured(state):
+        ceilings = {s: budget_gate.ceiling(state, s)
+                    for s in ("outer", "blind", "ultraverge", "total")}
+        te_initial = budget_gate._task_envelope_initial(state)
+        te_cap = budget_gate._task_envelope_hard_cap(state)
+        print(f"[init] local ceilings: {ceilings}")
+        print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
+        print("[init] quality_path_guaranteed: false")
+    print(f"[config-init] OK (mode={args.mode}, config={config})")
     return EXIT_PROCEED
 
 
@@ -406,6 +446,8 @@ def cmd_dispatch(args) -> int:
         # Caller asserts they already reserved; we trust this (no re-reserve).
         # But we still record the budget gate's absence in our state by skipping.
         _err(f"[adapter] using externally-reserved id: {reservation_id}")
+        # D10: Ensure task-envelope companion exists for the pre-reserved role
+        _ensure_te_companion(gate_script, active_dir, reservation_id, args.tier)
     else:
         rc, msg = _gate_reserve(gate_script, active_dir, args.role, args.round,
                                 None, args.tier)
@@ -709,8 +751,8 @@ def build_parser() -> argparse.ArgumentParser:
     ci = sub.add_parser("config-init",
                         help="Write initial _budget-state.json (idempotent; --force to overwrite).")
     ci.add_argument("--converge-active", required=True)
-    ci.add_argument("--mode", default="standard", choices=["standard", "ultraverge"],
-                    help="FSM mode; 'ultraverge' auto-applies max_blind_rechecks=2 override.")
+    ci.add_argument("--mode", default=None, choices=["standard", "ultraverge"],
+                    help="FSM mode; both modes share the same default ceilings; omit to inherit.")
     ci.add_argument("--max-outer-loops", type=int, default=None)
     ci.add_argument("--max-blind-rechecks", type=int, default=None)
     ci.add_argument("--ultraverge-min-reviewers", type=int, default=None)

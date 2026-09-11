@@ -6,7 +6,7 @@
     begin-invocation kind=continue(parent_event_id=父 started 事件 id,
     parent_instance_id=父 instance_id,reservation_id=None);**无 gate reserve**
     (契约:continue 不得携带 reservation;计数独立于 spawn cap 天然成立)
-  - 上限:同一父链最多 3 次 continue(max_inner_loops,SKILL.md L273)
+  - 上限:同一父链由 active state 的有效 max_inner_loops 限制
   - register-round --invocation-id <iid>:complete continue(succeeded),
     无 settle;settle 复用既有路径不适用;instance 必须等于父 instance(续命同实例)
   - finish 步骤 3:continue 孤儿(started 无 terminal)按无 reservation 分支恢复
@@ -17,6 +17,9 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import budget_gate  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_loop_a_coverage import (  # noqa: E402
@@ -31,6 +34,12 @@ def _started_of(events, invocation_id):
 
 
 class TestContinueChain(LoopABase):
+
+    def _init_budget(self, inner: int | None = None):
+        config = {}
+        if inner is not None:
+            config["max_inner_loops"] = inner
+        budget_gate.initialize_state(self.active, config=config)
 
     def _spawned_parent(self) -> tuple[str, str, str]:
         rid, iid = self.reserve(round_no=1)
@@ -51,7 +60,7 @@ class TestContinueChain(LoopABase):
         n_reserved_before = len([e for e in _read_gate_ledger(self.active)
                                  if e.get("event") == "reserved"])
 
-        # 三次 Continue 全链
+        # stock 上限为 3 次 Continue（max_inner_loops 默认 3）
         cont_iids = []
         for k in range(3):
             rc, out, err = self._continue(rid)
@@ -75,7 +84,7 @@ class TestContinueChain(LoopABase):
                 "--invocation-id", cont_iid, "--instance-id", sid)
             self.assertEqual(rc, 0, f"register continue #{k+1}: {out} {err}")
 
-        # 第四次 Continue 被上限拒绝(max_inner_loops=3)
+        # 第 4 次 Continue 被 stock 上限拒绝
         rc, out, err = self._continue(rid)
         self.assertNotEqual(rc, 0, "第 4 次 continue 应被拒绝")
         combined = out + err
@@ -105,6 +114,20 @@ class TestContinueChain(LoopABase):
         rc, out, err = self.finish()
         self.assertEqual(rc, 0, f"finish rc={rc} {out} {err}")
         self.assertTrue((self.done_root / self.SLUG).is_dir())
+
+    def test_active_override_allows_exactly_three_continues(self):
+        self._init_budget(inner=3)
+        rid, _, sid = self._spawned_parent()
+        for k in range(3):
+            rc, out, err = self._continue(rid)
+            self.assertEqual(rc, 0, f"continue #{k + 1}: {out} {err}")
+            iid = next(line.split(":", 1)[1].strip() for line in out.splitlines()
+                       if line.startswith("invocation_id:"))
+            rc, out, err = run_orchest(
+                "register-round", "--active-dir", str(self.active),
+                "--invocation-id", iid, "--instance-id", sid)
+            self.assertEqual(rc, 0, out + err)
+        self.assertNotEqual(self._continue(rid)[0], 0)
 
     def test_continue_parent_must_be_succeeded_spawn(self):
         # 父未 register(无 terminal)→ 拒绝
@@ -157,6 +180,70 @@ class TestNoRegressionWithoutContinue(LoopABase):
         self.assertEqual(ev["invocation_kind"], "spawn")
         self.assertEqual(ev.get("parent_event_id"), None)
         self.assertEqual(ev.get("reservation_id"), rid)
+
+
+class TestContinueTaskEnvelopeLinkage(LoopABase):
+    """D10: Continue single-reservation linkage for task-envelope companion.
+
+    Continue keeps its no-local-reservation contract; its call_id links
+    the task-envelope reservation directly to the existing invocation-started
+    event (explicit single-reservation exception).
+    """
+
+    def _init_with_te(self, tier="small"):
+        budget_gate.initialize_state(self.active, config={"task_tier": tier})
+
+    def _spawned_parent(self) -> tuple[str, str, str]:
+        rid, iid = self.reserve(round_no=1)
+        rc, out, err = self.register(rid, "inst-r1")
+        self.assertEqual(rc, 0, err)
+        return rid, iid, "inst-r1"
+
+    def test_continue_creates_te_companion_when_configured(self):
+        """When task-envelope is configured, Continue creates a task-envelope
+        companion reservation linked to the invocation-started event."""
+        self._init_with_te()
+        rid, parent_iid, sid = self._spawned_parent()
+        rc, out, err = run_orchest(
+            "reserve-round", "--active-dir", str(self.active),
+            "--phase", "inner-review", "--attempt", "1",
+            "--prompt-file", str(self.prompt),
+            "--requested-provider", "testp", "--requested-model", "testm",
+            "--continue-of", rid)
+        self.assertEqual(rc, 0, f"continue failed: {out} {err}")
+        cont_iid = next((l.split(":", 1)[1].strip()
+                         for l in out.splitlines()
+                         if l.startswith("invocation_id:")), None)
+        self.assertTrue(cont_iid, f"No invocation_id in output: {out}")
+        # Check task-envelope companion was created
+        ledger = _read_gate_ledger(self.active)
+        te_reserved = [e for e in ledger
+                       if e.get("event") == "reserved"
+                       and e.get("target_role") == "task-envelope"]
+        self.assertTrue(len(te_reserved) >= 1,
+                        "Continue must create task-envelope companion when configured")
+        comp = te_reserved[-1]
+        # call_id must link to the invocation
+        self.assertIsNotNone(comp.get("call_id"))
+        self.assertEqual(comp.get("call_id"), cont_iid,
+                         "call_id must equal Continue invocation_id")
+
+    def test_continue_no_te_companion_when_unconfigured(self):
+        """Without task-envelope config, Continue creates no companion."""
+        rid, parent_iid, sid = self._spawned_parent()
+        n_before = len([e for e in _read_gate_ledger(self.active)
+                        if e.get("event") == "reserved"])
+        rc, out, err = run_orchest(
+            "reserve-round", "--active-dir", str(self.active),
+            "--phase", "inner-review", "--attempt", "1",
+            "--prompt-file", str(self.prompt),
+            "--requested-provider", "testp", "--requested-model", "testm",
+            "--continue-of", rid)
+        self.assertEqual(rc, 0, f"continue failed: {out} {err}")
+        n_after = len([e for e in _read_gate_ledger(self.active)
+                       if e.get("event") == "reserved"])
+        self.assertEqual(n_after, n_before,
+                         "No new reservations when task-envelope unconfigured")
 
 
 if __name__ == "__main__":

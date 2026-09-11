@@ -47,7 +47,7 @@ Round 表示由 `model.canonical_round()` 单点归一化：`round` 字段只有
 
 requested provenance 字段为 `requested_provider/requested_model`；resolved 字段为 `resolved_provider/resolved_model/resolved_family/backend/backend_version`。`evidence_level=observed|host-reported|configured|inherited|unavailable`，`resolution_source=host_receipt|tool_response|cli_argument|agent_config|parent_instance|none`。configured/inherited 不得带 resolved model。partial/unavailable reason 仅允许 `backend-does-not-expose|receipt-missing|inherited-concrete-model-hidden|invocation-failed-before-resolution`。
 
-`settlement_ref`（`invocation-terminal` 字段）由 `capture.complete_invocation` 自动生成规范值 `gate-ledger.jsonl:<reservation_id>`——仅当调用方**未显式传入** `settlement_ref` 且该 invocation 是持有 `reservation_id` 的 spawn 时触发；调用方仍可显式传入覆盖值（走基本格式校验：非空、有界字符串），但**不再需要**为常见路径手拼规范值。Continue（无 reservation）不受影响，`settlement_ref` 保持 `None`，语义不变。`gate-ledger.jsonl` 侧的 `ledger-settlement-ref` 交叉校验（archive 时）不变——若显式覆盖值与对应 reservation 不一致，仍会在 `validate_ledger` 处被拒绝。
+`settlement_ref`（`invocation-terminal` 字段）由 `capture.complete_invocation` 自动生成规范值 `gate-ledger.jsonl:<reservation_id>`——仅当调用方**未显式传入** `settlement_ref` 且该 invocation 是持有 `reservation_id` 的 spawn 时触发；调用方仍可显式传入覆盖值（走基本格式校验：非空、有界字符串），但**不再需要**为常见路径手拼规范值。Continue（无 reservation）不受影响，`settlement_ref` 保持 `None`，语义不变。`gate-ledger.jsonl` 侧的 `ledger-settlement-ref` 交叉校验（archive 时）不变——若显式覆盖值与对应 reservation 不一致，仍会在 `validate_ledger` 处被拒绝。结算与终态的配对上，`pre_execution=true` 的 `cancelled` 结算允许与 `failed` 恢复终态配对——二者是同一事实（模型从未被调用）在预算层与归档层的两种词汇；非 pre_execution 的 `cancelled` 结算仍只与 `cancelled` 终态配对。
 
 ### Evidence 与路径
 
@@ -60,6 +60,44 @@ requested provenance 字段为 `requested_provider/requested_model`；resolved �
 manifest 承诺 canonical records、events、invocation/artifact blobs、revision manifests 的相对路径/hash/size，以及 invocation projection、artifact projection、final decision、advisory refs、degradations、parent revision。manifest 不自哈希；检查从 owners 重投影做语义比较，再逐字节重建 INDEX。archive 事务状态为 `preparing -> source-backed-up -> committed`，post-check 失败进入 `rolled-back`；reopen 使用 `reopen-prepared -> reopen-moved` journal。异常 journal 报 `recoverable`。重试从 journal 恢复，且任一时刻只接受 active、backup 或 done 中一个 authoritative 副本。只有 canonical done root 内且 check valid 才是 archived。reopen 将旧 manifest 原字节进入 revisions，新事件从历史最大 sequence 继续。
 
 威胁边界：v1 只保证归档时点内部一致性、结构完整性和声明 provenance 可追溯性；hash 不认证来源，configured/inherited 不证明实际模型。本契约不抵抗同权限整体重写归档、ledger、manifest 和 Git 历史。
+
+### 版本化 fenced JSON 机器块契约
+
+以下四个契约共用同一组字节与定位规则。机器块只存在于 fenced code block 中：opening line 是三个反引号紧接 `json`，closing line 是三个反引号。散文与 Markdown 表格永不进入机器解析。
+
+**通用规则**：
+
+- canonical 字节：UTF-8 编码、`json.dumps` 的 `sort_keys=True` + `separators=(",", ":")`（compact）、`ensure_ascii=False`，恰好一个尾随 LF。payload 含 CR（CRLF 污染）一律 fail closed，不做静默换行归一化；所有写字节处必须显式 newline 控制。
+- 严格解析：拒绝重复 key、NaN/Infinity、非 dict 顶层。
+- locator 语法：`<root-file>::json-fence[schema=<schema>,id=<id>]`。`root-file` 是不含路径分隔符的普通文件名，且必须在 Archive Contract 根 allowlist 内；解析时相对引用方所在目录打开该文件，只扫描上述 `json` fence，按顶层 `schema` 与 `id` 精确选择，要求恰好一个命中。错误分类：文件缺失或 `id` 缺席 = `path-not-found`；多于一个精确命中 = `duplicate-target`；请求的 `id` 仅出现在其他 schema 下 = `wrong-schema`。
+- 块 hash = 该块 canonical 字节的 SHA-256（64 位小写 hex）；是子块 hash，不是所在文件的 hash，因此无自引用。
+
+**`converge.calibration-sample/v1`**（retrospective 当前 revision 的唯一样本；多 revision 样本按文件顺序取最后一个为当前，revision_id 重复即 duplicate）：
+
+- 必填：`schema`、`revision_id`、`configured_limits{outer,blind,inner,task_envelope}`（前三个为正整数）、`usage{outer,blind,inner_max_per_outer}`（非负整数）、`productive_at_or_after_limit{outer,blind,inner}` 各为 `{value, evidence_refs}`（`value ∈ true|false|"unavailable"`）、`accounting_scope`、`accounting_coverage ∈ instrumented_complete|partial|unavailable`、`model_invocations`（非负整数或 `"unavailable"`；数值仅允许 `instrumented_complete`）、`terminal{value, reviewer_terminal_event_id}`。不允许未知顶层字段。
+- `bindings`（缺失整键 = 旧样本，记 `unverifiable` 而非 malformed）：`budget_state{path,sha256}`、`gate_ledger{path,sha256,high_watermark}`、`rounds[{path,sha256,invocation_id}]`、`attempts{path,sha256}`。path 相对该 retrospective 所在目录解析且不得越界；记录存在则复算 SHA-256 比对（不一致 = 排除出定量聚合），记录缺失 = `unverifiable`。
+- `productive` 的 `true|false` 必须带非空、每项为非空字符串的 `evidence_refs`，否则强制 `"unavailable"`——绝不默认 `false`。
+
+**`converge.calibration-report/v1`**（`distill_antipatterns.py --calibration` 的确定性输出）：
+
+- 字段：`schema`、`id`、`scope`、`freshness{repository_head,source_archive_revision,source_event_high_watermark}`（`repository_head` 为 40 位 hex 或 `"unavailable"`；high-water 为非负整数）、`corpus`（按 `ref` 排序的条目数组）、`corpus_digest`（corpus 数组 canonical 字节的 SHA-256）、`quantitative_aggregates{eligible_samples,status,...}`。
+- corpus 条目：`ref`、`quantitative_status ∈ eligible|unavailable|unverifiable|excluded`、`reason`；eligible 条目另带 `revision_id`、`sample_digest`（样本 canonical SHA-256）、`bindings`（各绑定实测 hash/ledger high-water）、`usage`、`productive`。缺失/畸形/不可绑定样本列入 corpus 但不进定量聚合。
+- 新鲜度 = 重算的 corpus digest 与事件 high-water 与报告一致；不一致即 stale，消费方 fail closed。报告绝不包含默认值/阈值推荐。
+
+**`converge.governance-change/v1`**（治理计划 preflight 的唯一机器输入）：
+
+- 字段恰好为：`schema`、`change_id`、`numeric_changes`、`archaeology_refs`、`calibration`、`counterevidence_refs`、`user_message_events`。未知/缺失字段 fail closed。
+- `numeric_changes[]` 恰好含 `{control,kind,released,old,proposed,comparison,basis}`；`kind ∈ default|threshold|stopping_condition|mechanism`，`comparison ∈ outer|blind|null`；数值 kind 的 `released/old/proposed` 必须为整数，`mechanism` 允许为 null。
+- `archaeology_refs`：非空列表，每项 `git:<40hex>` 或 `archive:<…>`；在 git 工作树内 `git:` 引用须通过 `cat-file -e` 存在性核验。
+- `calibration`：`{path, sha256, corpus_digest, freshness}`——`path` 为指向唯一 calibration-report 块的 locator；`sha256` 为该块 canonical hash 复算值；`corpus_digest` 与 `freshness` 须与报告完全一致（否则 stale fail closed）。
+- `user_message_events`：必填 `quality_goal`、`execution_authorization`，可选 `tradeoff_decision`，值均为 UUID。
+- 窄数值经验门：仅对 `kind ∈ default|threshold|stopping_condition` 且 `comparison ∈ {outer,blind}` 的条目；存在该 axis `productive=true` 的 eligible 样本时，`proposed < max(已观测推进用量)` 且 `counterevidence_refs` 为空且无 `tradeoff_decision` → `BLOCK:empirical_conflict`。`mechanism` 与 `comparison=null`（含角色权限/一般机制）不被数值门裁决。
+- bootstrap 例外（一次性）：编译器落地前唯一自举形态是计划内嵌 calibration-report 块（locator 指向 plan 自身）；后续治理变更必须由 `--calibration` 生成的报告提供。
+
+**`converge.review-target/v1`**（material revision 后两次同字节审查的 payload）：
+
+- 字段：`schema`、`target_id`、`revision_id`、`artifact{path,sha256,size}`、`material_revision{locator,sha256}`（locator 指向 `attempts.md` 内唯一 `converge.material-revision/v1` 块）、`quality_goal_event_id`（UUID）。
+- payload 是一行 canonical JSON（sorted keys、compact、UTF-8、恰好一个 LF）。两份 authority prompt 的抽取 canonical payload 字节必须相同，两份 Reviewer 输出回显的 payload 也必须逐字节相同；`plan.md` 事后任何字节变化使两份审查同时失效。
 
 ---
 

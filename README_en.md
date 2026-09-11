@@ -72,6 +72,35 @@ reserve → Agent spawn → settle → ingest-verdict
 
 > `best-effort guarded` is **not** `enforced` — it only enforces a **total spawn cap**: it does not perform per-scope reserve/settle (still Orchestrator-driven), does not defend against active deletion or tampering of the hook/binding, and the hook writes no ledger (no double-counting with the ledger). It addresses drift, forgetting, and post-compaction loss of control.
 
+### Budget profile
+
+| Mode | outer | blind | Continue | Total cap |
+|------|-------|-------|----------|-----------|
+| standard (default) / ultraverge | 8 | 3 | 3 | 63 |
+
+- Stock defaults `8/3/3` are evidence-restored stop-loss ceilings (`scripts/budget_gate.py` DEFAULTS is the single authoritative source): ordinary tasks typically converge in 2-3 rounds, outer=8/blind=3 are stop-loss ceilings for complex tasks rather than expected usage; inner=3 is released-compatibility, not equally-strong empirical calibration. Standard and ultraverge share the same default ceilings; no mode overlay.
+- Total cap is derived by a deterministic formula from `scripts/budget_gate.py` DEFAULTS and `total_safety=1.5`; the script is the authoritative source.
+- Extensions require `scope=total` (must reference a real BLOCK decision event + user's verbatim quote).
+
+### Shared initialization
+
+All entry paths (manual Orchestrator, `ocsr_spawn_adapter.py config-init`, `converge_loop.py run`) share the same initialization contract: `budget_gate.initialize_state()`.
+
+- No active state → create standard/ultraverge mode + explicit config write
+- Existing state → validate complete state/ledger; omitted fields inherit active state; explicitly equal values are idempotent no-ops; conflicting values fail closed
+- Standard and ultraverge share the same default ceilings; no mode overlay
+- Unknown keys, booleans-as-integers, negatives, string numbers, malformed shapes → fail closed
+
+### v1/v2 migration
+
+- New loop specs use `version: 2`, `budget_config.max_inner_loops` only for true Continue, and `driver_config.max_executor_repair_attempts` for fresh Executor retries
+- Existing `version: 1` specs remain loadable; an explicit v1 `budget_config.max_inner_loops` is migrated in memory to `driver_config.max_executor_repair_attempts`, is not written as active-state Continue limit, and emits a deprecation warning
+- When a v1 spec and existing active state coexist, the migrated retry value remains driver-local while validated active `max_inner_loops` remains the Continue limit
+
+### Continue semantics
+
+`max_inner_loops` has exactly one meaning: the number of `orchest.py reserve-round --continue-of` calls allowed on the same succeeded Reviewer instance. `orchest.py` reads the effective value from validated active state — not hardcoded. `converge_loop.py` acts as a fresh-review scheduler; its retries are bounded by `driver_config.max_executor_repair_attempts` (default 1), which is distinct from Continue.
+
 ### Budget-block handling
 
 When a budget limit is hit the gate returns `BLOCK:budget_exhausted` / `blind_exhausted` / `ultraverge_exhausted` / `total_spawn_cap`: **stop**. No further spawn is allowed without a valid `budget_extension` (must reference a real BLOCK decision event + the user's verbatim quote). The user chooses: extend and continue / accept the current artifact (terminate-c) / simplify the plan / terminate.

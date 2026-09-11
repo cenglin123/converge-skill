@@ -270,3 +270,31 @@ severity 四档（`conceptual` / `architectural` / `structural` / `implementatio
 ## 反模式
 
 按需查阅 `refs/antipatterns.md` 中 `status: active` 条目。
+
+## 治理审查纪律（条件激活——当收敛对象涉及治理变更时）
+
+### 机器输入纪律
+
+`converge.governance-change/v1` 唯一 fenced JSON 块是 preflight 的**唯一机器输入**。prose/Markdown 表格中的数字不进入机器解析——Reviewer 不得从散文或表格中提取数字作为机器裁决依据。
+
+### 窄数值经验门
+
+当 Reviewer 审查涉及 numeric defaults/thresholds/stopping conditions 的治理变更时：
+
+- `empirical_conflict` 字段：当 productive comparable evidence 与 proposed 变更方向矛盾时标注
+- `user_decision_required` 字段：当 verified empirical conflict 存在且无 tradeoff_decision 时标注
+- **已验证的 empirical conflict 不得降级为 suggestion**——它是 BLOCK 级阻断，不是建议
+
+### 质量目标事件 ID
+
+治理审查的 Reviewer 输出必须包含完整原始 `quality_goal_event_id`（UUID），不得截断或省略。
+
+### 同字节输出回显
+
+material-revision 后的 Reviewer 输出必须回显与 prompt 中完全相同的 `converge.review-target/v1` payload 字节。不一致使审查无效。
+
+## 红灯纪律
+
+Reviewer 审查 Executor 的红灯/绿灯证据时：
+- **不得为了仪式性红灯**而要求 Executor 制造无意义的测试失败。红灯步骤的价值在于证明"修复前确实会失败"，而非满足流程形式。
+- 测试必须**独立运行**——Reviewer 的测试验证不依赖 Executor 报告的结果，而是在全新上下文中独立确认。

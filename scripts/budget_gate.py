@@ -31,9 +31,12 @@ extension 链线性、单调、prior 与被取代记录的 new_ceiling 衔接、
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import re
+import subprocess
 import sys
 import time
 import uuid
@@ -46,6 +49,7 @@ EXIT_BLOCK_BLIND = 11
 EXIT_BLOCK_ULTRAVERGE = 12
 EXIT_BLOCK_TOTAL = 13
 EXIT_BLOCK_TASK_ENVELOPE = 14
+EXIT_BLOCK_EMPIRICAL = 15
 EXIT_MODE_SWITCH = 20
 EXIT_DENY_UNKNOWN = 21
 EXIT_DENY_ILLEGAL = 22
@@ -58,10 +62,23 @@ EXIT_FAIL_CLOSED = 30
 from archive_contract.model import canonical_round  # noqa: E402
 
 DEFAULTS = {
-    # 默认额度(2026-08-16 调优,实证依据 .meta/memory/project/ 20260816 预算复盘):
-    # 原默认 5/1 下两次真实收敛(orchest/loop-wiring)全部超限打断——outer 实际 7/12,
-    # blind 实际 3/4,且每轮 findings 均在推进(零振荡),门卡的是正常收敛非异常。
-    # blind=3 覆盖"盲审打回→修复→再审"一个完整周期;超默认仍走 extension 显式授权。
+    # 实证恢复的止损上限（非预期调用次数）：0137fce 两次复杂收敛 outer 7/12、blind 3/4
+    # 仍在持续推进；d3c82cb 治理任务至 outer R8、blind #2 后方通过——outer=8/blind=3
+    # 据此恢复为复杂任务止损上限。inner=3 为已发布兼容保留（无缩减证据，不声称同等
+    # 强度的实证校准）。
+    "max_outer_loops": 8,
+    "max_blind_rechecks": 3,
+    "ultraverge_min_reviewers": 3,
+    "max_inner_loops": 3,
+    "impl_severity_streak_threshold": 3,
+    "preflight_code_block_threshold": 3,
+    "preflight_code_loc_threshold": 40,
+    "total_safety": 1.5,
+}
+
+# 旧版默认值：sparse legacy state（defaults_version=1）使用此表回退，
+# 不随 DEFAULTS 变化而静默改变有效预算（DR1 权威性一致性）。
+LEGACY_DEFAULTS = {
     "max_outer_loops": 8,
     "max_blind_rechecks": 3,
     "ultraverge_min_reviewers": 3,
@@ -145,6 +162,11 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _mint_call_id() -> str:
+    """Mint one unique call_id per instrumented model call (D10)."""
+    return uuid.uuid4().hex[:16]
+
+
 def _ledger_path(active: Path) -> Path:
     return active / LEDGER_NAME
 
@@ -182,6 +204,45 @@ def append_ledger(active: Path, event: dict) -> None:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
+def _validate_state_shape(st: dict) -> None:
+    """Shared state-shape/value validator for read_state() and initialize_state().
+
+    Validates before calling .items(), .get(), or .setdefault() on any unproved
+    nested type. Raises FailClosed on any violation.
+
+    Does NOT enforce version-specific INT_CONFIG range (v >= 1) because read_state()
+    must accept sparse legacy states with zero-valued INT_CONFIG.  That stricter check
+    lives in initialize_state() where defaults_version is known.
+    """
+    if not isinstance(st.get("config", {}), dict):
+        raise FailClosed("state_corrupt:config_not_object")
+    if not isinstance(st.get("extensions", []), list):
+        raise FailClosed("state_corrupt:extensions_not_list")
+    fsm = st.get("fsm")
+    if not isinstance(fsm, dict):
+        raise FailClosed("state_corrupt:fsm_not_object")
+    mode = fsm.get("mode", "standard")
+    if not isinstance(mode, str) or mode not in ("standard", "ultraverge"):
+        raise FailClosed(f"state_corrupt:fsm_mode_invalid:{mode}")
+    if not isinstance(fsm.get("severities", {}), dict):
+        raise FailClosed("state_corrupt:severities_not_object")
+    # Config key validation: reject unknown keys (shared by read_state + initialize_state).
+    # Type checks for known keys (bool-as-int, wrong type) applied here; range checks
+    # (v < 1) deferred to caller with version context.
+    cfgd = st.get("config", {})
+    _INT_TASK_KEYS = {"task_envelope_initial", "task_envelope_cap"}
+    for k, v in cfgd.items():
+        if k not in DEFAULTS and k not in ("task_tier", "task_envelope_initial",
+                                            "task_envelope_cap"):
+            raise FailClosed(f"config_unknown:{k}")
+        if k in INT_CONFIG or k in _INT_TASK_KEYS:
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise FailClosed(f"config_type:{k}")
+        if k == "total_safety":
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise FailClosed(f"config_type:{k}")
+
+
 def read_state(active: Path) -> dict:
     p = _state_path(active)
     if not p.exists():
@@ -195,8 +256,7 @@ def read_state(active: Path) -> dict:
     st.setdefault("config", {})
     st.setdefault("extensions", [])
     st.setdefault("fsm", {"mode": "standard", "severities": {}})
-    if not isinstance(st["config"], dict) or not isinstance(st["extensions"], list):
-        raise FailClosed("state_corrupt:bad_shape")
+    _validate_state_shape(st)
     st["fsm"].setdefault("mode", "standard")
     st["fsm"].setdefault("severities", {})
     return st
@@ -210,8 +270,170 @@ def write_state(active: Path, state: dict) -> None:
     )
 
 
+def initialize_state(active: Path, *, mode: str | None = None,
+                     config: dict | None = None, force: bool = False) -> dict:
+    """Host-independent 状态初始化器/解析器（plan D3）。
+
+    手动 orchestrator、ocsr_spawn_adapter config-init、converge_loop run
+    三条入口共享同一初始化契约。行为：
+
+    1. 无 active state → 创建 standard/ultraverge 模式 + 显式 config 写入。
+    2. 已有 state → 校验完整状态/ledger；省略字段继承 active state；
+       显式相等值为幂等 no-op；冲突值 fail-closed（不静默覆盖）。
+    3. standard 与 ultraverge 共用同一组默认值上限，无模式叠加。
+    4. 未知键、布尔伪装整数、负数、字符串数字、malformed shape → fail-closed。
+    5. force=True 跳过冲突检查，直接覆盖。
+    6. mode=None 表示省略：已有 state 继承其模式，新 state 默认 standard。
+    """
+    p = _state_path(active)
+    if config is not None and not isinstance(config, dict):
+        raise FailClosed(f"config_type:not_mapping")
+    explicit = dict(config or {})
+
+    # --- 校验显式 config 值（无论是否有已有 state） ---
+    for k, v in explicit.items():
+        if k not in DEFAULTS and k not in ("task_tier", "task_envelope_initial",
+                                            "task_envelope_cap"):
+            raise FailClosed(f"config_unknown:{k}")
+        if k in INT_CONFIG:
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise FailClosed(f"config_type:{k}")
+            if v < 1:
+                raise FailClosed(f"config_type:{k}")
+        if k == "total_safety":
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise FailClosed(f"config_type:{k}")
+            if v <= 0:
+                raise FailClosed(f"config_type:total_safety")
+        if k == "task_tier":
+            if v not in TASK_TIERS:
+                raise FailClosed(f"config_type:task_tier")
+        if k in ("task_envelope_initial", "task_envelope_cap"):
+            if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                raise FailClosed(f"config_type:{k}")
+    # cap >= initial when both present
+    if "task_envelope_initial" in explicit and "task_envelope_cap" in explicit:
+        if explicit["task_envelope_cap"] < explicit["task_envelope_initial"]:
+            raise FailClosed("config_type:task_envelope_cap_lt_initial")
+
+    # 校验显式 mode 参数（无论新旧 state）
+    if mode is not None and mode not in ("standard", "ultraverge"):
+        raise FailClosed(f"state_corrupt:fsm_mode_invalid:{mode}")
+
+    if p.is_file():
+        # --- 已有 state ---
+        try:
+            state = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            raise FailClosed(f"state_corrupt:{e}")
+        if not isinstance(state, dict):
+            raise FailClosed("state_corrupt:not_object")
+        state.setdefault("config", {})
+        state.setdefault("extensions", [])
+        state.setdefault("fsm", {"mode": "standard", "severities": {}})
+        # 校验 defaults_version：必须是 exactly int 1 或 2（bool 是 int 子类，拒绝）
+        dv = state.get("defaults_version")
+        if dv is not None:
+            if isinstance(dv, bool) or not isinstance(dv, int) or dv not in (1, 2):
+                raise FailClosed(f"state_corrupt:defaults_version:{dv}")
+        # 共享 state shape/value 校验（config 类型/键、extensions 类型、fsm 类型/mode 值）
+        _validate_state_shape(state)
+        # 读取 ledger 并校验完整性（validate_integrity 包含 v2 INT_CONFIG 范围校验、
+        # task_tier/task_envelope/total_safety 校验——单一事实源，不在此重复）。
+        events = read_ledger(active)
+        validate_integrity(active, events, state)
+
+        # 标记旧版 sparse state（无 defaults_version 字段）。
+        # 不重写旧版 state：defaults_version 缺失 → cfg() 内存中视为 version 1（LEGACY_DEFAULTS 回退）。
+        # 旧版 state 字节不变，测试断言 defaults_version == 1、有效值、字节不变。
+
+        if not force:
+            # 冲突检查：显式值必须与已有值一致
+            for k, v in explicit.items():
+                if k in state["config"] and state["config"][k] != v:
+                    raise FailClosed(f"config_conflict:{k}")
+            # mode 冲突检查：显式 mode 与已有 fsm.mode 不一致 → fail-closed
+            if mode is not None and state["fsm"].get("mode") != mode:
+                raise FailClosed(f"mode_conflict:{state['fsm'].get('mode')}!={mode}")
+
+        # 合并显式值到 state（不写磁盘）。
+        # 目标：state["config"] 反映显式值的并集，cfg() 用它做回退。
+        if force:
+            state["config"].update(explicit)
+        else:
+            for k, v in explicit.items():
+                state["config"].setdefault(k, v)
+
+        # 应用 mode overlay（mode=None 时继承已有模式，不覆盖）
+        if mode is not None:
+            if force:
+                state["fsm"]["mode"] = mode
+            elif state["fsm"].get("mode") is None:
+                state["fsm"]["mode"] = mode
+        # mode=None: 继承已有 fsm.mode，不做任何修改
+
+        # Re-validate merged candidate against ledger: catches cross-key relationships
+        # assembled from old state + explicit config (R7 cross-overlay bug).
+        validate_integrity(active, events, state)
+
+        # 仅在实际内容变化时写入（避免 reformatted JSON 改变字节）。
+        # 读取已有 state（不经过 setdefault），与 merged state 比较。
+        try:
+            raw_state = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            raw_state = None
+        raw_state = raw_state if isinstance(raw_state, dict) else {}
+        raw_state.setdefault("config", {})
+        raw_state.setdefault("fsm", {"mode": "standard", "severities": {}})
+        raw_state.setdefault("extensions", [])
+        needs_write = (
+            force
+            or state["config"] != raw_state["config"]
+            or state["fsm"] != raw_state["fsm"]
+            or state["extensions"] != raw_state["extensions"]
+        )
+        if needs_write:
+            write_state(active, state)
+        return state
+
+    # --- 新建 state ---
+    # mode=None 时默认 standard
+    effective_mode = mode if mode is not None else "standard"
+    # 无模式叠加：standard 与 ultraverge 共用同一组默认值上限（plan r2 D9）
+    merged_config = dict(explicit)
+
+    state = {
+        "defaults_version": 2,
+        "config": merged_config,
+        "extensions": [],
+        "fsm": {"mode": effective_mode, "severities": {}},
+    }
+    # 校验候选状态（单一契约：与已有 state 路径的 validate_integrity 对称）
+    validate_integrity(active, [], state)
+    active.mkdir(parents=True, exist_ok=True)
+    write_state(active, state)
+    return state
+
+
 def cfg(state: dict, key: str):
-    return state.get("config", {}).get(key, DEFAULTS[key])
+    if key in state.get("config", {}):
+        return state["config"][key]
+    # defaults_version 缺失 → version 1（LEGACY_DEFAULTS 回退），
+    # 不随 DEFAULTS 变化而静默改变有效预算（plan D3 + DR1）。
+    # 新建 state 写入 defaults_version=2，回退到 DEFAULTS。
+    version = state.get("defaults_version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version not in (1, 2):
+        raise FailClosed(f"state_corrupt:defaults_version:{version}")
+    if version == 1 and key in LEGACY_DEFAULTS:
+        return LEGACY_DEFAULTS[key]
+    return DEFAULTS[key]
+
+
+# In-memory 追踪哪些 active 目录是 legacy sparse state（无 defaults_version 字段）。
+# _legacy_active_paths: set[str] = set()
+# 注意：此全局集合已移除（plan D3 + 修复项 A）。
+# 状态权威性改为 state 自带 defaults_version 字段：无此字段 → 内存中视为 version 1（LEGACY_DEFAULTS 回退）。
+# 新建 state 写入 defaults_version=2。不因读/初始化而重写旧版 state。
 
 
 # ---- 锁 ---------------------------------------------------------------------
@@ -561,6 +783,14 @@ def _validate_event(ev: dict) -> None:
             raise FailClosed("event_field:reserved.extension_id")
         if ev.get("tier") not in TIER_VALUES:
             raise FailClosed("event_field:reserved.tier")
+        # D10: call_id (optional, set by instrumented dispatch)
+        cid = ev.get("call_id")
+        if cid is not None and not _nonempty_str(cid):
+            raise FailClosed("event_field:reserved.call_id")
+        # D10: companion_reservation_id (optional, links Spawn pair)
+        comp_rid = ev.get("companion_reservation_id")
+        if comp_rid is not None and not _nonempty_str(comp_rid):
+            raise FailClosed("event_field:reserved.companion_reservation_id")
 
     elif et == "spawn_succeeded":
         if not _nonempty_str(ev.get("reservation_id")):
@@ -617,7 +847,9 @@ def validate_integrity(active: Path, events: list[dict], state: dict) -> None:
         if k in cfgd and (isinstance(cfgd[k], bool) or not isinstance(cfgd[k], int)):
             raise FailClosed(f"config_type:{k}")
     if "total_safety" in cfgd and (isinstance(cfgd["total_safety"], bool)
-                                   or not isinstance(cfgd["total_safety"], (int, float))):
+                                    or not isinstance(cfgd["total_safety"], (int, float))):
+        raise FailClosed("config_type:total_safety")
+    if "total_safety" in cfgd and cfgd["total_safety"] <= 0:
         raise FailClosed("config_type:total_safety")
     if "task_tier" in cfgd and cfgd["task_tier"] not in TASK_TIERS:
         raise FailClosed("config_type:task_tier")
@@ -627,6 +859,13 @@ def validate_integrity(active: Path, events: list[dict], state: dict) -> None:
     if ("task_envelope_initial" in cfgd and "task_envelope_cap" in cfgd
             and cfgd["task_envelope_cap"] < cfgd["task_envelope_initial"]):
         raise FailClosed("config_type:task_envelope_cap_lt_initial")
+    # v2 INT_CONFIG 范围校验：v2 state 的 INT_CONFIG 值必须 >= 1；
+    # sparse legacy state（无 defaults_version）保留零值边界兼容。
+    dv = state.get("defaults_version")
+    if dv == 2:
+        for k in INT_CONFIG:
+            if k in cfgd and cfgd[k] < 1:
+                raise FailClosed(f"config_type:{k}")
 
     # 事件类型 + reservation 生命周期
     seen_reserved: set = set()
@@ -667,6 +906,72 @@ def validate_integrity(active: Path, events: list[dict], state: dict) -> None:
         if nums and sorted(nums) != list(range(1, max(nums) + 1)):
             raise FailClosed(f"round_gap:{scope}")
 
+    # D10: Companion reservation invariants (exactly-once pairing, no orphan,
+    # no cross-link, no duplicate).  Supports two paths:
+    #   - Atomic pair (cmd_reserve): both role and companion carry
+    #     companion_reservation_id pointing at each other.
+    #   - Pre-reserved adapter (cmd_companion_for): only the companion
+    #     carries companion_reservation_id pointing at the role; the role
+    #     has no forward reference.  This is the append-only path.
+    reserved_by_rid = {ev.get("reservation_id"): ev for ev in events
+                       if ev.get("event") == "reserved"}
+    # Track which role→companion links have been validated (avoid double-
+    # counting when both sides carry companion_reservation_id).
+    validated_pairs: set[tuple[str, str]] = set()
+    # Track which role rids have been claimed by a companion (duplicate check)
+    claimed_roles: dict[str, str] = {}  # role_rid → companion_rid
+    for ev in events:
+        if ev.get("event") != "reserved":
+            continue
+        comp_rid = ev.get("companion_reservation_id")
+        if comp_rid is None:
+            continue
+        # comp_rid points to the "other side" of the pair.
+        # If ev is the companion (target_role == task-envelope), comp_rid is
+        # the role rid.  If ev is the role, comp_rid is the companion rid.
+        # We need to find the actual role event and companion event.
+        if ev.get("target_role") == "task-envelope":
+            # ev is the companion; comp_rid is the role
+            role_rid = comp_rid
+            comp_ev = ev
+            role_ev = reserved_by_rid.get(role_rid)
+        else:
+            # ev is the role; comp_rid is the companion
+            role_rid = ev["reservation_id"]
+            comp_ev = reserved_by_rid.get(comp_rid)
+            role_ev = ev
+        # Deduplicate: in the atomic pair path, both events carry
+        # companion_reservation_id and we'd validate the same pair twice.
+        pair_key = (role_rid, comp_ev.get("reservation_id") if comp_ev else comp_rid)
+        if pair_key in validated_pairs:
+            continue
+        validated_pairs.add(pair_key)
+        # Companion must exist
+        if comp_ev is None:
+            raise FailClosed(f"companion_orphan:{ev['reservation_id']}->{comp_rid}")
+        # Role must exist
+        if role_ev is None:
+            raise FailClosed(f"companion_orphan:{ev['reservation_id']}->{comp_rid}")
+        # Exactly one companion per role (no duplicate)
+        if role_rid in claimed_roles:
+            existing_comp = claimed_roles[role_rid]
+            if existing_comp != (comp_ev.get("reservation_id") if comp_ev else comp_rid):
+                raise FailClosed(f"companion_duplicate:{role_rid}")
+        else:
+            claimed_roles[role_rid] = comp_ev.get("reservation_id") if comp_ev else comp_rid
+        # Type check: exactly one must be task-envelope
+        roles = {role_ev.get("target_role"), comp_ev.get("target_role")}
+        if "task-envelope" not in roles:
+            raise FailClosed("companion_missing_te_role")
+        if roles == {"task-envelope"}:
+            raise FailClosed("companion_both_te_role")
+        # Cross-call link: when both sides carry call_id, they must match
+        role_cid = role_ev.get("call_id")
+        comp_cid = comp_ev.get("call_id")
+        if role_cid is not None and comp_cid is not None and role_cid != comp_cid:
+            raise FailClosed(
+                f"companion_cross_call:{ev['reservation_id']}")
+
     # extension 链
     validate_extensions(state, events)
 
@@ -702,6 +1007,11 @@ def cmd_reserve(args) -> int:
     active = Path(args.active_dir)
     if not active.is_dir():
         print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+
+    # --companion-for: create a task-envelope companion for an existing role reservation
+    if getattr(args, 'companion_for', None):
+        return cmd_companion_for(args)
+
     with Lock(active):
         state = read_state(active)
         events = read_ledger(active)
@@ -777,6 +1087,43 @@ def cmd_reserve(args) -> int:
             # ledger 记录与改造前完全一致，见 SCOPE_KEYS 处注释）。
             counts_before["task-envelope"] = scope_reservations_issued(events, "task-envelope")
             ceilings["task-envelope"] = ceiling(state, "task-envelope")
+
+        # D10: Atomic Spawn pair — for non-task-envelope roles with configured
+        # task-envelope, create companion reservation atomically. Task companion
+        # is checked first; no half-pair may be committed.
+        call_id = None
+        companion_rid = None
+        te_blocked = False
+        if consumes != "task-envelope" and _task_envelope_configured(state):
+            call_id = _mint_call_id()
+            companion_rid = _new_id()
+            # Check task-envelope budget first
+            te_usage = scope_reservations_issued(events, "task-envelope")
+            te_ceil = ceiling(state, "task-envelope")
+            if te_usage >= te_ceil:
+                _emit_decision(active, "BLOCK:task_envelope_exhausted",
+                               "task-envelope", te_usage, te_ceil)
+                print("BLOCK:task_envelope_exhausted")
+                return EXIT_BLOCK_TASK_ENVELOPE
+            # Recompute counts_before with the companion's perspective
+            te_counts = dict(counts_before)
+            te_counts["task-envelope"] = te_usage
+            te_ceilings = dict(ceilings)
+            te_ceilings["task-envelope"] = te_ceil
+            # Atomic: append companion first, then role (both or neither)
+            append_ledger(active, {
+                "event": "reserved", "reservation_id": companion_rid, "ts": _now(),
+                "target_round": None, "target_role": "task-envelope",
+                "consumes": "task-envelope",
+                "counts_before": te_counts,
+                "ceilings": te_ceilings,
+                "call_id": call_id,
+                "companion_reservation_id": rid,  # points to the role reservation
+                "extension_id": (active_extension(state, "task-envelope")
+                                 or {}).get("extension_id"),
+                "tier": args.tier,
+            })
+
         append_ledger(active, {
             "event": "reserved", "reservation_id": rid, "ts": _now(),
             "target_round": target_round, "target_role": role, "consumes": consumes,
@@ -785,9 +1132,36 @@ def cmd_reserve(args) -> int:
             "extension_id": (active_extension(state, consumes) or {}).get("extension_id")
                              if consumes != "none" else None,
             "tier": args.tier,
+            **({"call_id": call_id, "companion_reservation_id": companion_rid}
+               if call_id else {}),
         })
         print(f"PROCEED:{rid}")
         return EXIT_PROCEED
+
+
+def _find_companion(events: list[dict], rid: str) -> str | None:
+    """D10: Find the companion reservation_id for a given reservation.
+
+    Forward lookup: reads companion_reservation_id from the event itself
+    (used by the atomic-pair path in cmd_reserve where both sides carry it).
+    Reverse lookup: scans reserved events for one whose
+    companion_reservation_id == rid (used by the pre-reserved adapter path
+    where the role event has no forward reference).
+
+    Returns the companion's reservation_id or None if no companion exists.
+    """
+    # Forward lookup (atomic pair path)
+    for ev in events:
+        if ev.get("event") == "reserved" and ev.get("reservation_id") == rid:
+            fwd = ev.get("companion_reservation_id")
+            if fwd is not None:
+                return fwd
+    # Reverse lookup (pre-reserved adapter path)
+    for ev in events:
+        if (ev.get("event") == "reserved"
+                and ev.get("companion_reservation_id") == rid):
+            return ev.get("reservation_id")
+    return None
 
 
 def cmd_settle(args) -> int:
@@ -818,7 +1192,95 @@ def cmd_settle(args) -> int:
         if args.reason:
             ev["reason"] = args.reason
         append_ledger(active, ev)
+
+        # D10: Idempotent companion settle — settling a role reservation
+        # also settles its task-envelope companion with the same result.
+        comp_rid = _find_companion(events, args.reservation_id)
+        if comp_rid and res.get(comp_rid, {}).get("status") == "reserved":
+            comp_ev = {"event": ev["event"],
+                       "reservation_id": comp_rid, "ts": _now()}
+            if args.result == "succeeded":
+                comp_ev["instance_id"] = args.instance_id
+            if args.result in ("cancelled", "failed"):
+                comp_ev["pre_execution"] = bool(args.pre_execution)
+            if args.reason:
+                comp_ev["reason"] = args.reason
+            append_ledger(active, comp_ev)
+
         print("OK")
+        return EXIT_PROCEED
+
+
+def cmd_companion_for(args) -> int:
+    """Create or update a task-envelope companion for an existing role reservation.
+
+    Used by the adapter when --reserved-reservation-id is provided (pre-reserved):
+    the gate's atomic pair in cmd_reserve was skipped, so this command retroactively
+    creates the companion and links it to the role reservation.
+    """
+    active = Path(args.active_dir)
+    if not active.is_dir():
+        print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    with Lock(active):
+        events = read_ledger(active)
+        state = read_state(active)
+        validate_integrity(active, events, state)
+
+        if not _task_envelope_configured(state):
+            print("FAIL_CLOSED:task_envelope_not_configured"); return EXIT_FAIL_CLOSED
+
+        role_rid = args.companion_for
+        # Role reservation must exist
+        role_ev = None
+        for ev in events:
+            if ev.get("event") == "reserved" and ev.get("reservation_id") == role_rid:
+                role_ev = ev
+                break
+        if role_ev is None:
+            print("FAIL_CLOSED:role_reservation_not_found"); return EXIT_FAIL_CLOSED
+
+        # Role must not already have a companion (check both forward and reverse)
+        if role_ev.get("companion_reservation_id") is not None:
+            print("FAIL_CLOSED:companion_already_exists"); return EXIT_FAIL_CLOSED
+        # Reverse lookup: check if any reserved event already references this role
+        for ev in events:
+            if (ev.get("event") == "reserved"
+                    and ev.get("companion_reservation_id") == role_rid):
+                print("FAIL_CLOSED:companion_already_exists"); return EXIT_FAIL_CLOSED
+
+        # Check task-envelope budget
+        te_usage = scope_reservations_issued(events, "task-envelope")
+        te_ceil = ceiling(state, "task-envelope")
+        if te_usage >= te_ceil:
+            _emit_decision(active, "BLOCK:task_envelope_exhausted",
+                           "task-envelope", te_usage, te_ceil)
+            print("BLOCK:task_envelope_exhausted"); return EXIT_BLOCK_TASK_ENVELOPE
+
+        call_id = _mint_call_id()
+        companion_rid = _new_id()
+        total_used = total_reservations_issued(events)
+        te_counts = {s: effective_usage(active, events, s)
+                     for s in ("outer", "blind", "ultraverge")}
+        te_counts["total"] = total_used
+        te_counts["task-envelope"] = te_usage
+        te_ceilings = {s: ceiling(state, s)
+                       for s in ("outer", "blind", "ultraverge", "total")}
+        te_ceilings["task-envelope"] = te_ceil
+
+        # Append companion reservation (append-only: never mutate existing events)
+        append_ledger(active, {
+            "event": "reserved", "reservation_id": companion_rid, "ts": _now(),
+            "target_round": None, "target_role": "task-envelope",
+            "consumes": "task-envelope",
+            "counts_before": te_counts, "ceilings": te_ceilings,
+            "call_id": call_id,
+            "companion_reservation_id": role_rid,
+            "extension_id": (active_extension(state, "task-envelope")
+                             or {}).get("extension_id"),
+            "tier": args.tier,
+        })
+
+        print(f"PROCEED:{companion_rid}")
         return EXIT_PROCEED
 
 
@@ -842,13 +1304,353 @@ def cmd_ingest_verdict(args) -> int:
         return EXIT_PROCEED
 
 
+# ---- 治理计划 preflight（plan r2 D7：机器输入 + 窄数值经验门）------------------
+#
+# preflight 在既有 code-heaviness 启发式之上扩展治理计划模式：plan 内出现
+# `converge.governance-change/v1` fenced JSON 块（或显式 --governance）时，读取
+# **唯一**该 schema 块（重复块/畸形 JSON/未知字段/缺字段一律 fail closed），经
+# calibration locator 解析唯一 `converge.calibration-report/v1` 报告，复算其
+# canonical hash、比对 corpus_digest 与事件 high-water 新鲜度，然后仅对
+# numeric_changes 中 comparison ∈ {outer, blind} 的数值默认/阈值/停止条件做窄比较：
+# proposal 低于"仍有推进证据的已观测用量"且无 counterevidence_refs、无绑定用户
+# 取舍事件 → BLOCK:empirical_conflict（退出码 15）。角色权限/一般机制
+# （kind=mechanism 或 comparison=null）不被数值门裁决，交给 Reviewer 语义审查。
+#
+# **一次性 bootstrap 例外**：本实现落地前编译器尚不存在，唯一合法的自举形态是
+# 计划文件内嵌的 calibration-report 块（locator 指向 plan 自身，如
+# `plan.md::json-fence[schema=converge.calibration-report/v1,id=...]`）。此后的
+# 治理变更必须提供由 `distill_antipatterns.py --calibration` 生成的报告，不再
+# 接受内嵌自举。此注释即该例外在代码侧的说明（plan §Machine Preflight Input）。
+#
+# canonical 字节规则与 locator 语法的规范定义见 refs/state-schema.md §版本化
+# fenced JSON 机器块契约（与 distill_antipatterns.py 的实现保持字面一致）。
+
+GOVERNANCE_SCHEMA = "converge.governance-change/v1"
+CAL_REPORT_SCHEMA = "converge.calibration-report/v1"
+
+_LOCATOR_RE = re.compile(
+    r"^(?P<file>[^/\\:\s]+)::json-fence\[schema=(?P<schema>[^,\]\s]+),"
+    r"id=(?P<id>[^\]\s]+)\]$")
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_GIT_REF_RE = re.compile(r"^git:[0-9a-f]{40}$")
+_ARCHIVE_REF_RE = re.compile(r"^archive:\S+$")
+
+# Archive Contract 根 allowlist（refs/state-schema.md §Evidence 与路径）：locator 的
+# root-file 必须是其中允许的普通文件名。
+_ROOT_ALLOWLIST = {
+    "INDEX.md", "manifest.json", "plan.md", "contract.md", "attempts.md",
+    "retrospective.md", "design-review.md", "_orchestrator-state.md",
+    "gate-ledger.jsonl", "_budget-state.json",
+}
+_ROOT_ALLOWLIST_RE = re.compile(r"^round-[1-9][0-9]*\.md$")
+
+_GOV_KEYS = {"schema", "change_id", "numeric_changes", "archaeology_refs",
+             "calibration", "counterevidence_refs", "user_message_events"}
+_GOV_CHANGE_KEYS = {"control", "kind", "released", "old", "proposed",
+                    "comparison", "basis"}
+_GOV_NUMERIC_KINDS = {"default", "threshold", "stopping_condition"}
+_GOV_KINDS = _GOV_NUMERIC_KINDS | {"mechanism"}
+_GOV_COMPARISONS = {"outer", "blind", None}
+_GOV_CAL_KEYS = {"path", "sha256", "corpus_digest", "freshness"}
+_GOV_FRESHNESS_KEYS = {"repository_head", "source_archive_revision",
+                       "source_event_high_watermark"}
+_GOV_UME_REQUIRED = {"quality_goal", "execution_authorization"}
+_GOV_UME_ALLOWED = _GOV_UME_REQUIRED | {"tradeoff_decision"}
+
+
+def _canonical_json_bytes(obj) -> bytes:
+    """canonical JSON 字节：UTF-8、sorted keys、compact separators、恰好一个 LF。"""
+    return (json.dumps(obj, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _strict_json_object(raw: bytes) -> dict:
+    """严格 JSON：拒绝重复 key、NaN/Infinity、非 dict 顶层。失败抛 ValueError。"""
+    def _no_dupes(pairs):
+        out = {}
+        for k, v in pairs:
+            if k in out:
+                raise ValueError(f"duplicate_key:{k}")
+            out[k] = v
+        return out
+
+    def _bad_const(x):
+        raise ValueError(f"invalid_constant:{x}")
+
+    obj = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_dupes,
+                     parse_constant=_bad_const)
+    if not isinstance(obj, dict):
+        raise ValueError("top_level_not_object")
+    return obj
+
+
+def _extract_json_fences(data: bytes) -> tuple[list[bytes], list[bytes]]:
+    """扫描 ```json fenced 块。返回 (payloads, crlf_payloads)。
+
+    只识别 opening line 为三个反引号紧接 json 的 fence；payload 含 CR（CRLF 污染）
+    的块单独列出——字节级一致校验必须 fail closed，不得静默归一化换行。
+    未闭合 fence 的残余行不计入（与历史 code-heaviness 计数行为一致）。
+    """
+    payloads: list[bytes] = []
+    crlf: list[bytes] = []
+    in_fence = False
+    buf: list[bytes] = []
+    for line in data.split(b"\n"):
+        stripped = line.rstrip(b"\r").rstrip()
+        if not in_fence:
+            if stripped == b"```json":
+                in_fence = True
+                buf = []
+            continue
+        if stripped == b"```":
+            payload = b"\n".join(buf)
+            (crlf if b"\r" in payload else payloads).append(payload)
+            in_fence = False
+            buf = []
+            continue
+        buf.append(line)
+    return payloads, crlf
+
+
+def _resolve_report_locator(plan: Path, locator: str) -> dict:
+    """解析 `<root-file>::json-fence[schema=<schema>,id=<id>]`，返回报告 payload。
+
+    恰好一个精确匹配是硬性要求：文件缺失或 id 缺席 → path-not-found；多于一个
+    精确匹配 → duplicate-target；请求的 id 只在别的 schema 下出现 → wrong-schema。
+    """
+    m = _LOCATOR_RE.match(locator)
+    if not m:
+        raise FailClosed(f"locator_syntax:{locator}")
+    fname = m.group("file")
+    if fname not in _ROOT_ALLOWLIST and not _ROOT_ALLOWLIST_RE.match(fname):
+        raise FailClosed(f"locator_file_not_allowed:{fname}")
+    target = plan.parent / fname
+    if not target.is_file():
+        raise FailClosed(f"path-not-found:{fname}")
+    payloads, crlf = _extract_json_fences(target.read_bytes())
+    if crlf:
+        raise FailClosed(f"crlf_payload:{fname}")
+    exact: list[dict] = []
+    id_elsewhere = False
+    for raw in payloads:
+        try:
+            obj = _strict_json_object(raw)
+        except (ValueError, UnicodeDecodeError):
+            raise FailClosed(f"malformed_json_fence:{fname}")
+        if obj.get("schema") == m.group("schema") and obj.get("id") == m.group("id"):
+            exact.append(obj)
+        elif obj.get("id") == m.group("id"):
+            id_elsewhere = True
+    if len(exact) > 1:
+        raise FailClosed(f"duplicate-target:{m.group('id')}")
+    if not exact:
+        if id_elsewhere:
+            raise FailClosed(f"wrong-schema:{m.group('id')}")
+        raise FailClosed(f"path-not-found:{m.group('id')}")
+    return exact[0]
+
+
+def _validate_governance_change(gov: dict, plan: Path) -> None:
+    """converge.governance-change/v1 严格 schema：未知字段/缺字段/错类型 fail closed。"""
+    unknown = sorted(set(gov) - _GOV_KEYS)
+    if unknown:
+        raise FailClosed(f"gov_unknown_field:{unknown[0]}")
+    missing = sorted(_GOV_KEYS - set(gov))
+    if missing:
+        raise FailClosed(f"gov_missing_field:{missing[0]}")
+    if not _nonempty_str(gov["change_id"]):
+        raise FailClosed("gov_field:change_id")
+
+    changes = gov["numeric_changes"]
+    if not isinstance(changes, list):
+        raise FailClosed("gov_field:numeric_changes")
+    for ch in changes:
+        if not isinstance(ch, dict):
+            raise FailClosed("gov_field:numeric_changes.entry")
+        extra = sorted(set(ch) - _GOV_CHANGE_KEYS)
+        if extra:
+            raise FailClosed(f"gov_unknown_field:numeric_changes.{extra[0]}")
+        miss = sorted(_GOV_CHANGE_KEYS - set(ch))
+        if miss:
+            raise FailClosed(f"gov_missing_field:numeric_changes.{miss[0]}")
+        if not _nonempty_str(ch["control"]):
+            raise FailClosed("gov_field:numeric_changes.control")
+        if ch["kind"] not in _GOV_KINDS:
+            raise FailClosed(f"gov_field:numeric_changes.kind:{ch['kind']}")
+        if ch["comparison"] not in _GOV_COMPARISONS:
+            raise FailClosed("gov_field:numeric_changes.comparison")
+        if not _nonempty_str(ch["basis"]):
+            raise FailClosed("gov_field:numeric_changes.basis")
+        for f in ("released", "old", "proposed"):
+            v = ch[f]
+            if ch["kind"] == "mechanism":
+                if v is not None and not _int(v):
+                    raise FailClosed(f"gov_field:numeric_changes.{f}")
+            elif not _int(v):
+                raise FailClosed(f"gov_field:numeric_changes.{f}")
+
+    refs = gov["archaeology_refs"]
+    if not isinstance(refs, list) or not refs:
+        raise FailClosed("gov_field:archaeology_refs")
+    for r in refs:
+        if not isinstance(r, str) or not (_GIT_REF_RE.match(r)
+                                          or _ARCHIVE_REF_RE.match(r)):
+            raise FailClosed(f"gov_field:archaeology_refs:{r}")
+    # git 对象存在性：plan 位于 git 工作树内时用 cat-file 核验；不在工作树内
+    # （单元测试临时目录）退化为格式校验——存在性断言只在可核验环境中生效。
+    root = plan.parent
+    while root != root.parent and not (root / ".git").exists():
+        root = root.parent
+    if (root / ".git").exists():
+        for r in refs:
+            if _GIT_REF_RE.match(r):
+                sha = r[len("git:"):]
+                try:
+                    p = subprocess.run(
+                        ["git", "-C", str(root), "cat-file", "-e", sha],
+                        capture_output=True, timeout=10)
+                except (OSError, subprocess.SubprocessError):
+                    raise FailClosed(f"archaeology_ref_unverifiable:{r}")
+                if p.returncode != 0:
+                    raise FailClosed(f"archaeology_ref_missing:{r}")
+
+    if not isinstance(gov["counterevidence_refs"], list) or any(
+            not isinstance(r, str) for r in gov["counterevidence_refs"]):
+        raise FailClosed("gov_field:counterevidence_refs")
+
+    cal = gov["calibration"]
+    if not isinstance(cal, dict):
+        raise FailClosed("gov_field:calibration")
+    unknown = sorted(set(cal) - _GOV_CAL_KEYS)
+    if unknown:
+        raise FailClosed(f"gov_unknown_field:calibration.{unknown[0]}")
+    missing = sorted(_GOV_CAL_KEYS - set(cal))
+    if missing:
+        raise FailClosed(f"gov_missing_field:calibration.{missing[0]}")
+    if not _nonempty_str(cal["path"]):
+        raise FailClosed("gov_field:calibration.path")
+    for f in ("sha256", "corpus_digest"):
+        if not (isinstance(cal[f], str) and _HEX64_RE.match(cal[f])):
+            raise FailClosed(f"gov_field:calibration.{f}")
+    fresh = cal["freshness"]
+    if not isinstance(fresh, dict):
+        raise FailClosed("gov_field:calibration.freshness")
+    unknown = sorted(set(fresh) - _GOV_FRESHNESS_KEYS)
+    if unknown:
+        raise FailClosed(f"gov_unknown_field:freshness.{unknown[0]}")
+    missing = sorted(_GOV_FRESHNESS_KEYS - set(fresh))
+    if missing:
+        raise FailClosed(f"gov_missing_field:freshness.{missing[0]}")
+    head = fresh["repository_head"]
+    if not (isinstance(head, str)
+            and (re.fullmatch(r"[0-9a-f]{40}", head) or head == "unavailable")):
+        raise FailClosed("gov_field:freshness.repository_head")
+    if not _nonempty_str(fresh["source_archive_revision"]):
+        raise FailClosed("gov_field:freshness.source_archive_revision")
+    hw = fresh["source_event_high_watermark"]
+    if isinstance(hw, bool) or not isinstance(hw, int) or hw < 0:
+        raise FailClosed("gov_field:freshness.source_event_high_watermark")
+
+    ume = gov["user_message_events"]
+    if not isinstance(ume, dict):
+        raise FailClosed("gov_field:user_message_events")
+    unknown = sorted(set(ume) - _GOV_UME_ALLOWED)
+    if unknown:
+        raise FailClosed(f"gov_unknown_field:user_message_events.{unknown[0]}")
+    missing = sorted(_GOV_UME_REQUIRED - set(ume))
+    if missing:
+        raise FailClosed(f"gov_missing_field:user_message_events.{missing[0]}")
+    for k, v in ume.items():
+        if not (isinstance(v, str) and _UUID_RE.match(v)):
+            raise FailClosed(f"gov_field:user_message_events.{k}")
+
+
+def _resolve_and_check_report(gov: dict, plan: Path) -> dict:
+    """locator 解析 + canonical hash 复算 + 新鲜度（corpus digest / high-water）。"""
+    cal = gov["calibration"]
+    report = _resolve_report_locator(plan, cal["path"])
+    if report.get("schema") != CAL_REPORT_SCHEMA:
+        raise FailClosed("calibration_report_schema")
+    actual = hashlib.sha256(_canonical_json_bytes(report)).hexdigest()
+    if actual != cal["sha256"]:
+        raise FailClosed("calibration_hash_mismatch")
+    if not isinstance(report.get("corpus"), list) or any(
+            not isinstance(e, dict) or not _nonempty_str(e.get("ref"))
+            or not _nonempty_str(e.get("quantitative_status"))
+            for e in report["corpus"]):
+        raise FailClosed("calibration_report_corpus")
+    if report.get("corpus_digest") != cal["corpus_digest"]:
+        raise FailClosed("stale_calibration:corpus_digest")
+    if report.get("freshness") != cal["freshness"]:
+        raise FailClosed("stale_calibration:freshness")
+    agg = report.get("quantitative_aggregates")
+    if not isinstance(agg, dict):
+        raise FailClosed("calibration_report_aggregates")
+    eligible = sum(1 for e in report["corpus"]
+                   if e.get("quantitative_status") == "eligible")
+    if agg.get("eligible_samples") != eligible:
+        raise FailClosed("calibration_report_inconsistent:eligible_samples")
+    return report
+
+
+def _numeric_empirical_conflicts(gov: dict, report: dict) -> list[str]:
+    """窄数值经验门：仅 comparison ∈ {outer, blind} 的数值默认/阈值/停止条件。
+
+    proposal 低于"仍有推进证据的已观测用量"（eligible 样本中该 axis
+    productive=true 的最大 usage）且无 counterevidence_refs、无绑定用户取舍事件
+    → 冲突。角色权限/一般机制（mechanism / comparison=null）不进本门。
+    """
+    dischargers = bool(gov["counterevidence_refs"]) or \
+        "tradeoff_decision" in gov["user_message_events"]
+    conflicts: list[str] = []
+    for ch in gov["numeric_changes"]:
+        if ch["kind"] not in _GOV_NUMERIC_KINDS:
+            continue
+        axis = ch["comparison"]
+        if axis not in ("outer", "blind"):
+            continue
+        usages = []
+        for e in report["corpus"]:
+            if e.get("quantitative_status") != "eligible":
+                continue
+            prod = e.get("productive", {})
+            usage = e.get("usage", {})
+            if isinstance(prod, dict) and prod.get(axis) is True:
+                u = usage.get(axis) if isinstance(usage, dict) else None
+                if _int(u):
+                    usages.append(u)
+        if not usages:
+            continue   # 无 eligible 可比样本 → 不做数值裁决
+        observed = max(usages)
+        if ch["proposed"] < observed and not dischargers:
+            conflicts.append(f"{ch['control']}:proposed={ch['proposed']}"
+                             f"<observed_productive_usage={observed}")
+    return conflicts
+
+
+def cmd_preflight_governance(args, plan: Path, gov: dict) -> int:
+    _validate_governance_change(gov, plan)
+    report = _resolve_and_check_report(gov, plan)
+    conflicts = _numeric_empirical_conflicts(gov, report)
+    if conflicts:
+        for c in conflicts:
+            print(f"BLOCK:empirical_conflict:{c}")
+        return EXIT_BLOCK_EMPIRICAL
+    print("PREFLIGHT_OK:governance-change")
+    return EXIT_PROCEED
+
+
 def cmd_preflight(args) -> int:
     plan = Path(args.plan)
     if not plan.is_file():
         print("FAIL_CLOSED:no_plan"); return EXIT_FAIL_CLOSED
+    raw = plan.read_bytes()
     blocks = loc = 0
     in_block = False
-    for line in plan.read_text(encoding="utf-8").splitlines():
+    for line in raw.decode("utf-8", "replace").splitlines():
         if line.lstrip().startswith("```"):
             if in_block:
                 in_block = False
@@ -862,7 +1664,34 @@ def cmd_preflight(args) -> int:
         print(f"WARN:code_heavy:{blocks},{loc}")
     else:
         print("CLEAN")
-    return EXIT_PROCEED
+
+    # 治理计划模式（plan r2 D7）：plan 内出现唯一 governance-change 机器块，
+    # 或显式 --governance 时启用。散文/表格永不进入机器裁决。
+    payloads, crlf = _extract_json_fences(raw)
+    parsed: list[dict] = []
+    malformed = 0
+    for p in payloads:
+        try:
+            parsed.append(_strict_json_object(p))
+        except (ValueError, UnicodeDecodeError):
+            malformed += 1
+    gov_blocks = [o for o in parsed if o.get("schema") == GOVERNANCE_SCHEMA]
+    if not args.governance and not gov_blocks:
+        # 纯 legacy 模式：行为与改造前一致。唯一例外：CRLF 污染的 fence 里带有
+        # converge 机器块标记——无法安全解析其 schema，按 fail-closed 处理而非
+        # 静默放过（字节级一致契约，plan r2 设计审查 highlight）。
+        if any(b"converge." in p for p in crlf):
+            print("FAIL_CLOSED:crlf_payload"); return EXIT_FAIL_CLOSED
+        return EXIT_PROCEED
+    if crlf:
+        print("FAIL_CLOSED:crlf_payload"); return EXIT_FAIL_CLOSED
+    if malformed:
+        print("FAIL_CLOSED:malformed_json_fence"); return EXIT_FAIL_CLOSED
+    if not gov_blocks:
+        print("FAIL_CLOSED:no_governance_block"); return EXIT_FAIL_CLOSED
+    if len(gov_blocks) > 1:
+        print("FAIL_CLOSED:duplicate_governance_block"); return EXIT_FAIL_CLOSED
+    return cmd_preflight_governance(args, plan, gov_blocks[0])
 
 
 def cmd_summary(args) -> int:
@@ -897,9 +1726,29 @@ def cmd_summary(args) -> int:
         "total_reservations_issued": total_reservations_issued(events),
         "total_ceiling": ceiling(state, "total"),
         "attempted_dispatch": attempted_dispatch(events, None),
-        "model_invocation": model_invocation(events, None),
+        "model_invocation": model_invocation(events, None),  # legacy key preserved
         "scopes": scopes,
     }
+    # D10: accounting_coverage — instrumented_complete / partial / unavailable.
+    # Legacy ledger events without call_id force coverage=unavailable.
+    reserved_events = [e for e in events if e.get("event") == "reserved"]
+    if not reserved_events:
+        coverage = "unavailable"
+    else:
+        with_call_id = sum(1 for e in reserved_events if e.get("call_id"))
+        if with_call_id == len(reserved_events):
+            coverage = "instrumented_complete"
+        elif with_call_id > 0:
+            coverage = "partial"
+        else:
+            coverage = "unavailable"
+    out["accounting_coverage"] = coverage
+    out["accounting_scope"] = "instrumented_dispatch_only"
+    # Numeric model_invocations only allowed for instrumented_complete
+    if coverage == "instrumented_complete":
+        out["model_invocations"] = model_invocation(events, None)
+    else:
+        out["model_invocations"] = "unavailable"
     print(json.dumps(out, ensure_ascii=False, sort_keys=True))
     return EXIT_PROCEED
 
@@ -985,6 +1834,9 @@ def cmd_bind(args) -> int:
     active = Path(args.active_dir).resolve()
     if not active.is_dir():
         print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    # 确保 state 存在且使用 version 2 默认值（plan D3）。
+    # 若无 state → 创建 stock standard state；已有 state → 校验（幂等）。
+    initialize_state(active)
     BINDINGS_DIR.mkdir(parents=True, exist_ok=True)
     bp = _binding_path(args.session_id)
     try:
@@ -1042,6 +1894,45 @@ def cmd_unbind(args) -> int:
         print(f"FAIL_CLOSED:{e.reason}"); return EXIT_FAIL_CLOSED
     print("UNBOUND")
     return EXIT_PROCEED
+
+
+def cmd_init(args) -> int:
+    """CLI 入口：host-independent 状态初始化器（plan D3）。
+
+    三条入口（手动 orchestrator / ocsr_spawn_adapter config-init / converge_loop run）
+    共享同一初始化契约。
+    """
+    active = Path(args.active_dir)
+    config = {}
+    for attr in ("max_outer_loops", "max_blind_rechecks", "max_inner_loops",
+                 "ultraverge_min_reviewers"):
+        val = getattr(args, attr.replace("-", "_"), None)
+        if val is not None:
+            config[attr] = val
+    # task_tier / task_envelope_initial / task_envelope_cap passthrough
+    for attr in ("task_tier", "task_envelope_initial", "task_envelope_cap"):
+        val = getattr(args, attr, None)
+        if val is not None:
+            config[attr] = val
+    # mode=None 表示省略（继承已有 state 的模式）；CLI 未指定时 default=None
+    mode = getattr(args, "mode", None)
+    force = getattr(args, "force", False)
+    try:
+        state = initialize_state(active, mode=mode, config=config, force=force)
+        # Phase 5b: initialization disclosure
+        if _task_envelope_configured(state):
+            ceilings = {s: ceiling(state, s)
+                        for s in ("outer", "blind", "ultraverge", "total")}
+            te_initial = _task_envelope_initial(state)
+            te_cap = _task_envelope_hard_cap(state)
+            print(f"[init] local ceilings: {ceilings}")
+            print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
+            print("[init] quality_path_guaranteed: false")
+        print("OK")
+        return EXIT_PROCEED
+    except FailClosed as e:
+        print(f"FAIL_CLOSED:{e.reason}")
+        return EXIT_FAIL_CLOSED
 
 
 def _emit_deny(reason: str) -> None:
@@ -1123,6 +2014,8 @@ def main() -> int:
     r.add_argument("--reservation-id")
     r.add_argument("--target-round", type=int)
     r.add_argument("--tier", default="auditable-only", choices=["auditable-only", "enforced"])
+    r.add_argument("--companion-for",
+                   help="Create a task-envelope companion for an existing role reservation.")
     r.set_defaults(func=cmd_reserve)
 
     s = sub.add_parser("settle")
@@ -1144,6 +2037,9 @@ def main() -> int:
 
     pf = sub.add_parser("preflight")
     pf.add_argument("--plan", required=True)
+    pf.add_argument("--governance", action="store_true",
+                    help="强制治理计划模式：要求唯一 converge.governance-change/v1 "
+                         "机器块（缺块 fail closed）；省略时检测到该块亦自动启用")
     pf.set_defaults(func=cmd_preflight)
 
     sm = sub.add_parser("summary")     # 可验证预算汇总（attempted_dispatch/model_invocation 双计数）
@@ -1162,6 +2058,19 @@ def main() -> int:
     ub = sub.add_parser("unbind")      # 会话结束时解绑
     ub.add_argument("--session-id", required=True)
     ub.set_defaults(func=cmd_unbind)
+
+    ini = sub.add_parser("init")        # host-independent 状态初始化器（plan D3）
+    ini.add_argument("--active-dir", required=True)
+    ini.add_argument("--mode", choices=["standard", "ultraverge"], default=None)
+    ini.add_argument("--max-outer-loops", type=int)
+    ini.add_argument("--max-blind-rechecks", type=int)
+    ini.add_argument("--max-inner-loops", type=int)
+    ini.add_argument("--ultraverge-min-reviewers", type=int)
+    ini.add_argument("--task-tier", choices=list(TASK_TIERS.keys()))
+    ini.add_argument("--task-envelope-initial", type=int)
+    ini.add_argument("--task-envelope-cap", type=int)
+    ini.add_argument("--force", action="store_true")
+    ini.set_defaults(func=cmd_init)
 
     hk = sub.add_parser("hook-pretooluse")   # PreToolUse hook 入口（读 stdin）
     hk.set_defaults(func=cmd_hook_pretooluse)

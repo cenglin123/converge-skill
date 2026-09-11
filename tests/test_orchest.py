@@ -400,8 +400,59 @@ class TestFinishWithCancelled(OrchestBase):
         self.assertFalse(self.active.exists())
 
 
-# ── 验收 6：finish 二次调用拒绝 ──────────────────────────────────────────────
+# ── finish 恢复路径：cancelled 结算 → 显式 (status, reason) ──────────────────
 
+class TestFinishRecoveryCancelledSettle(OrchestBase):
+    """finish 步骤 3：started 无 terminal 且 gate 已 settle cancelled 时，恢复必须经
+    GATE_TO_RECOVER 解析为显式 (status, reason) 元组，无 unpack 异常。"""
+
+    def _crash_after_gate_cancel(self) -> str:
+        """reserve → gate 侧 settle cancelled(pre_execution)，宿主在 recover 前崩溃：
+        started 有、archive terminal 无、gate 已 settle。"""
+        rid, _ = self.reserve(round_no=2)
+        rc, out, err = run_cli(GATE, "settle", "--active-dir", str(self.active),
+                               "--reservation-id", rid, "--result", "cancelled",
+                               "--pre-execution")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        return rid
+
+    def test_finish_dry_run_resolves_pair_without_writes(self):
+        self.completed_round(1)
+        rid2 = self._crash_after_gate_cancel()
+        (self.active / "retrospective.md").write_text("# Retrospective\n",
+                                                      encoding="utf-8")
+        events_before = _read_events(self.active)
+        rc, out, err = self.finish(FINAL_VERDICT, "--dry-run")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        # dry-run 输出列出恢复判定：cancelled 结算 → recover(cancelled)
+        self.assertIn(f"{rid2}:补 recover(cancelled)", out)
+        # 零写入
+        self.assertEqual(_read_events(self.active), events_before)
+        self.assertFalse((self.done_root / self.SLUG).exists())
+
+    def test_finish_real_recover_writes_explicit_cancelled_terminal(self):
+        self.completed_round(1)
+        rid2 = self._crash_after_gate_cancel()
+        (self.active / "retrospective.md").write_text("# Retrospective\n",
+                                                      encoding="utf-8")
+        rc, out, err = self.finish()
+        self.assertEqual(rc, 0, f"{out} {err}")
+        # 恢复终态 = 显式 (cancelled, cancelled-by-host)
+        events = _read_events(self.done_root / self.SLUG)
+        rid_by_started = {e["event_id"]: e.get("reservation_id") for e in events
+                          if e["event_type"] == "invocation-started"}
+        terminals = [e for e in events if e["event_type"] == "invocation-terminal"
+                     and rid_by_started.get(e["started_event_id"]) == rid2]
+        self.assertEqual(len(terminals), 1)
+        self.assertEqual(terminals[0]["terminal_status"], "cancelled")
+        self.assertEqual(terminals[0]["failure_reason_code"], "cancelled-by-host")
+        # 归档后 check valid
+        rc, out, _ = run_cli(ARCHIVE, "check", str(self.done_root / self.SLUG),
+                             "--format", "json")
+        self.assertEqual(rc, 0, out)
+
+
+# ── 验收 6：finish 二次调用拒绝 ──────────────────────────────────────────────
 class TestFinishTwiceRefused(OrchestBase):
     def test_second_finish_refused(self):
         self.completed_round(1)
@@ -752,6 +803,138 @@ class TestRecordVerdict(OrchestBase):
         self.assertNotEqual(rc, 0)
         self.assertIn("步骤 0.5", err)
         self.assertIn("record-verdict", err)
+
+
+class TestReopenMarkerSurvivesStep6(unittest.TestCase):
+    """Regression: .reopen-state.json must survive _finish_step6 so archive can
+    derive revision_id/parent linkage for reopened objects."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.active = self.root / "active" / "case"
+        self.active.mkdir(parents=True)
+
+    def test_finish_step6_preserves_reopen_state_for_archive(self):
+        """_finish_step6 must NOT move .reopen-state.json; archive _prepare()
+        must read it and produce manifest with revision_id r2 + parent link."""
+        cli = str(SCRIPTS / "archive_convergence.py")
+        done = self.root / "done"
+        done.mkdir()
+        sys.path.insert(0, str(SCRIPTS))
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+
+        # -- Phase 1: build minimal r1 active dir and archive it ---------------
+        ledger_r1 = []
+        for rid, rnd in [("r1-res", 1)]:
+            reserve = {
+                "event": "reserved", "reservation_id": rid,
+                "ts": "2026-07-12T00:00:00+00:00",
+                "target_round": rnd, "target_role": "outer-reviewer", "consumes": "outer",
+                "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+                "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+                "extension_id": None, "tier": "auditable-only",
+            }
+            settle = {
+                "event": "spawn_succeeded", "reservation_id": rid,
+                "ts": "2026-07-12T00:00:01+00:00", "instance_id": "i1",
+            }
+            ledger_r1.append(json.dumps(reserve) + "\n" + json.dumps(settle) + "\n")
+        (self.active / "gate-ledger.jsonl").write_text("".join(ledger_r1), encoding="utf-8", newline="\n")
+        (self.active / "plan.md").write_text("# Plan\n", encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text("# Retrospective\n\nplaceholder\n", encoding="utf-8", newline="\n")
+
+        start1 = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id="r1-res")
+        term1 = complete_invocation(self.active, start1["invocation_id"],
+            terminal_status="succeeded", instance_id="i1", receipt="p1",
+            settlement_ref="gate-ledger.jsonl:r1-res",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"v1")
+        dec1 = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": term1["event_id"],
+            "review_kind": "fresh", "verdict": "可执行", "verdict_output_ref": term1["event_id"],
+        })
+        marker1 = f"terminal_decision_event_id: {dec1['event_id']}\nterminal_decision_value: 可执行\n"
+        (self.active / "round-1.md").write_text(marker1, encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text(marker1, encoding="utf-8", newline="\n")
+
+        r = subprocess.run([sys.executable, cli, "archive", str(self.root / "active"), str(done), "case"],
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, f"archive r1 failed: {r.stdout} {r.stderr}")
+
+        # -- Phase 2: reopen → creates .reopen-state.json ----------------------
+        r = subprocess.run([sys.executable, cli, "reopen", str(self.root / "active"), str(done), "case"],
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, f"reopen failed: {r.stdout} {r.stderr}")
+
+        reopen_marker = self.active / ".reopen-state.json"
+        self.assertTrue(reopen_marker.exists(), ".reopen-state.json must exist after reopen")
+        state = json.loads(reopen_marker.read_text(encoding="utf-8"))
+        self.assertEqual(state["revision_id"], "r2")
+        self.assertIn("parent_revision_id", state)
+
+        # -- Phase 3: add r2 events + ledger, prompt file ----------------------
+        # Append r2 ledger pair
+        reserve2 = {
+            "event": "reserved", "reservation_id": "r2-res",
+            "ts": "2026-07-12T00:00:02+00:00",
+            "target_round": 2, "target_role": "outer-reviewer", "consumes": "outer",
+            "counts_before": {"outer": 1, "blind": 0, "ultraverge": 0, "total": 1},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        settle2 = {
+            "event": "spawn_succeeded", "reservation_id": "r2-res",
+            "ts": "2026-07-12T00:00:03+00:00", "instance_id": "i2",
+        }
+        with (self.active / "gate-ledger.jsonl").open("a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(reserve2) + "\n" + json.dumps(settle2) + "\n")
+
+        start2 = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="revision-review", round_number=2, attempt=1, reservation_id="r2-res")
+        term2 = complete_invocation(self.active, start2["invocation_id"],
+            terminal_status="succeeded", instance_id="i2", receipt="p2",
+            settlement_ref="gate-ledger.jsonl:r2-res",
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"v2")
+        dec2 = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": term2["event_id"],
+            "review_kind": "fresh", "verdict": "可执行", "verdict_output_ref": term2["event_id"],
+            "supersedes_decision_event_id": dec1["event_id"],
+        })
+        marker2 = f"terminal_decision_event_id: {dec2['event_id']}\nterminal_decision_value: 可执行\n"
+        (self.active / "round-2.md").write_text(marker2, encoding="utf-8", newline="\n")
+        prompt = self.active / "prompt-review.md"
+        prompt.write_text("prompt content\n", encoding="utf-8", newline="\n")
+
+        # -- Phase 4: call _finish_step6 directly --------------------------------
+        spec = importlib.util.spec_from_file_location("_orchest", str(ORCHEST))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        moved, stray = mod._finish_step6(self.active)
+
+        # (a) .reopen-state.json must NOT have been moved
+        self.assertTrue(reopen_marker.exists(),
+                        ".reopen-state.json must NOT be moved by _finish_step6")
+        # Prompt file SHOULD have been moved
+        self.assertFalse(prompt.exists(), "prompt file should have been moved")
+        self.assertGreater(moved, 0, "at least one prompt file should be moved")
+        # Stray list must NOT include .reopen-state.json
+        self.assertNotIn(".reopen-state.json", stray,
+                         ".reopen-state.json must be allowed by stray check")
+
+        # -- Phase 5: archive _prepare() reads the marker -----------------------
+        from archive_convergence import _prepare
+        _prepare(self.active, acknowledged_orphan_reservations=frozenset())
+        manifest = json.loads((self.active / "manifest.json").read_text(encoding="utf-8"))
+        # (b) manifest must show r2 with parent link, not r1
+        self.assertEqual(manifest["revision_id"], "r2",
+                         "archive must derive revision_id=r2 from .reopen-state.json")
+        self.assertIsNotNone(manifest.get("parent_revision"),
+                             "manifest must have parent_revision for reopened r2")
+        self.assertEqual(manifest["parent_revision"]["revision_id"], "r1")
 
 
 if __name__ == "__main__":

@@ -65,6 +65,41 @@ class ArchiveContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "lock-conflict")
         self.assertTrue(lock_path.exists())
 
+    def test_event_lock_malformed_owner_preserved_not_deleted(self):
+        """Defect 2: partially-written lock must NOT be unlinked.
+
+        Another writer created the lock via O_EXCL but hasn't finished writing
+        owner JSON. The contender must fail closed with ArchiveError and preserve
+        the existing lock (not delete it and retry, which would permit two writers).
+        """
+        from archive_contract.capture import EventLock
+        from archive_contract.model import ArchiveError
+
+        lock_path = self.active / ".archive-event.lock"
+        # Simulate partially-written lock (empty bytes — writer created but didn't flush)
+        lock_path.write_bytes(b"")
+        self.assertTrue(lock_path.exists())
+        with self.assertRaises(ArchiveError) as caught:
+            with EventLock(self.active):
+                self.fail("malformed lock must not be acquired")
+        self.assertEqual(caught.exception.code, "lock-conflict")
+        # Lock must be preserved — deleting it would allow two writers
+        self.assertTrue(lock_path.exists(), "malformed lock must not be deleted")
+
+    def test_event_lock_partial_json_preserved_not_deleted(self):
+        """Defect 2: partial JSON in lock file → fail closed, preserve lock."""
+        from archive_contract.capture import EventLock
+        from archive_contract.model import ArchiveError
+
+        lock_path = self.active / ".archive-event.lock"
+        # Partial JSON — writer started but didn't finish
+        lock_path.write_bytes(b'{"pid": 1234, "no')
+        with self.assertRaises(ArchiveError) as caught:
+            with EventLock(self.active):
+                self.fail("partial JSON lock must not be acquired")
+        self.assertEqual(caught.exception.code, "lock-conflict")
+        self.assertTrue(lock_path.exists(), "partial JSON lock must not be deleted")
+
     def test_schema_dispatch_five_states(self):
         from archive_contract.model import schema_state
 
@@ -295,6 +330,45 @@ class ArchiveContractTests(unittest.TestCase):
         )
         with self.assertRaises(ArchiveError):
             validate_ledger(self.active, load_events(self.active))
+
+    def _cancelled_settlement_fixture(self, *, pre_execution):
+        """Ledger: reserve + cancelled settle（按参数带 pre_execution）；
+        events: spawn started + recover 为 failed/process-interrupted 终态。"""
+        from archive_contract.capture import begin_invocation, recover_invocation
+
+        reserve = {
+            "event": "reserved", "reservation_id": "r1", "ts": "2026-07-12T00:00:00+00:00",
+            "target_round": 1, "target_role": "outer-reviewer", "consumes": "outer",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 20},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        settle = {"event": "cancelled", "reservation_id": "r1",
+                  "ts": "2026-07-12T00:00:01+00:00", "pre_execution": pre_execution}
+        (self.active / "gate-ledger.jsonl").write_text(
+            json.dumps(reserve) + "\n" + json.dumps(settle) + "\n", encoding="utf-8", newline="\n"
+        )
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="review", round_number=1, attempt=1, reservation_id="r1")
+        recover_invocation(self.active, started["invocation_id"], terminal_status="failed",
+            failure_reason_code="process-interrupted")
+
+    def test_pre_execution_cancelled_settlement_pairs_with_failed_terminal(self):
+        """pre_execution=true 的 cancelled 结算与 failed 恢复终态是同一事实
+        （模型从未被调用）在预算层与归档层的两种词汇——允许配对。"""
+        from archive_contract.model import load_events, validate_ledger
+
+        self._cancelled_settlement_fixture(pre_execution=True)
+        validate_ledger(self.active, load_events(self.active))  # must not raise
+
+    def test_non_pre_execution_cancelled_settlement_still_conflicts_with_failed(self):
+        """非 pre_execution 的 cancelled 结算仍只与 cancelled 终态配对。"""
+        from archive_contract.model import ArchiveError, load_events, validate_ledger
+
+        self._cancelled_settlement_fixture(pre_execution=False)
+        with self.assertRaises(ArchiveError) as caught:
+            validate_ledger(self.active, load_events(self.active))
+        self.assertEqual(caught.exception.code, "ledger-status-conflict")
 
     def test_provenance_matrix_rejects_configured_as_resolved(self):
         from archive_contract.capture import begin_invocation, complete_invocation

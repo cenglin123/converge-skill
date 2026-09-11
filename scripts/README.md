@@ -13,7 +13,8 @@
 # ① 宿主 Spawn 之前：gate reserve → begin-invocation → SCOPE_PRODUCT 骨架
 python scripts/orchest.py reserve-round --active-dir <dir> --role outer-reviewer \
     --round 1 --phase review --attempt 1 --prompt-file <已落盘的自足 prompt> \
-    --requested-provider <p> --requested-model <m>
+    --requested-provider <p> --requested-model <m> \
+    [--evidence-mode exact]   # material-revision 两-authority 审查时必传 exact
 # 输出 reservation_id + invocation_id（LLM 全程不经手 invocation_id 的转录）
 # begin 失败 → reservation 保持 open，修复后同 rid 重试：
 python scripts/orchest.py reserve-round ... --resume-reservation <rid>
@@ -22,7 +23,8 @@ python scripts/orchest.py reserve-round ... --resume-reservation <rid>
 
 # ③ 成功返回：
 python scripts/orchest.py register-round --active-dir <dir> --reservation-id <rid> \
-    --instance-id <sid> [--backend <b>] [--output <path>]   # consumes=none 角色必传 --output
+    --instance-id <sid> [--backend <b>] [--output <path>] \
+    [--evidence-mode exact]   # material-revision 输出证据时必传 exact
 
 # ③' 失败/取消/弃用：
 python scripts/orchest.py cancel-round --active-dir <dir> --reservation-id <rid> \
@@ -79,7 +81,7 @@ python scripts/orchest.py register-round --active-dir <dir> --reservation-id <ri
 python scripts/orchest.py record-verdict --active-dir <dir> --round 1 \
     --product blind-recheck-1.md --verdict 可执行   # verdict 用 gate 三档；pass/fail/waived 只进 retrospective
 
-# Inner Loop Continue（续命同实例；无 reservation，计数入 max_inner_loops=3）
+# Inner Loop Continue（续命同实例；无 reservation，计数入 active state 有效 max_inner_loops）
 python scripts/orchest.py reserve-round --active-dir <dir> --continue-of <父rid> \
     --phase inner-review --prompt-file <prompt.md>   # role/round 派生自父轮
 python scripts/orchest.py register-round --active-dir <dir> --invocation-id <iid> \
@@ -119,15 +121,37 @@ ledger/budget 双计数风险；同一 active 目录同一时刻只允许一条�
 
 ## 其他脚本
 
-- `budget_gate.py` — 预算执行硬化（reserve/settle/ingest-verdict/summary）
+- `budget_gate.py` — 预算执行硬化（reserve/settle/ingest-verdict/summary/preflight）
 - `archive_convergence.py` — Archive Contract v1 CLI（begin/complete/recover/
   record-terminal-decision/stamp/archive/check/reopen）
 - `ocsr_spawn_adapter.py` — OCSR 派发的五步原子 Spawn 适配
 - `archive_contract/` — Archive Contract v1 可执行单源（model/capture/transaction）
 - `converge_loop.py` — 循环级机械调度器（可选，见上节；run/resume/validate/status）
 - `l1_gate.py` — L1 信号检测前端：读取 Dynamic Workflow 各 phase 收口 JSON 指标，按阈值判定 pass/warn
-- `distill_antipatterns.py` — Antipattern 蒸馏器：从 done/*/retrospective.md 的 Antipattern 巡查表编译 refs/antipatterns.md 的 status/zero_streak（确定性，零 LLM；--write 才落盘）
+- `distill_antipatterns.py` — Antipattern 蒸馏器：从 done/*/retrospective.md 的 Antipattern 巡查表编译 refs/antipatterns.md 的 status/zero_streak（确定性，零 LLM；--write 才落盘）。`--calibration` 模式生成 `converge.calibration-report/v1` 规范报告（corpus digest、freshness、定量聚合）
 - `hooks/pre-commit` — 检测治理文档变更，提醒走 ultraverge 流程（CONSTITUTION 第三部保护文件）
 - `hooks/pre-push` — 检查 active/ 陈旧项（stale-check）+ 变更的 Archive Contract v1 done 目录（check-push-range）
 - `hooks/stale-check.py` — 扫描 .converge/active/ 与 docs/plans/active/ 的 stale 项（CRITICAL/WARNING/NOTE；CONVERGE_STRICT=1 阻断 push）
 - `hooks/kimi_pretooluse_shim.py` — 把 kimi-code 宿主 hook 事件桥接到 converge budget_gate（字段归一化后子进程调用）
+
+## r2 新增/变更 CLI 速查
+
+### `--evidence-mode`（reserve-round / register-round）
+
+`--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision 两-authority 同字节审查。默认 `metadata-only`（仅记录 hash/size）。material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集。
+
+### 治理 preflight 模式
+
+`budget_gate.py` 支持读取 `converge.governance-change/v1` 唯一 fenced JSON 块作为治理变更的机器输入。prose/Markdown 表格不进入机器解析。窄数值经验门仅对 `kind ∈ default|threshold|stopping_condition` 且 `comparison ∈ {outer,blind}` 的条目生效，返回 `BLOCK:empirical_conflict`。
+
+### task-envelope companion / call_id
+
+`budget_gate.py` 对已配置任务档的非 task-envelope 角色自动创建原子 companion reservation（`call_id` + 互相指向的 `companion_reservation_id`）。Continue 使用显式单 reservation 链接（无 companion）。`accounting_coverage` 取值 `instrumented_complete` / `partial` / `unavailable`，始终声明 `accounting_scope=instrumented_dispatch_only`。
+
+### 初始化 `quality_path_guaranteed: false`
+
+task-envelope 初始化时显示 `quality_path_guaranteed: false`——选档是质量-成本权衡，不保证 8/3/3 最坏路径可达。
+
+### closure-pairing 规则
+
+`validate_ledger` 中，`pre_execution=true` 的 `cancelled` ledger 结算允许与 `failed` 恢复终态配对（预算层与归档层对同一事实的两种词汇）；非 pre_execution 的 `cancelled` 结算仍只与 `cancelled` 终态配对。

@@ -14,6 +14,38 @@
 
 bootstrap 只在 staging 副本导入 legacy raw evidence。绑定必须由 ledger reservation、state instance registry、round log 或显式 mapping 唯一确定；无法唯一绑定即停止，不按文件名猜 role/model。旧 done 目录由 scan 报 legacy，只读且不原地升级。
 
+## Material revision 与同字节两-authority 审查
+
+Material revision 是 post-review 事实（非作者选择的 frontmatter）。Orchestrator 在完成初始审查证据后、下一个 Reviewer spawn 前，在 append-only `attempts.md` 中记录 `converge.material-revision/v1` 机器块。
+
+### 触发条件
+
+Material triggers 仅限：概念/架构阻断导致的修订、empirical conflict、或核心 numeric default/threshold/stopping condition 变更。纯结构性/实现修复非 material（除非同时变更上述控制项）。模糊时 fail closed。
+
+### 同字节两-Spawn 流程
+
+1. 冻结 `plan.md`，计算 SHA-256/size，追加唯一标识 material block，计算其 canonical SHA-256，确定性生成 target payload。plan hash 不嵌入 `plan.md`。
+2. 写两份新 prompt 文件（含 byte-identical payload）。每次 Spawn 前运行 `archive_convergence.py begin-invocation ... --prompt <file> --evidence-mode exact`。一个 start role 为 `outer-reviewer`，另一个为 `blind-reviewer`/blank-slate。invocation IDs 和 instance IDs 必须不同。
+3. 每个 Reviewer 输出回显 identical target payload 并给出零阻断。`complete-invocation ... --output <file> --evidence-mode exact` 捕获每个输出。
+4. `finish` 解析最新 material-block locator，重算 canonical hash，选取两个成功的 invocation terminals（started events 为 Spawn 且角色正确）。对每个要求 exact prompt/output paths，解析匹配的 target block，检查四个 payloads byte-equal。
+5. `finish` 最后重算 on-disk `plan.md` SHA-256/size 并与 common target artifact 比较。
+6. 任何后续 `plan.md` 字节变化使两份审查同时失效。若任一 Reviewer 阻断且 plan 变更，两角色重新审查新 hash。
+
+### Bootstrap locator 例外
+
+编译器落地前的唯一自举形态是计划内嵌 calibration-report 块（locator 指向 plan 自身）。后续治理变更必须由 `--calibration` 生成的报告提供，不享受 bootstrap 例外。
+
+### Reopened object closure
+
+reopened object 达到 strict pass 时，`finish` 追加新的 reviewer-verdict terminal decision（graph-derived `supersedes_decision_event_id` 指向前一个 terminal decision）。旧 state/events/manifest 不变。
+
+## Task-envelope 初始化披露
+
+task-envelope 初始化时显示：
+- 本地 ceilings（outer/blind/inner）
+- 选定 envelope initial/cap
+- `quality_path_guaranteed: false`（选档是质量-成本权衡，非到达保证）
+
 ## 〇、启动决策：converge 还是直接改？
 
 在 spawn 任何 agent 之前，先按以下顺序判断任务是否需要走 converge。
@@ -198,7 +230,7 @@ Executor 修复后，通过 Continue 让 reviewer 验收。Orchestrator 自己�
 
 1. **每次 spawn 经 orchest.py（收敛循环内）**：gate 生命周期统一由 `scripts/orchest.py` 承接——spawn 前 `reserve-round`（gate reserve + begin-invocation + 骨架，单命令），宿主返回后 `register-round`（complete + settle + 回填，成功带 instance_id，失败/取消走 `cancel-round`）。命令名与参数见 `scripts/README.md` Loop A。
    - `PROCEED` → 继续 spawn；非 PROCEED 透传处置（见下条 2）。gate reserve/settle 由命令内部驱动并确保结果落 ledger——**不得手跑裸 budget_gate.py reserve/settle 序列**（两个已落地 tier 都如此）。`best-effort guarded` 仅额外提供独立 PreToolUse 总量 cap——hook 不写 ledger、hook counter 与 ledger 不双计、bind/refresh-cap/unbind 只管理总量 backstop；per-scope gate 经 reserve-round 驱动。
-   - Inner Loop Continue：`reserve-round --continue-of <父rid>`（begin kind=continue，无 gate reservation，计数入 max_inner_loops=3）→ 宿主 Continue 同实例 → `register-round`。命令名与参数见 `scripts/README.md` Loop A。
+   - Inner Loop Continue：`reserve-round --continue-of <父rid>`（begin kind=continue，无 gate reservation，计数入 active state 有效 `max_inner_loops`）→ 宿主 Continue 同实例 → `register-round`。命令名与参数见 `scripts/README.md` Loop A。
 2. **非 PROCEED 处置**（对应 SKILL.md 主循环步骤 4）：
    - `BLOCK:*` → **停止**，向用户呈现菜单：继续迭代 / 接受（终止-c）/ 简化 plan / 终止。续跑须写 `budget_extension` 令牌（见下）。
    - `MODE_SWITCH_REQUIRED` → 呈现：接受进入执行 / 简化 plan 重收敛 / 终止。
