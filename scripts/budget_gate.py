@@ -54,6 +54,7 @@ EXIT_MODE_SWITCH = 20
 EXIT_DENY_UNKNOWN = 21
 EXIT_DENY_ILLEGAL = 22
 EXIT_FAIL_CLOSED = 30
+EXIT_USAGE = 2   # D3/O7：来源声明门用法错误（与 argparse 用法错误退出码一致）
 
 # archive_contract.model 是 Round 表示的权威源（invocation-started 的 `round` 字段契约：
 # null 或正整数）；ledger 的 `target_round` 由同一 canonical_round() 归一化产生，不允许
@@ -543,6 +544,31 @@ def realized_round_numbers(active: Path, scope: str) -> list[int]:
     return nums
 
 
+def next_contiguous_round(active: Path, scope: str) -> int:
+    """D2/O4 单一权威：FS 推导的下一个连续轮号（预约号必须钉到它）。
+
+    `max(realized_round_numbers)+1`，无产物时为 1。只读 `SCOPE_PRODUCT` 文件系统产物，
+    不读 ledger——与 `validate_integrity` 的连续编号检查同源。非连续 scope（无产物模板）
+    返回 1（调用方只在 `CONTIGUOUS_SCOPES` 上使用本函数）。
+    """
+    nums = realized_round_numbers(active, scope)
+    return (max(nums) + 1) if nums else 1
+
+
+def contiguous_missing(active: Path, scope: str) -> list[int]:
+    """D2/O4 单一权威：既有缺口检测的唯一实现（缺口集合的唯一可观测权威）。
+
+    返回 `1..max(realized)` 中缺失的整数列表；无产物 → 空列表。
+    `validate_integrity`（抛 `round_gap:{scope}`）与 `orchest._finish_step1_missing`
+    （返回文件名单）均复用本函数，消除两处同源重复。
+    """
+    nums = realized_round_numbers(active, scope)
+    if not nums:
+        return []
+    have = set(nums)
+    return [n for n in range(1, max(nums) + 1) if n not in have]
+
+
 def realized(active: Path, scope: str) -> int:
     return len(realized_round_numbers(active, scope))
 
@@ -901,9 +927,9 @@ def validate_integrity(active: Path, events: list[dict], state: dict) -> None:
         seen_targets.add(key)
 
     # 顺序 scope 产物连续编号（无重复 FS 上不可能；缺号 → fail-closed）
+    # D2/O4 single-source：缺口集合由 contiguous_missing 唯一权威提供。
     for scope in CONTIGUOUS_SCOPES:
-        nums = realized_round_numbers(active, scope)
-        if nums and sorted(nums) != list(range(1, max(nums) + 1)):
+        if contiguous_missing(active, scope):
             raise FailClosed(f"round_gap:{scope}")
 
     # D10: Companion reservation invariants (exactly-once pairing, no orphan,
@@ -1003,10 +1029,56 @@ def _emit_decision(active: Path, verdict: str, scope, observed, ceil) -> str:
     return did
 
 
+def _record_manual_fallback(active: Path, command: str, reason: str,
+                            reservation_id: str | None) -> None:
+    """D3/O7：把手工状态转移声明追加为 attempts.md 的 `[manual-fallback]` bullet。
+
+    append-only：尝试打开不存在的 attempts.md 会创建之（Python 'a' 模式语义），
+    不改写既有内容。依据 SKILL.md:215 既有 `[manual-fallback]` 义务，不新增 ledger
+    事件/state 字段。
+    """
+    bullet = (f"- [manual-fallback] {command}"
+              f" reservation_id={reservation_id or ''}"
+              f" reason={reason} ts={_now()}\n")
+    with (active / "attempts.md").open("a", encoding="utf-8", newline="\n") as f:
+        f.write(bullet)
+
+
+def _check_source_declaration(args, active: Path, command: str) -> int | None:
+    """D3/O7 来源声明门：reserve/settle 须恰好一个来源声明。
+
+    - `--orchest-managed`：由 orchest.py / ocsr_spawn_adapter.py 内部注入；
+    - `--manual-fallback <reason>`：非经编排的直调显式声明（落 attempts.md 披露）；
+    - 两者皆无 → fail-closed `FAIL_CLOSED:naked_state_transition`（零 ledger 写入）；
+    - 两者同传 → 用法错误 `EXIT_USAGE`（零 ledger 写入）。
+
+    返回 None 表示放行；返回退出码表示已在调用方之前裁决。
+    """
+    orchest_managed = bool(getattr(args, "orchest_managed", False))
+    manual_fallback = getattr(args, "manual_fallback", None)
+    if orchest_managed and manual_fallback:
+        print("USAGE:conflicting_source_declaration")
+        return EXIT_USAGE
+    if orchest_managed:
+        return None
+    if manual_fallback:
+        _record_manual_fallback(
+            active, command, str(manual_fallback).strip(),
+            getattr(args, "reservation_id", None) or getattr(args, "companion_for", None))
+        return None
+    print("FAIL_CLOSED:naked_state_transition")
+    return EXIT_FAIL_CLOSED
+
+
 def cmd_reserve(args) -> int:
     active = Path(args.active_dir)
     if not active.is_dir():
         print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+
+    # D3/O7 声明门：置于 --companion-for 分派之前，使 companion 路径同受约束。
+    gate_rc = _check_source_declaration(args, active, "reserve")
+    if gate_rc is not None:
+        return gate_rc
 
     # --companion-for: create a task-envelope companion for an existing role reservation
     if getattr(args, 'companion_for', None):
@@ -1036,6 +1108,14 @@ def cmd_reserve(args) -> int:
         # 重复 reservation_id → fail-closed（finding 1）
         if any(e.get("event") == "reserved" and e.get("reservation_id") == rid for e in events):
             print("FAIL_CLOSED:duplicate_reservation_id"); return EXIT_FAIL_CLOSED
+        # D2/O4 漂移门：预约 target_round 必须钉到 FS 推导的下一个连续轮号
+        # （执行次序：canonical_round → 重复 rid → 漂移门 → double_target → 预算裁决
+        # → MODE_SWITCH）。违反 → 零 ledger 写入 fail-closed。
+        if consumes in CONTIGUOUS_SCOPES:
+            expected_round = next_contiguous_round(active, consumes)
+            if target_round != expected_round:
+                print(f"FAIL_CLOSED:target_round_drift:{consumes}")
+                return EXIT_FAIL_CLOSED
         # 同一 (scope, target_round) 重复活跃预约 → fail-closed（finding 2）
         if consumes in SCOPE_PRODUCT:
             if (consumes, target_round) in active_targets(events):
@@ -1168,6 +1248,10 @@ def cmd_settle(args) -> int:
     active = Path(args.active_dir)
     if not active.is_dir():
         print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    # D3/O7 声明门：置于进入 Lock 之前（reserve 门置于 --companion-for 分派之前）。
+    gate_rc = _check_source_declaration(args, active, "settle")
+    if gate_rc is not None:
+        return gate_rc
     with Lock(active):
         events = read_ledger(active)
         state = read_state(active)
@@ -2016,6 +2100,12 @@ def main() -> int:
     r.add_argument("--tier", default="auditable-only", choices=["auditable-only", "enforced"])
     r.add_argument("--companion-for",
                    help="Create a task-envelope companion for an existing role reservation.")
+    r.add_argument("--orchest-managed", action="store_true",
+                   help="D3/O7 来源声明：本次 reserve 由 orchest.py/adapter 编排注入"
+                        "（与 --manual-fallback 恰好一个）")
+    r.add_argument("--manual-fallback", metavar="REASON", default=None,
+                   help="D3/O7 来源声明：非编排直调的手工状态转移 reason"
+                        "（与 --orchest-managed 恰好一个；落 attempts.md 披露）")
     r.set_defaults(func=cmd_reserve)
 
     s = sub.add_parser("settle")
@@ -2025,6 +2115,12 @@ def main() -> int:
     s.add_argument("--instance-id")
     s.add_argument("--pre-execution", action="store_true")
     s.add_argument("--reason")
+    s.add_argument("--orchest-managed", action="store_true",
+                   help="D3/O7 来源声明：本次 settle 由 orchest.py/adapter 编排注入"
+                        "（与 --manual-fallback 恰好一个）")
+    s.add_argument("--manual-fallback", metavar="REASON", default=None,
+                   help="D3/O7 来源声明：非编排直调的手工状态转移 reason"
+                        "（与 --orchest-managed 恰好一个；落 attempts.md 披露）")
     s.set_defaults(func=cmd_settle)
 
     iv = sub.add_parser("ingest-verdict")

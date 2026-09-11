@@ -1,12 +1,29 @@
 """Static contracts for controller ownership and Executor-local methods."""
 from __future__ import annotations
 
+import ast
+import re
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT_ROOT = ROOT.parent / "init-agent-docs"
+
+
+def function_source(text: str, name: str) -> str | None:
+    """Extract the source of a top-level/nested function by name (AST-scoped).
+
+    Used so anti-regression assertions are anchored to a specific write point /
+    function rather than the whole file (which would false-positive on read-side
+    defaults elsewhere).
+    """
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            lines = text.splitlines()
+            return "\n".join(lines[node.lineno - 1:node.end_lineno])
+    return None
 
 
 def read(root: Path, rel: str) -> str:
@@ -156,6 +173,110 @@ class ProcessControllerContractTest(unittest.TestCase):
             # The old table had "3 | 1 | 1 | 21" and "3 | 2 | 1 | 23"
             self.assertNotIn("| 3 | 1 | 1 | 21 |", text)
             self.assertNotIn("| 3 | 2 | 1 | 23 |", text)
+
+
+def _authorized_direct_gate_files() -> set[str]:
+    return {
+        "scripts/budget_gate.py",
+        "scripts/orchest.py",
+        "scripts/ocsr_spawn_adapter.py",
+        "scripts/converge_loop.py",
+        "tests/test_budget_gate.py",
+        "tests/test_orchest.py",
+        "tests/test_ocsr_spawn_adapter.py",
+        "tests/test_converge_loop.py",
+        "tests/test_loop_a_coverage.py",
+    }
+
+
+class OpEnvelopeToolingHardeningTest(unittest.TestCase):
+    """Sub-plan A（O2 + O4 + O7）防回退静态检查：以函数/调用点为单位锚定。"""
+
+    def _orchest(self) -> str:
+        return read(ROOT, "scripts/orchest.py")
+
+    # ── D1/O2：需要 exact 的写出点不得回退为字面量 metadata-only ──────────────
+    def test_orchest_exact_write_points_not_hardcoded(self):
+        orchest = self._orchest()
+        # _reserve_continue 的 begin 写出点：透传 args.evidence_mode（不得字面量）
+        continue_src = function_source(orchest, "_reserve_continue")
+        self.assertIsNotNone(continue_src)
+        self.assertNotIn('"--evidence-mode", "metadata-only"', continue_src)
+        self.assertIn('getattr(args, "evidence_mode"', continue_src)
+        # cmd_finish 的步骤 3 崩溃恢复写出点：缺省继承 started，--evidence-mode 仅覆盖
+        finish_src = function_source(orchest, "cmd_finish")
+        self.assertIsNotNone(finish_src)
+        self.assertNotIn('"--evidence-mode", "metadata-only"', finish_src)
+        self.assertIn('"--evidence-mode", recovery_mode', finish_src)
+        # finish --evidence-mode 缺省哨兵 None（不得 default="metadata-only"）
+        self.assertIn('"--evidence-mode", default=None', orchest)
+
+    def test_orchest_negative_read_side_default_untouched(self):
+        """负例：material gate 读取侧默认值仍是 metadata-only（检查按函数锚定，不误伤）。"""
+        material_src = function_source(self._orchest(), "_validate_material_gate")
+        self.assertIsNotNone(material_src)
+        self.assertIn('"metadata-only"', material_src)
+
+    def test_reserve_dry_run_display_is_parameter_linked(self):
+        orchest = self._orchest()
+        self.assertNotIn("evidence-mode=metadata-only", orchest)
+
+    # ── D1/O2：adapter / converge_loop 默认策略与透传 ─────────────────────────
+    def test_adapter_cli_default_metadata_only_and_passthrough(self):
+        adapter = read(ROOT, "scripts/ocsr_spawn_adapter.py")
+        self.assertIn('d.add_argument("--evidence-mode", default="metadata-only"', adapter)
+        self.assertIn("evidence_mode=evidence_mode", adapter)   # begin
+        self.assertIn('"--evidence-mode", evidence_mode', adapter)  # complete
+
+    def test_converge_loop_evidence_mode_single_source(self):
+        loop = read(ROOT, "scripts/converge_loop.py")
+        self.assertIn("from archive_contract.model import EVIDENCE_MODES", loop)
+        self.assertIn('spec.get("evidence_mode", "metadata-only")', loop)
+        reserve_src = function_source(loop, "reserve")
+        register_src = function_source(loop, "register")
+        self.assertIn('"--evidence-mode", self.evidence_mode', reserve_src)
+        self.assertIn('"--evidence-mode", self.evidence_mode', register_src)
+
+    # ── D3/O7：来源声明门 ────────────────────────────────────────────────────
+    def test_budget_gate_source_declaration_gate(self):
+        gate = read(ROOT, "scripts/budget_gate.py")
+        self.assertIn("FAIL_CLOSED:naked_state_transition", gate)
+        self.assertIn("EXIT_USAGE = 2", gate)
+        reserve_src = function_source(gate, "cmd_reserve")
+        # reserve 门置于 --companion-for 分派之前
+        self.assertLess(reserve_src.index('_check_source_declaration(args, active, "reserve")'),
+                        reserve_src.index("cmd_companion_for(args)"))
+        settle_src = function_source(gate, "cmd_settle")
+        # settle 门置于进入 Lock 之前
+        self.assertLess(settle_src.index("_check_source_declaration"),
+                        settle_src.index("with Lock(active)"))
+        # ingest-verdict 不设门（保留 guide:248 直调路径）
+        iv_src = function_source(gate, "cmd_ingest_verdict")
+        self.assertNotIn("_check_source_declaration", iv_src)
+
+    def test_orchest_and_adapter_inject_orchest_managed(self):
+        orchest = self._orchest()
+        gate_src = function_source(orchest, "_gate")
+        self.assertIn('("reserve", "settle")', gate_src)
+        self.assertIn('"--orchest-managed"', gate_src)
+        adapter = read(ROOT, "scripts/ocsr_spawn_adapter.py")
+        for fn in ("_gate_reserve", "_gate_settle", "_ensure_te_companion"):
+            src = function_source(adapter, fn)
+            self.assertIsNotNone(src, fn)
+            self.assertIn('"--orchest-managed"', src, fn)
+
+    def test_no_new_direct_gate_accounting_calls_outside_authorized_files(self):
+        """reserve / settle 直调（命令数组形态）只允许出现在授权文件内。"""
+        pattern = re.compile(r"""["'](reserve|settle)["']\s*,\s*["']--active-dir["']""")
+        allowed = _authorized_direct_gate_files()
+        offenders: set[str] = set()
+        for base in (ROOT / "scripts", ROOT / "tests"):
+            for path in base.rglob("*.py"):
+                rel = path.relative_to(ROOT).as_posix()
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if pattern.search(text) and rel not in allowed:
+                    offenders.add(rel)
+        self.assertEqual(offenders, set(), f"授权文件外的直调记账命令: {sorted(offenders)}")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ from pathlib import Path
 
 # budget_gate 与本文件同在 scripts/ 目录，脚本入口执行时该目录在 sys.path[0] 上
 import budget_gate  # noqa: E402
+from archive_contract.model import EVIDENCE_MODES  # noqa: E402
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -194,6 +195,11 @@ def validate_spec(spec: dict) -> list[str]:
             errs.append(f"缺少必填字段: {k}")
     if spec.get("mode", "standard") not in ("standard", "ultraverge"):
         errs.append("mode 必须是 standard | ultraverge")
+    # D1/O2：loop-spec 顶层 evidence_mode（默认 metadata-only），取值校验单源
+    # archive_contract.model.EVIDENCE_MODES；由 Driver.reserve/register 透传。
+    ev_mode = spec.get("evidence_mode")
+    if ev_mode is not None and ev_mode not in EVIDENCE_MODES:
+        errs.append("evidence_mode 必须是 " + " | ".join(sorted(EVIDENCE_MODES)))
     phases = spec.get("phases") or []
     if not isinstance(phases, list) or not phases:
         errs.append("phases 必须是非空列表")
@@ -433,6 +439,8 @@ class Driver:
         self.harness = spec.get("harness", "opencode")
         self.timeout = timeout_min or int(spec.get("timeout_min", 20))
         self.plan_ref = spec.get("plan", "")
+        # D1/O2：loop-spec 顶层 evidence_mode（默认 metadata-only），透传 reserve/register。
+        self.evidence_mode = spec.get("evidence_mode", "metadata-only")
         self.journal, _ = load_journal(self.active)
 
     def ensure_artifacts(self) -> None:
@@ -456,7 +464,8 @@ class Driver:
         cmd = ["reserve-round", "--active-dir", str(self.active), "--role", role,
                "--phase", phase, "--attempt", str(attempt),
                "--prompt-file", str(prompt),
-               "--requested-provider", provider, "--requested-model", mname or model]
+               "--requested-provider", provider, "--requested-model", mname or model,
+               "--evidence-mode", self.evidence_mode]
         if round_n is not None:
             cmd += ["--round", str(round_n)]
         rc, out, err = self._orchest(*cmd)
@@ -469,7 +478,8 @@ class Driver:
 
     def register(self, rid: str, instance: str, output: str | None = None) -> None:
         cmd = ["register-round", "--active-dir", str(self.active),
-               "--reservation-id", rid, "--instance-id", instance]
+               "--reservation-id", rid, "--instance-id", instance,
+               "--evidence-mode", self.evidence_mode]
         if output:
             cmd += ["--output", output]
         rc, out, err = self._orchest(*cmd)

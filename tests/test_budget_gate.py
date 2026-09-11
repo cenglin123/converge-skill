@@ -36,20 +36,24 @@ class Base(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def reserve(self, role, rid, rnd=None, tier="auditable-only"):
+    def reserve(self, role, rid, rnd=None, tier="auditable-only", manual=True):
         args = ["reserve", "--active-dir", str(self.active), "--role", role,
                 "--reservation-id", rid, "--tier", tier]
         if rnd is not None:
             args += ["--target-round", str(rnd)]
+        if manual:
+            args += ["--manual-fallback", "test-fixture"]
         return run(*args)
 
-    def settle(self, rid, result, **kw):
+    def settle(self, rid, result, manual=True, **kw):
         args = ["settle", "--active-dir", str(self.active),
                 "--reservation-id", rid, "--result", result]
         if kw.get("pre_execution"):
             args += ["--pre-execution"]
         if kw.get("instance_id"):
             args += ["--instance-id", kw["instance_id"]]
+        if manual:
+            args += ["--manual-fallback", "test-fixture"]
         return run(*args)
 
     def ledger(self):
@@ -84,11 +88,14 @@ class Base(unittest.TestCase):
 class TestScopeBudget(Base):
     def test_outer_boundary(self):
         self.set_config(max_outer_loops=2)
-        # 用 round 产物把 realized 顶到 ceiling-? 我们用 pending 模拟：连续 reserve 不落产物
+        # D2/O4：预约号须钉到 FS 推导的下一个连续轮号（预约号 == 产物号），
+        # 故每步落对应 round-N.md（写产物后 pending→realized，effective_usage 不变）。
         c, out, _ = self.reserve("outer-reviewer", "r1", rnd=1)
         self.assertTrue(out.startswith("PROCEED"), out)         # usage 0 < 2
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
         c, out, _ = self.reserve("outer-reviewer", "r2", rnd=2)
         self.assertTrue(out.startswith("PROCEED"), out)         # usage 1 < 2
+        (self.active / "round-2.md").write_text("x", encoding="utf-8")
         c, out, _ = self.reserve("outer-reviewer", "r3", rnd=3)
         self.assertEqual(out, "BLOCK:budget_exhausted")         # usage 2 == 2
         self.assertEqual(c, 10)
@@ -97,9 +104,11 @@ class TestScopeBudget(Base):
         self.set_config(max_outer_loops=1)
         c, out, _ = self.reserve("outer-reviewer", "r1", rnd=1)
         self.assertTrue(out.startswith("PROCEED"))
-        # 失败释放 scope 额度 → 可再领一格 scope（但总量仍计）
+        # 失败释放 scope 额度 → 可再领一格 scope（但总量仍计）。
+        # D2/O4：失败释放后重用同一轮号（= next_contiguous_round），不得落 round-1.md
+        # （落产物会把失败轮计入 realized 使 effective_usage=1，令第二预约变 BLOCK）。
         self.settle("r1", "failed")
-        c, out, _ = self.reserve("outer-reviewer", "r2", rnd=2)
+        c, out, _ = self.reserve("outer-reviewer", "r2", rnd=1)
         self.assertTrue(out.startswith("PROCEED"), out)
 
     def test_realized_dedup(self):
@@ -233,6 +242,9 @@ class TestModeSwitch(Base):
             run("ingest-verdict", "--active-dir", str(self.active),
                 "--target-round", str(rnd), "--verdict", "阻断需修复",
                 "--severities", "implementation,implementation,structural")
+        # D2/O4：使 next_contiguous_round==3（预约号钉定）。
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
+        (self.active / "round-2.md").write_text("x", encoding="utf-8")
         c, out, _ = self.reserve("outer-reviewer", "next", rnd=3)
         self.assertEqual(out, "MODE_SWITCH_REQUIRED", out)
         self.assertEqual(c, 20)
@@ -243,6 +255,9 @@ class TestModeSwitch(Base):
             run("ingest-verdict", "--active-dir", str(self.active),
                 "--target-round", str(rnd), "--verdict", "阻断需修复",
                 "--severities", "structural,conceptual")
+        # D2/O4：使 next_contiguous_round==3（预约号钉定）。
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
+        (self.active / "round-2.md").write_text("x", encoding="utf-8")
         c, out, _ = self.reserve("outer-reviewer", "next", rnd=3)
         self.assertTrue(out.startswith("PROCEED"), out)
 
@@ -713,7 +728,8 @@ class TestRound0Unification(Base):
 
     def test_negative_round_rejected(self):
         c, out, _ = run("reserve", "--active-dir", str(self.active), "--role", "executor",
-                        "--reservation-id", "neg", "--target-round", "-1", "--tier", "auditable-only")
+                        "--reservation-id", "neg", "--target-round", "-1", "--tier", "auditable-only",
+                        "--manual-fallback", "test-fixture")
         self.assertTrue(out.startswith("FAIL_CLOSED:event_field:reserved.target_round"), out)
 
 
@@ -2014,7 +2030,8 @@ class TestAppendOnlyCompanionLinkage(Base):
     def _companion_for(self, role_rid, tier="auditable-only"):
         return run("reserve", "--active-dir", str(self.active),
                     "--role", "task-envelope", "--tier", tier,
-                    "--companion-for", role_rid)
+                    "--companion-for", role_rid,
+                    "--manual-fallback", "test-fixture")
 
     # -- 1. Append-only: ledger bytes are never rewritten ----------------
     def test_companion_for_append_only_no_rewrite(self):
@@ -2193,6 +2210,134 @@ class TestAppendOnlyCompanionLinkage(Base):
         self.assertTrue(
             out.startswith("FAIL_CLOSED"),
             f"Duplicate companion must be rejected: {out}")
+
+
+# ---------------------------------------------------------------------------
+# D2/O4：预约号钉定 + 缺口 single-source（(a)/(b) 两段可观测断言）
+# ---------------------------------------------------------------------------
+
+class TestContiguousRoundPinning(Base):
+    """D2/O4：`next_contiguous_round` / `contiguous_missing` 单一权威 + cmd_reserve 钉定。"""
+
+    def test_next_contiguous_round_reads_fs_products(self):
+        self.assertEqual(budget_gate.next_contiguous_round(self.active, "outer"), 1)
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
+        self.assertEqual(budget_gate.next_contiguous_round(self.active, "outer"), 2)
+        (self.active / "round-2.md").write_text("x", encoding="utf-8")
+        self.assertEqual(budget_gate.next_contiguous_round(self.active, "outer"), 3)
+
+    def test_jump_ahead_reservation_rejected_zero_ledger(self):
+        self.set_config(max_outer_loops=5)
+        c, out, _ = self.reserve("outer-reviewer", "jump", rnd=2)   # next=1
+        self.assertEqual(out, "FAIL_CLOSED:target_round_drift:outer", out)
+        self.assertEqual(c, 30)
+        self.assertEqual(self.ledger(), [], "漂移门必须零 ledger 写入")
+
+    def test_pre_execution_cancelled_round_is_reused(self):
+        """纯骨架/pre_execution 取消不改变 realized → 下一次预约重用同一轮号。"""
+        self.set_config(max_outer_loops=5)
+        c, out, _ = self.reserve("outer-reviewer", "r1", rnd=1)
+        self.assertTrue(out.startswith("PROCEED"), out)
+        self.settle("r1", "cancelled", pre_execution=True)
+        c, out, _ = self.reserve("outer-reviewer", "r2", rnd=1)   # 重用被取消轮号
+        self.assertTrue(out.startswith("PROCEED"), out)
+
+    def test_substantive_cancel_does_not_reuse_round(self):
+        """已写实质内容的取消保留产物计入 realized → 下一轮为 N+1。"""
+        self.set_config(max_outer_loops=5)
+        c, out, _ = self.reserve("outer-reviewer", "r1", rnd=1)
+        self.assertTrue(out.startswith("PROCEED"), out)
+        (self.active / "round-1.md").write_text("substantive\n", encoding="utf-8")
+        self.settle("r1", "cancelled")   # 非 pre_execution：产物保留
+        # 重用轮号 1 会被拒（next=2）
+        c, out, _ = self.reserve("outer-reviewer", "r2", rnd=1)
+        self.assertEqual(out, "FAIL_CLOSED:target_round_drift:outer", out)
+        c, out, _ = self.reserve("outer-reviewer", "r3", rnd=2)
+        self.assertTrue(out.startswith("PROCEED"), out)
+
+    def test_contiguous_missing_is_single_authority_two_part(self):
+        """(a) `contiguous_missing` 等于预期整数列表；(b) `validate_integrity` 抛
+        `round_gap:outer` 且 `orchest._finish_step1_missing` 返回对应文件名单。"""
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
+        (self.active / "round-3.md").write_text("x", encoding="utf-8")
+        # (a)
+        self.assertEqual(budget_gate.contiguous_missing(self.active, "outer"), [2])
+        # (b) validate_integrity 抛 round_gap:outer（只抛异常、不暴露集合）
+        state = budget_gate.read_state(self.active)
+        events = budget_gate.read_ledger(self.active)
+        with self.assertRaises(budget_gate.FailClosed) as cm:
+            budget_gate.validate_integrity(self.active, events, state)
+        self.assertEqual(cm.exception.reason, "round_gap:outer")
+        # (b) _finish_step1_missing 返回与 (a) 对应的文件名单
+        import orchest
+        self.assertEqual(orchest._finish_step1_missing(self.active), ["round-2.md"])
+
+
+# ---------------------------------------------------------------------------
+# D3/O7：reserve/settle 来源声明门 + manual-fallback 披露
+# ---------------------------------------------------------------------------
+
+class TestSourceDeclarationGate(Base):
+    """D3/O7：裸 reserve/settle 被 fail-closed 拒绝；恰好一个声明；ingest-verdict 不设门。"""
+
+    def test_naked_reserve_rejected_zero_ledger(self):
+        c, out, _ = run("reserve", "--active-dir", str(self.active),
+                        "--role", "executor", "--tier", "auditable-only")
+        self.assertEqual(out, "FAIL_CLOSED:naked_state_transition", out)
+        self.assertEqual(c, 30)
+        self.assertEqual(self.ledger(), [], "裸 reserve 必须零 ledger 写入")
+
+    def test_naked_settle_rejected_zero_ledger(self):
+        # 先经声明建立 reservation（helper 默认 --manual-fallback）
+        self.reserve("executor", "e1")
+        before = len(self.ledger())
+        c, out, _ = run("settle", "--active-dir", str(self.active),
+                        "--reservation-id", "e1", "--result", "succeeded",
+                        "--instance-id", "i1")
+        self.assertEqual(out, "FAIL_CLOSED:naked_state_transition", out)
+        self.assertEqual(c, 30)
+        self.assertEqual(len(self.ledger()), before, "裸 settle 必须零 ledger 写入")
+
+    def test_naked_companion_for_rejected_before_dispatch(self):
+        """companion_for 路径同受门禁（门置于分派之前）。"""
+        self.set_config(task_tier="small")
+        self.reserve("executor", "role1")   # 经声明建立 role
+        c, out, _ = run("reserve", "--active-dir", str(self.active),
+                        "--role", "task-envelope", "--tier", "auditable-only",
+                        "--companion-for", "role1")
+        self.assertEqual(out, "FAIL_CLOSED:naked_state_transition", out)
+
+    def test_conflicting_declarations_usage_error(self):
+        c, out, _ = run("reserve", "--active-dir", str(self.active),
+                        "--role", "executor", "--tier", "auditable-only",
+                        "--orchest-managed", "--manual-fallback", "x")
+        self.assertEqual(c, 2, out)
+        self.assertEqual(self.ledger(), [])
+
+    def test_manual_fallback_records_disclosure_bullet(self):
+        c, out, _ = self.reserve("executor", "e1")
+        self.assertTrue(out.startswith("PROCEED"), out)
+        attempts = self.active / "attempts.md"
+        self.assertTrue(attempts.is_file(), "manual-fallback 须创建/追加 attempts.md")
+        text = attempts.read_text(encoding="utf-8")
+        self.assertIn("[manual-fallback]", text)
+        self.assertIn("reserve", text)
+        self.assertIn("reason=test-fixture", text)
+
+    def test_orchest_managed_does_not_record_disclosure(self):
+        c, out, _ = run("reserve", "--active-dir", str(self.active),
+                        "--role", "executor", "--tier", "auditable-only",
+                        "--orchest-managed")
+        self.assertTrue(out.startswith("PROCEED"), out)
+        self.assertFalse((self.active / "attempts.md").exists(),
+                         "orchest-managed 不应产生 manual-fallback 披露")
+
+    def test_ingest_verdict_has_no_declaration_gate(self):
+        c, out, _ = run("ingest-verdict", "--active-dir", str(self.active),
+                        "--target-round", "1", "--verdict", "阻断需修复",
+                        "--severities", "structural")
+        self.assertEqual(out, "ok", out)
+        self.assertEqual(c, 0)
 
 
 if __name__ == "__main__":

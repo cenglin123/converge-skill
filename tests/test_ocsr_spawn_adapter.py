@@ -201,6 +201,26 @@ class TestHappyPath(AdapterBase):
         self.assertEqual(reserved["target_round"], 1)
 
 
+class TestEvidenceMode(AdapterBase):
+    """D1/O2：adapter 的 --evidence-mode 默认策略与透传。"""
+
+    def test_default_metadata_only(self):
+        rc, out, err = run_adapter(self.active, {"FAKE_OCSR_MODE": "happy"},
+                                   *self._adapter_args())
+        self.assertEqual(rc, 0, f"{out} {err}")
+        started, terminal = _read_events(self.active)
+        self.assertEqual(started["prompt_evidence"]["evidence_mode"], "metadata-only")
+        self.assertEqual(terminal["output_evidence"]["evidence_mode"], "metadata-only")
+
+    def test_exact_evidence_mode_passthrough(self):
+        rc, out, err = run_adapter(self.active, {"FAKE_OCSR_MODE": "happy"},
+                                   *self._adapter_args(evidence_mode="exact"))
+        self.assertEqual(rc, 0, f"{out} {err}")
+        started, terminal = _read_events(self.active)
+        self.assertEqual(started["prompt_evidence"]["evidence_mode"], "exact")
+        self.assertEqual(terminal["output_evidence"]["evidence_mode"], "exact")
+
+
 class TestFailurePaths(AdapterBase):
     def test_fail_launcher_uses_pre_execution_true(self):
         """fail-launcher (Start-Process error, no model call) → pre_execution=true."""
@@ -376,19 +396,21 @@ class TestBudgetAccounting(AdapterBase):
         for i in range(1, 9):
             # Each iteration uses a different output_name to avoid collision detection,
             # and a different round to satisfy budget_gate's (scope, round) uniqueness
-            # invariant.
+            # invariant. D2/O4：产物落在 active 根（round-N.md）使预约号恒等于 FS 推导的
+            # 下一个连续轮号（否则漂移门会在 round>=2 时 fail-closed）。
             rc, _, err = run_adapter(
                 self.active, {"FAKE_OCSR_MODE": "happy"},
                 *self._adapter_args(role="outer-reviewer", round=i,
                                     output_name=f"round-{i}.md",
-                                    label=f"r{i}"),
+                                    label=f"r{i}", output_dir=str(self.active)),
             )
             self.assertEqual(rc, 0, f"iteration {i}: rc={rc}; stderr={err}")
         # Next outer reservation must BLOCK
         rc, out, err = run_adapter(
             self.active, {"FAKE_OCSR_MODE": "happy"},
             *self._adapter_args(role="outer-reviewer", round=9,
-                                output_name="round-9.md", label="r9"),
+                                output_name="round-9.md", label="r9",
+                                output_dir=str(self.active)),
         )
         self.assertEqual(rc, 10, f"expected EXIT_BLOCK=10, got rc={rc}; stderr={err}")
         gate = _read_gate_ledger(self.active)
@@ -447,6 +469,7 @@ class TestReservedReservationId(AdapterBase):
             self.active, "reserve", "--active-dir", str(self.active),
             "--role", "executor", "--tier", "auditable-only",
             "--reservation-id", rid,
+            "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"pre-reserve failed: {out}")
 
@@ -723,6 +746,7 @@ class TestAdapterCompanionPairing(AdapterBase):
         rc, out = run_gate(
             self.active, "reserve", "--active-dir", str(self.active),
             "--role", "executor", "--tier", "auditable-only",
+            "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"reserve failed: {out}")
         rid = out.split("PROCEED:")[1]
@@ -737,7 +761,7 @@ class TestAdapterCompanionPairing(AdapterBase):
         rc, out = run_gate(
             self.active, "settle", "--active-dir", str(self.active),
             "--reservation-id", role_rid, "--result", "cancelled",
-            "--pre-execution",
+            "--pre-execution", "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"settle failed: {out}")
         gate = _read_gate_ledger(self.active)
@@ -835,6 +859,7 @@ class TestAdapterCompanionReverseLookup(AdapterBase):
         rc, out = run_gate(
             self.active, "reserve", "--active-dir", str(self.active),
             "--role", "executor", "--tier", "auditable-only",
+            "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"reserve failed: {out}")
         role_rid = out.split("PROCEED:")[1]
@@ -847,6 +872,7 @@ class TestAdapterCompanionReverseLookup(AdapterBase):
             self.active, "reserve", "--active-dir", str(self.active),
             "--role", "task-envelope", "--tier", "auditable-only",
             "--companion-for", role_rid,
+            "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"companion_for failed: {out}")
 
@@ -882,6 +908,7 @@ class TestAdapterCompanionReverseLookup(AdapterBase):
         rc, out = run_gate(
             self.active, "reserve", "--active-dir", str(self.active),
             "--role", "executor", "--tier", "auditable-only",
+            "--manual-fallback", "test-fixture",
         )
         self.assertEqual(rc, 0, f"reserve failed: {out}")
         role_rid = out.split("PROCEED:")[1]

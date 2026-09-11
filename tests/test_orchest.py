@@ -412,7 +412,7 @@ class TestFinishRecoveryCancelledSettle(OrchestBase):
         rid, _ = self.reserve(round_no=2)
         rc, out, err = run_cli(GATE, "settle", "--active-dir", str(self.active),
                                "--reservation-id", rid, "--result", "cancelled",
-                               "--pre-execution")
+                               "--pre-execution", "--manual-fallback", "test-fixture")
         self.assertEqual(rc, 0, f"{out} {err}")
         return rid
 
@@ -422,10 +422,13 @@ class TestFinishRecoveryCancelledSettle(OrchestBase):
         (self.active / "retrospective.md").write_text("# Retrospective\n",
                                                       encoding="utf-8")
         events_before = _read_events(self.active)
-        rc, out, err = self.finish(FINAL_VERDICT, "--dry-run")
+        rc, out, err = self.finish(FINAL_VERDICT, "--dry-run",
+                                   "--acknowledge-manual-fallback")
         self.assertEqual(rc, 0, f"{out} {err}")
         # dry-run 输出列出恢复判定：cancelled 结算 → recover(cancelled)
         self.assertIn(f"{rid2}:补 recover(cancelled)", out)
+        # D3/O7：手工状态转移在 dry-run 下同样打印降级
+        self.assertIn("DEGRADED:manual-fallback=1", out)
         # 零写入
         self.assertEqual(_read_events(self.active), events_before)
         self.assertFalse((self.done_root / self.SLUG).exists())
@@ -435,8 +438,9 @@ class TestFinishRecoveryCancelledSettle(OrchestBase):
         rid2 = self._crash_after_gate_cancel()
         (self.active / "retrospective.md").write_text("# Retrospective\n",
                                                       encoding="utf-8")
-        rc, out, err = self.finish()
+        rc, out, err = self.finish(FINAL_VERDICT, "--acknowledge-manual-fallback")
         self.assertEqual(rc, 0, f"{out} {err}")
+        self.assertIn("DEGRADED:manual-fallback=1", out)
         # 恢复终态 = 显式 (cancelled, cancelled-by-host)
         events = _read_events(self.done_root / self.SLUG)
         rid_by_started = {e["event_id"]: e.get("reservation_id") for e in events
@@ -450,6 +454,119 @@ class TestFinishRecoveryCancelledSettle(OrchestBase):
         rc, out, _ = run_cli(ARCHIVE, "check", str(self.done_root / self.SLUG),
                              "--format", "json")
         self.assertEqual(rc, 0, out)
+
+    def test_finish_without_acknowledge_refused(self):
+        """D3/O7：扫描命中 [manual-fallback] 而缺 --acknowledge-manual-fallback →
+        DEGRADED 输出 + 零归档写入。"""
+        self.completed_round(1)
+        self._crash_after_gate_cancel()
+        (self.active / "retrospective.md").write_text("# Retrospective\n",
+                                                      encoding="utf-8")
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("DEGRADED:manual-fallback=1", out + err)
+        self.assertIn("--acknowledge-manual-fallback", out + err)
+        self.assertFalse((self.done_root / self.SLUG).exists())
+
+
+# ── N1 回归：finish 的 manual-fallback 计数按行首 bullet 锚定，正文引用不计 ──
+
+class TestManualFallbackCountAnchored(OrchestBase):
+    """审计 N1：计数须只统计行首 `- [manual-fallback]` 条目；正文中出现的
+    字面量（非条目）不再夸大 DEGRADED 计数。"""
+
+    # 正文引用：4 次字面量，均非行首 bullet
+    INLINE_REFS = (
+        "本对象在正文讨论 [manual-fallback] 机制；\n"
+        "并再次引用 [manual-fallback] 与 [manual-fallback]。\n"
+        "> 引用 [manual-fallback] 不是条目。\n"
+    )
+
+    def test_inline_references_do_not_count(self):
+        """仅正文引用（非行首 bullet）→ 计数为 0，免确认即可归档。"""
+        self.completed_round(1)
+        (self.active / "attempts.md").write_text(
+            "# Attempts\n\n" + self.INLINE_REFS, encoding="utf-8")
+        (self.active / "retrospective.md").write_text(
+            "# Retrospective\n", encoding="utf-8")
+        rc, out, err = self.finish()
+        self.assertEqual(rc, 0, f"{out} {err}")
+        self.assertNotIn("DEGRADED:manual-fallback", out + err)
+        self.assertTrue((self.done_root / self.SLUG).is_dir())
+
+    def test_real_bullets_count_and_ack_gate(self):
+        """N=3 条真实行首 bullet（含前置空白）→ 计数为 3；缺确认拒绝归档，
+        带确认通过。正文引用仍不计入。"""
+        self.completed_round(1)
+        (self.active / "attempts.md").write_text(
+            "# Attempts\n\n"
+            "- [manual-fallback] reserve rid=a reason=x ts=t\n"
+            "  - [manual-fallback] settle rid=b reason=y ts=t\n"
+            "- [manual-fallback] settle rid=c reason=z ts=t\n"
+            "\n正文引用 [manual-fallback] 不计。\n",
+            encoding="utf-8")
+        (self.active / "retrospective.md").write_text(
+            "# Retrospective\n", encoding="utf-8")
+        # 缺 --acknowledge-manual-fallback → 拒绝归档、零归档写入
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("DEGRADED:manual-fallback=3", out + err)
+        self.assertIn("--acknowledge-manual-fallback", out + err)
+        self.assertFalse((self.done_root / self.SLUG).exists())
+        # 带确认 → 通过归档
+        rc, out, err = self.finish(FINAL_VERDICT, "--acknowledge-manual-fallback")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        self.assertIn("DEGRADED:manual-fallback=3", out)
+        self.assertTrue((self.done_root / self.SLUG).is_dir())
+
+
+# ── D1/O2：finish 崩溃恢复 evidence-mode 继承 started（--evidence-mode 仅覆盖） ──
+
+class TestFinishRecoveryEvidenceMode(OrchestBase):
+    def _reserve_exact_and_settle_gate(self) -> str:
+        """reserve-round --evidence-mode exact → started 记录 exact；gate 手工 settle
+        succeeded（无 archive terminal），构造 finish 步骤 3 崩溃恢复窗口。"""
+        rc, out, err = run_orchest(
+            "reserve-round", "--active-dir", str(self.active),
+            "--role", "outer-reviewer", "--phase", "review", "--round", "1",
+            "--prompt-file", str(self.prompt),
+            "--requested-provider", "p", "--requested-model", "m",
+            "--evidence-mode", "exact")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        rid = next(l.split(":", 1)[1].strip()
+                   for l in out.splitlines() if l.startswith("reservation_id:"))
+        (self.active / "round-1.md").write_text(
+            "---\nround: 1\n---\nbody\n", encoding="utf-8")
+        rc, out, err = run_cli(GATE, "settle", "--active-dir", str(self.active),
+                               "--reservation-id", rid, "--result", "succeeded",
+                               "--instance-id", "i1",
+                               "--manual-fallback", "test-fixture")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        return rid
+
+    def test_recovery_inherits_started_exact(self):
+        self._reserve_exact_and_settle_gate()
+        (self.active / "retrospective.md").write_text("# Retrospective\n",
+                                                      encoding="utf-8")
+        rc, out, err = self.finish(FINAL_VERDICT, "--acknowledge-manual-fallback")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        events = _read_events(self.done_root / self.SLUG)
+        started = next(e for e in events if e["event_type"] == "invocation-started")
+        self.assertEqual(started["prompt_evidence"]["evidence_mode"], "exact")
+        term = next(e for e in events if e["event_type"] == "invocation-terminal")
+        # 缺省继承 started 的 exact，而非降级为 metadata-only
+        self.assertEqual(term["output_evidence"]["evidence_mode"], "exact")
+
+    def test_recovery_explicit_override_wins(self):
+        self._reserve_exact_and_settle_gate()
+        (self.active / "retrospective.md").write_text("# Retrospective\n",
+                                                      encoding="utf-8")
+        rc, out, err = self.finish(FINAL_VERDICT, "--acknowledge-manual-fallback",
+                                   "--evidence-mode", "metadata-only")
+        self.assertEqual(rc, 0, f"{out} {err}")
+        events = _read_events(self.done_root / self.SLUG)
+        term = next(e for e in events if e["event_type"] == "invocation-terminal")
+        self.assertEqual(term["output_evidence"]["evidence_mode"], "metadata-only")
 
 
 # ── 验收 6：finish 二次调用拒绝 ──────────────────────────────────────────────

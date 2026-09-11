@@ -105,6 +105,16 @@ class TestSpecValidation(unittest.TestCase):
         with self.assertRaises(cl.SpecError):
             cl.normalize_spec(spec)
 
+    def test_evidence_mode_default_and_invalid(self):
+        """D1/O2：loop-spec 顶层 evidence_mode（默认 metadata-only；取值校验单源）。"""
+        spec = self._base()
+        self.assertEqual(cl.validate_spec(spec), [])          # 缺省合法（metadata-only）
+        spec["evidence_mode"] = "exact"
+        self.assertEqual(cl.validate_spec(spec), [])
+        spec["evidence_mode"] = "bogus"
+        errs = cl.validate_spec(spec)
+        self.assertTrue(any("evidence_mode" in e for e in errs), errs)
+
     def test_forbidden_round_key_regression(self):
         spec = self._base()
         spec["phases"][0]["round"] = 2  # 20260818 轮号误用事故回归：spec 禁轮号
@@ -1063,7 +1073,8 @@ class TestDriverNoDoubleCount(unittest.TestCase):
             # Do one reserve
             rc, out = _run_gate(active, "reserve", "--active-dir", str(active),
                                 "--role", "outer-reviewer", "--tier", "auditable-only",
-                                "--target-round", "1")
+                                "--target-round", "1",
+                                "--manual-fallback", "test-fixture")
             self.assertEqual(rc, 0, f"reserve failed: {out}")
             gate_events_after = budget_gate.read_ledger(active)
             te_after = budget_gate.scope_reservations_issued(gate_events_after, "task-envelope")
@@ -1074,6 +1085,47 @@ class TestDriverNoDoubleCount(unittest.TestCase):
             te_reserved = [e for e in reserved if e.get("target_role") == "task-envelope"]
             self.assertEqual(len(te_reserved), 1,
                              f"expected 1 TE reserved event, got {len(te_reserved)}")
+
+
+class TestDriverEvidenceModePassthrough(unittest.TestCase):
+    """D1/O2：Driver.reserve / Driver.register 透传 loop-spec 顶层 evidence_mode。"""
+
+    def _driver_with_capture(self, evidence_mode="metadata-only"):
+        captured: list[list[str]] = []
+        with tempfile.TemporaryDirectory() as td:
+            active = Path(td) / "active"
+            active.mkdir()
+            spec = {"slug": "s", "active_dir": str(active),
+                    "orchest": str(ORCHEST), "ocsr_dispatch": "/d",
+                    "evidence_mode": evidence_mode,
+                    "phases": [{"id": "uv", "type": "parallel-review",
+                                "prompt_template": "t.md",
+                                "reviewers": [{"model": "a/b", "label": "r1"}]}]}
+            spec_path = Path(td) / "spec.yaml"
+            spec_path.write_text("slug: s\n", encoding="utf-8")
+            drv = cl.Driver(spec, spec_path)
+
+            def fake(*args):
+                captured.append(list(args))
+                return (0, "reservation_id: abc123\n", "")
+
+            drv._orchest = fake  # type: ignore[method-assign]
+            return drv, captured
+
+    def test_reserve_and_register_pass_evidence_mode(self):
+        drv, captured = self._driver_with_capture("exact")
+        drv.reserve("outer-reviewer", 1, "review", 1, Path("p.md"), "a/b")
+        self.assertIn("--evidence-mode", captured[0])
+        self.assertEqual(captured[0][captured[0].index("--evidence-mode") + 1], "exact")
+        drv.register("abc123", "i1")
+        self.assertIn("--evidence-mode", captured[1])
+        self.assertEqual(captured[1][captured[1].index("--evidence-mode") + 1], "exact")
+
+    def test_default_evidence_mode_is_metadata_only(self):
+        drv, captured = self._driver_with_capture()
+        drv.reserve("outer-reviewer", 1, "review", 1, Path("p.md"), "a/b")
+        self.assertEqual(captured[0][captured[0].index("--evidence-mode") + 1],
+                         "metadata-only")
 
 
 def _run_gate(active: Path, *args) -> tuple[int, str]:

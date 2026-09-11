@@ -263,7 +263,8 @@ class TestExecutorCrashWindow(LoopABase):
         rc, out, err = run_gate("settle", "--active-dir", str(self.active),
                                 "--reservation-id", rid_exe,
                                 "--result", "succeeded",
-                                "--instance-id", "inst-exe-1")
+                                "--instance-id", "inst-exe-1",
+                                "--manual-fallback", "test-fixture")
         self.assertEqual(rc, 0, f"manual gate settle rc={rc} {out} {err}")
         return rid_exe
 
@@ -801,7 +802,7 @@ class TestCrashRecovery(LoopABase):
              "--active-dir", str(self.active),
              "--reservation-id", rid,
              "--result", "cancelled",
-             "--pre-execution"],
+             "--pre-execution", "--manual-fallback", "test-fixture"],
             capture_output=True, text=True, encoding="utf-8", env=env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # Verify both role and companion are settled

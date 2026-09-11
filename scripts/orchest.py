@@ -141,7 +141,12 @@ def _run(script: Path, args: list[str]) -> tuple[int, str, str]:
 
 
 def _gate(*args: str) -> tuple[int, str, str]:
-    return _run(GATE_SCRIPT, list(args))
+    # D3/O7：orchest 编排路径的 reserve/settle 注入 --orchest-managed 来源声明。
+    # ingest-verdict 不注入（其直调是 guide:248 既有规范指令，不设声明门）。
+    cmd = list(args)
+    if cmd and cmd[0] in ("reserve", "settle") and "--orchest-managed" not in cmd:
+        cmd.append("--orchest-managed")
+    return _run(GATE_SCRIPT, cmd)
 
 
 def _archive_cli(*args: str) -> tuple[int, str, str]:
@@ -389,7 +394,7 @@ def _reserve_continue(args, active: Path, prompt: Path) -> int:
                   "--attempt", str(attempt),
                   "--parent-event-id", parent.get("event_id", ""),
                   "--prompt", str(prompt.resolve()),
-                  "--evidence-mode", "metadata-only"]
+                  "--evidence-mode", getattr(args, "evidence_mode", "metadata-only")]
     if args.requested_provider:
         begin_args += ["--requested-provider", args.requested_provider]
     if args.requested_model:
@@ -573,7 +578,7 @@ def cmd_reserve_round(args) -> int:
             print(f"  a. 跳过（--resume-reservation {args.resume_reservation}，rid 已 reserve）")
         print(f"  b. archive begin-invocation kind=spawn role={role} phase={args.phase} "
               f"attempt={args.attempt} round={round_no} prompt={prompt} "
-              f"evidence-mode=metadata-only")
+              f"evidence-mode={getattr(args, 'evidence_mode', 'metadata-only')}")
         tmpl = budget_gate.SCOPE_PRODUCT.get(consumes) if consumes else None
         if tmpl and round_no is not None:
             print(f"  c. 骨架（不存在时创建）: {tmpl.format(n=round_no)}")
@@ -997,16 +1002,16 @@ def cmd_record_verdict(args) -> int:
 # ==============================================================================
 
 def _finish_step1_missing(active: Path) -> list[str]:
-    """顺序 scope 产物连续编号自检（读目录枚举，不信任 LLM 计数）。"""
+    """顺序 scope 产物连续编号自检（读目录枚举，不信任 LLM 计数）。
+
+    D2/O4 single-source：缺口集合复用 `budget_gate.contiguous_missing`（与
+    `budget_gate.validate_integrity` 的 `round_gap:{scope}` 判定同源），此处只负责把
+    缺失整数映射为产物文件名单。
+    """
     missing: list[str] = []
     for scope in budget_gate.CONTIGUOUS_SCOPES:
-        nums = budget_gate.realized_round_numbers(active, scope)
-        if not nums:
-            continue
-        have = set(nums)
-        for n in range(1, max(nums) + 1):
-            if n not in have:
-                missing.append(budget_gate.SCOPE_PRODUCT[scope].format(n=n))
+        for n in budget_gate.contiguous_missing(active, scope):
+            missing.append(budget_gate.SCOPE_PRODUCT[scope].format(n=n))
     return missing
 
 
@@ -1525,6 +1530,12 @@ def cmd_finish(args) -> int:
                             f"settle 行不含产物路径）——历史/手工 ledger 形态，停止")
             recover_notes.append(f"{rid}:补 complete(succeeded)")
             if not args.dry_run:
+                # D1/O2：崩溃恢复缺省继承该 invocation-started 的 prompt_evidence.evidence_mode
+                # （与 material gate 判定同源）；--evidence-mode 仅作显式覆盖（default=None 哨兵）。
+                started_evidence = (ev.get("prompt_evidence") or {}).get(
+                    "evidence_mode", "metadata-only")
+                override = getattr(args, "evidence_mode", None)
+                recovery_mode = override or started_evidence
                 cargs = ["complete-invocation", str(active), ev["invocation_id"],
                          "--status", "succeeded",
                          "--instance-id", row.get("instance_id") or "",
@@ -1532,7 +1543,7 @@ def cmd_finish(args) -> int:
                          "--resolution-source", "cli_argument",
                          "--resolution-reason-code", "backend-does-not-expose",
                          "--output", str(output.resolve()),
-                         "--evidence-mode", "metadata-only"]
+                         "--evidence-mode", recovery_mode]
                 rc, out, err_ = _archive_cli(*cargs)
                 if rc != 0:
                     return fail(f"步骤 3: 补 complete-invocation 失败（{rid}）: {out or err_}")
@@ -1545,6 +1556,25 @@ def cmd_finish(args) -> int:
                 rc, out, err_ = _archive_cli(*rargs)
                 if rc != 0:
                     return fail(f"步骤 3: 补 recover-invocation 失败（{rid}）: {out or err_}")
+
+    # 3.4 D3/O7 手工状态转移显式降级：扫描 attempts.md 的 [manual-fallback] 条目。
+    # 位置写死：step 3（异常恢复循环，含其"产物无法解析"早退）之后、step 3.5 之前、
+    # 归档（step 7）之前。扫描只读；--dry-run 下同样生效（插入点先于 dry-run 早退）。
+    attempts_path = active / "attempts.md"
+    manual_fallback_count = 0
+    if attempts_path.is_file():
+        # N1：按行首 bullet 锚定计数，正文对字面量的引用不计入（见审计 N1）。
+        manual_fallback_count = len(re.findall(
+            r"^[ \t]*- \[manual-fallback\]",
+            attempts_path.read_text(encoding="utf-8"), re.MULTILINE))
+    if manual_fallback_count:
+        print(f"[finish] DEGRADED:manual-fallback={manual_fallback_count}")
+        if not getattr(args, "acknowledge_manual_fallback", False):
+            return fail(
+                f"步骤 3.4: 检测到 {manual_fallback_count} 条 [manual-fallback] 手工状态转移"
+                f"（DEGRADED:manual-fallback={manual_fallback_count}）——须显式 "
+                f"--acknowledge-manual-fallback 才能继续归档")
+    completed.append("3.4")
 
     # 3.5 Material gate + calibration sample validation (non-dry-run only)
     if not args.dry_run:
@@ -1824,6 +1854,13 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--done-root", default=None,
                    help='缺省 = active 上级目录的同级 done/（如 .converge/active/<slug> → .converge/done）')
     f.add_argument("--slug", default=None, help="缺省 = <active-dir> 目录名")
+    f.add_argument("--evidence-mode", default=None,
+                   choices=["metadata-only", "redacted", "exact"],
+                   help="D1/O2：崩溃恢复 complete 的显式覆盖；缺省（None）继承对应 "
+                        "invocation-started 的 prompt_evidence.evidence_mode")
+    f.add_argument("--acknowledge-manual-fallback", action="store_true",
+                   help="D3/O7：显式确认 attempts.md 中的 [manual-fallback] 手工状态转移"
+                        "（否则 finish 输出 DEGRADED 并停止）")
     f.add_argument("--dry-run", action="store_true")
     f.set_defaults(func=cmd_finish)
 

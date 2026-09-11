@@ -82,8 +82,13 @@ def _parse_provider_model(model: str) -> tuple[str, str]:
 
 def _gate_reserve(gate_script: Path, active_dir: Path, role: str, target_round: int | None,
                   reservation_id: str | None, tier: str) -> tuple[int, str]:
-    """Run budget_gate.py reserve. Returns (exit_code, rid_or_message)."""
-    args = ["reserve", "--active-dir", str(active_dir), "--role", role, "--tier", tier]
+    """Run budget_gate.py reserve. Returns (exit_code, rid_or_message).
+
+    D3/O7：本适配器属编排路径 → 注入 `--orchest-managed` 来源声明（满足 budget_gate
+    的来源声明门；非手工裸转移）。
+    """
+    args = ["reserve", "--active-dir", str(active_dir), "--role", role, "--tier", tier,
+            "--orchest-managed"]
     if target_round is not None:
         args += ["--target-round", str(target_round)]
     if reservation_id:
@@ -97,8 +102,10 @@ def _gate_reserve(gate_script: Path, active_dir: Path, role: str, target_round: 
 def _gate_settle(gate_script: Path, active_dir: Path, reservation_id: str,
                  result: str, instance_id: str | None = None,
                  pre_execution: bool = False, reason: str | None = None) -> int:
+    # D3/O7：编排路径注入 --orchest-managed 来源声明。
     args = ["settle", "--active-dir", str(active_dir),
-            "--reservation-id", reservation_id, "--result", result]
+            "--reservation-id", reservation_id, "--result", result,
+            "--orchest-managed"]
     if instance_id:
         args += ["--instance-id", instance_id]
     if pre_execution:
@@ -292,10 +299,10 @@ def _ensure_te_companion(gate_script: Path, active_dir: Path,
                 and ev.get("companion_reservation_id") == role_reservation_id):
             return True  # Already has companion (reverse link from companion)
 
-    # Create companion via gate CLI
+    # Create companion via gate CLI (D3/O7: orchestration path → --orchest-managed)
     args = ["reserve", "--active-dir", str(active_dir),
             "--role", "task-envelope", "--tier", tier,
-            "--companion-for", role_reservation_id]
+            "--companion-for", role_reservation_id, "--orchest-managed"]
     rc, out, err = _run_cli(gate_script, args)
     if rc == 0 and out.startswith("PROCEED:"):
         return True
@@ -731,7 +738,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--timeout", type=int, default=15, help="ocsr watchdog minutes (default 15).")
     d.add_argument("--tier", default="auditable-only", choices=["auditable-only", "enforced"])
     d.add_argument("--evidence-mode", default="metadata-only",
-                   choices=["metadata-only", "redacted", "exact"])
+                   choices=["metadata-only", "redacted", "exact"],
+                   help="证据模式（D1/O2 默认策略）：缺省 metadata-only；material / 终局"
+                        "同字节绑定相关的轮由调用方显式传 exact。透传至 begin/complete。")
     d.add_argument("--harness", default="ocsr-adapter", help="ocsr --harness tag.")
     d.add_argument("--backend", default=None, help="archive backend name (default: opencode).")
     d.add_argument("--backend-version", default=None,

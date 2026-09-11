@@ -35,9 +35,12 @@ python scripts/orchest.py record-verdict --active-dir <dir> --round <N> \
     --verdict <可执行|阻断需修复|需重新设计> [--severities s1,s2] [--product blind-recheck-N.md]
 
 # ⑤ 收尾一条命令（固定顺序 0→8：拒已归档 → 交叉核对 → round 连续 → 全 settle →
-#    孤儿显性化 → 异常恢复 → 终局 decision → stamp → prompt 归位 → archive → check）：
+#    孤儿显性化 → 异常恢复 → 手工状态转移降级 → 终局 decision → stamp → prompt 归位
+#    → archive → check）：
 python scripts/orchest.py finish --active-dir <dir> --verdict <终局 verdict> \
-    [--done-root <dir>] [--slug <s>]
+    [--done-root <dir>] [--slug <s>] \
+    [--evidence-mode exact]          # 崩溃恢复 complete 的显式覆盖；缺省继承 started
+    [--acknowledge-manual-fallback]  # attempts.md 含 [manual-fallback] 时须显式确认
 
 # ⑥ plan checkpoint 路径清单（git diff-tree 现算，零手抄）：
 python scripts/orchest.py checkpoint-paths --commit <sha> [--repo <外部仓库路径>]
@@ -136,9 +139,27 @@ ledger/budget 双计数风险；同一 active 目录同一时刻只允许一条�
 
 ## r2 新增/变更 CLI 速查
 
-### `--evidence-mode`（reserve-round / register-round）
+### `--evidence-mode`（reserve-round / register-round / finish；ocsr_spawn_adapter dispatch）
 
-`--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision 两-authority 同字节审查。默认 `metadata-only`（仅记录 hash/size）。material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集。
+**默认策略（单一权威口径）**：默认（缺省）`metadata-only`；material-revision / 终局同字节绑定相关的轮**必需** `exact`，由调用方显式传入。
+
+- `orchest.py reserve-round` / `register-round`：默认 `metadata-only`；material 场景显式 `--evidence-mode exact`。`_reserve_continue` 的 begin 写出点同样透传 `--evidence-mode`。
+- `orchest.py finish`：步骤 3 崩溃恢复的 `complete-invocation` **缺省继承**对应 `invocation-started` 的 `prompt_evidence.evidence_mode`（与 material gate 判定同源）；`--evidence-mode`（`default=None` 哨兵）**仅作显式覆盖**。
+- `ocsr_spawn_adapter.py dispatch`：`--evidence-mode` 透传至 begin/complete，CLI 默认 `metadata-only`。
+- `converge_loop.py`：loop-spec 顶层 `evidence_mode`（默认 `metadata-only`，取值校验 `archive_contract.model.EVIDENCE_MODES`）由 `Driver.reserve` / `Driver.register` 透传；不使用 `meta` 通道承载。
+
+`--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision 两-authority 同字节审查。material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集。
+
+### `--manual-fallback` / `--orchest-managed`（budget_gate reserve / settle 来源声明门，D3/O7）
+
+`budget_gate.py reserve` / `settle` 在 CLI 入口要求**恰好一个**来源声明：
+
+- `--orchest-managed`：由 `orchest.py`（`_gate`）与 `ocsr_spawn_adapter.py`（`_gate_reserve` / `_gate_settle` / `_ensure_te_companion`）内部注入；
+- `--manual-fallback <reason>`：非经上述编排的直接调用必须显式声明 reason（脚本 append-only 落一条 `[manual-fallback]` bullet 到 `attempts.md`）；
+- 两者皆无 → fail-closed `FAIL_CLOSED:naked_state_transition`（零 ledger 写入）；
+- 两者同传 → 用法错误（`EXIT_USAGE=2`，零 ledger 写入）。
+
+`ingest-verdict` **不设声明门**（保留 `refs/orchestrator-guide.md:248` 既有直调路径）。`orchest.py finish` 在归档前扫描 `attempts.md` 的 `[manual-fallback]` 条目，命中则打印 `DEGRADED:manual-fallback=N` 并要求 `--acknowledge-manual-fallback` 才继续（该扫描在 finish 步骤 3 之后、步骤 3.5 之前，`--dry-run` 下同样生效）。
 
 ### 治理 preflight 模式
 
