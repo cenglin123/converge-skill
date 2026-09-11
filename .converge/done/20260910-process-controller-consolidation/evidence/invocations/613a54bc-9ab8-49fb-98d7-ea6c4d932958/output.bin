@@ -1,0 +1,76 @@
+# Blind Recheck 2 — r2 Plan (blank-slate recertification, exact evidence)
+
+Reviewed artifact: `.converge/active/20260910-process-controller-consolidation/plan.md` (34302 bytes).
+Reviewer basis: first-principles inspection of Git history, dirty worktree source/tests, `CONSTITUTION.md`, `SKILL.md`, the Archive Contract event log, and the init-agent-docs worktree. Per blank-slate rules, `attempts.md`, prior reviewer outputs, `retrospective.md`, `round-*.md`, and chat summaries were NOT read; the `material_revision` locator hash below is echoed as payload binding and was not independently recomputed (verification boundary, not a plan defect).
+
+## review_target (echoed byte-identically)
+
+```json
+{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+## Verification performed (evidence-backed)
+
+1. **Artifact binding**: recomputed `plan.md` SHA-256 = `ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb`, size = 34302 bytes — byte-exact match with payload.
+2. **Embedded calibration report**: extracted the `converge.calibration-report/v1` fence, re-canonicalized (sorted keys, compact separators, UTF-8, one trailing LF), SHA-256 = `c13d39574369e3df70c038d51dfa852f26a1a72174b58eee458c75c275fade8d` — matches the preflight `calibration.sha256`. The block is a sub-block hash; `plan.md` embeds no plan self-hash (no circularity).
+3. **Git archaeology** (all four commits exist and match claims):
+   - `aac95bd`: outer `10→5`, 评议 default entry, "all convergences finished in 2-3 rounds" — matches.
+   - `0137fce`: two real convergences outer `7/12`, blind `3/4`, findings progressing; released defaults `5→8` / `1→3` — matches.
+   - `20c8993`: file-authoritative budget gate shipped; HEAD `DEFAULTS` shows `max_inner_loops: 3` — matches "inner 3 released, no reduction evidence".
+   - `d3c82cb`: doc-layer governance ultraverge ran outer R1–R8 with blocking work, passed only at blind #2 — matches "complex work productively reaches released boundary; one post-revision review is weak evidence".
+4. **Numeric preflight values vs. actual code**: released HEAD `budget_gate.py` DEFAULTS = `8/3/3`; dirty worktree DEFAULTS = `3/1/1` with `LEGACY_DEFAULTS 8/3/3` + unpublished `defaults_version=2`; released `ocsr_spawn_adapter.py` HEAD does auto-apply `max_blind_rechecks=2` for ultraverge (so `"released": 2` for the overlay is accurate); dirty `budget_gate.py`/`ocsr_spawn_adapter.py` also carry the new-state overlay the plan removes. `old`/`released`/`proposed` fields in the governance-change block are all consistent with observed code.
+5. **Reuse-not-extend claims**: `archive_convergence.py` already supports `begin-invocation --prompt --evidence-mode exact` and `complete-invocation --output --evidence-mode exact`; `capture.py`/`model.py` already derive `supersedes_decision_event_id`; `EVIDENCE_MODES` includes `exact`. "No Archive Contract v1 schema change" is credible.
+6. **File matrix vs. dirty state**: `capture.py` 8-line malformed-EventLock fail-closed fix present (prior baseline, correctly excluded from r2); `tests/test_archive_convergence.py` +35 lines of EventLock tests; `converge_loop.py` loop-spec v2 separation with `_V1_DEFAULT_DRIVER_RETRY = 3` (matches "driver repair attempts default 3, released behavior"); untracked `tests/test_process_controller_contract.py` present; init-agent-docs worktree (`C:\Users\Administrator\Documents\Github\init-agent-docs`) is dirty with `D scripts/converge_orchestrator.py` — matches "preserve deletion".
+7. **Reopened-object claims vs. event log**: seq 30/31 spawns (`775c0a46` outer, `ab822a65` blind) started with `prompt_evidence.evidence_mode = metadata-only` and terminated normally at seq 32/33 — correctly disqualified from same-byte authority; seq 34 (`b6f4e8a3`) is an `invocation_kind: continue` executor (the active Plan Executor Continue), terminated at seq 35 after plan freeze; seq 36/37 used `evidence-mode exact`. `_budget-state.json` holds explicit `3/2/1` plus two user-authorized extensions (event `29c90690`) — consistent with "explicit active config is authoritative, never rewritten". `.reopen-state.json` confirms revision r2, parent r1, parent manifest SHA `9833752f…e68f`.
+
+## First-principles judgment
+
+**Implementable**: every mechanism binds to machinery verified present (exact prompt/output evidence, derived supersession, defaults_version dual-table, loop-spec v2, adapter delegation). File matrix deltas match the actual dirty tree; nothing outside the matrix is required. Phases are bounded, test-first, and each has concrete fail-closed semantics.
+
+**Minimal**: r2 restricts itself to the unsupported `3/1/1` cut plus review/calibration gaps; D1–D6 dirty baselines are explicitly preserved (including the unrelated EventLock fix and init-agent-docs scope freeze); no Archive Contract schema expansion, no state v3, no migration CLI, no new controller. The bootstrap calibration exception is single-use and honestly scoped (compiler does not yet exist; corpus `eligible_samples: 0` is declared, not hidden).
+
+**Prevents the demonstrated failure**: the failure chain was (a) evidence-backed defaults cut to 3/1/1, (b) a reviewer spotted the empirical conflict, (c) it was downgraded to a suggestion, (d) rationalized cost-first. The plan breaks each link: D7's narrow numeric gate returns `BLOCK:empirical_conflict` when productive comparable evidence is undercut without newer counterevidence **or a bound user tradeoff decision** — cost-first rationalization by the author alone no longer passes (d); Reviewer prompts receive the full quality-goal event and machine-input reference, and role/mechanism questions are explicitly kept out of the numeric parser and routed to semantic review (b, c); D8's material-revision rule forces two distinct fresh Spawns (outer + blank-slate) on byte-identical frozen bytes after any conceptual/architectural or numeric-control blocking revision, with byte-change invalidation — one weak post-revision review can no longer certify a material change (a recurrence). D10's scoped, honestly-labeled instrumented accounting (`accounting_coverage`, no auditable-only host-wide claim) prevents future usage-evidence fabrication that would undermine the calibration corpus.
+
+Residual risk is declared, not concealed: for r2 itself the numeric gate cannot fire (bootstrap corpus has zero eligible samples), so this restoration stands on released-behavior evidence plus the dual same-byte review now in progress — which is exactly the gate this recheck participates in.
+
+```yaml
+schema: converge.blind-recheck/v1
+review_target_echo: see-json-block-above
+reviewed_plan_sha256: ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb
+reviewed_plan_size: 34302
+verdict: 可执行
+blocking_issues: []
+suggestion_issues:
+  - id: S1
+    severity: suggestion
+    text: >-
+      corpus_digest 的字节构造配方在 plan.md 中只有定性描述（ordered corpus entries +
+      各项 digest）。实施时应按 File Matrix 在 refs/state-schema.md 的 calibration
+      report 契约中钉死精确的 canonicalization 配方（字段顺序、分隔符、嵌套 digest
+      算法），否则 Phase 3 的"复算一致"判据存在解释空间。
+  - id: S2
+    severity: suggestion
+    text: >-
+      本次 r2 变更本身落在 bootstrap 零合格样本区间，numeric empirical gate 无法对其
+      开火，恢复 8/3/3 的即时保障完全依赖双 fresh 同字节评审。建议在 Phase 3 落地
+      时加一条回归测试：bootstrap 报告块字节被锁死，任何漂移 fail-closed（plan 已
+      要求 replay 复现 canonical bytes，此处仅是把它显式测试化）。
+  - id: S3
+    severity: suggestion
+    text: >-
+      治理变更块中 ultraverge.max_blind_rechecks_override 的 "released": 2 准确反映
+      已发布 adapter 行为，但 budget_gate.py 侧的新 state overlay 是未提交新增；
+      未来生成的 calibration/preflight 报告中可对"released"标注其来源层
+      （adapter released / gate unreleased-dirty），减少考古歧义。
+verification_boundary:
+  - >-
+      按 blank-slate 规则未读取 attempts.md，material_revision locator 的
+      sha256（c99f4dc6…69e90）作为 payload 绑定回显，未独立复算。
+  - >-
+      未读取 uv-init/round-*/retrospective/design-review 等评审产物；plan 时间线第 5 行
+      对这些文件的引用按"存在性 + 与 Git 证据一致"间接采信。
+reviewer:
+  role: blind-reviewer
+  slate: blank
+  basis: [git-history, source-and-tests, event-log, worktree-state]
+```

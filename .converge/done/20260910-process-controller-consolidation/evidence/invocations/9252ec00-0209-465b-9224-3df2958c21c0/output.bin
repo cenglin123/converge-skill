@@ -1,0 +1,34 @@
+# Fresh Reviewer B
+
+```yaml
+verdict: 阻断需修复
+blocking_issues:
+  - id: B1
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D7"
+    description: "Preflight 不能直接解析 Markdown 散文；须定义版本化结构化 block，包含 changed_mechanisms、old/proposed、archaeology、calibration path/hash、counterevidence 和 user-message event id。"
+  - id: B2
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D8; Archive Contract"
+    description: "Post-hoc plan hash 不能证明 Reviewer 审过该字节版本；须建立 pre-spawn plan snapshot/hash 到 invocation、verdict、final plan 的可验证绑定。"
+  - id: B3
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D10"
+    description: "Task-envelope 缺 companion/call 外键，无法证明恰好一次。须定义 call_id/primary-reservation 关系、双 settle 幂等和崩溃恢复；或收窄为受支持入口并承认 auditable-only 边界。"
+  - id: B4
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D3"
+    description: "State schema version 与 loop-spec version 混淆，v1/v2 双字段规则矛盾，所谓迁移命令不存在；须分开版本概念并删除无消费者兼容或给出原子迁移。"
+  - id: B5
+    severity: structural
+    plan_amendment_required: true
+    location: "plan.md file/test matrix"
+    description: "矩阵缺 material+outer1 driver recertification、reviewed-plan binding、task-envelope companion 成功/失败/崩溃/重复测试；还需区分本轮新增与既有 dirty baseline。"
+suggestions:
+  - "恢复 8/3/3、取消 ultraverge blind=2 倒挂方向正确。"
+  - "共享 initializer 放在 budget_gate.py 是正确方向，不需新增控制器。"
+```

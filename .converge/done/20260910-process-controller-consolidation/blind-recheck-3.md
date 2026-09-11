@@ -1,0 +1,77 @@
+---
+round: 4
+reviewer_backend: opencode-task
+reviewer_instance_id: ses_f71e02b69ffelJUAKbONIW5Ja3
+generated_at: 2026-09-11T01:52:31.264360+00:00
+verdict: 可执行
+---
+# Blind Recheck 3 — Blank-Slate Recertification (final, candidate-3)
+
+Reviewer role: blank-slate / blind-reviewer (second independent fresh Spawn on identical final plan bytes).
+
+## Echoed review target (byte-identical)
+
+```json
+{"artifact":{"path":"plan.md","sha256":"c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059","size":38827},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-3]","sha256":"e1fc65989ae1e7f345503289cc4b9e461e2f23bd3cc8032466a8cd33ca983db6"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+## Verification performed (independent, from first principles)
+
+Per the prompt rules, `attempts.md`, prior reviewer outputs, `retrospective.md`, `round-*.md`, and chat summaries were NOT read. The `material_revision.sha256` above is echoed as instructed and was not independently re-derived. Everything below was verified directly against source, tests, docs, the event stream, the gate ledger, and Git history.
+
+### Artifact identity
+
+- Recomputed `plan.md`: size 38827 bytes, SHA-256 `c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059` — matches the payload exactly.
+
+### Historical timeline (Git)
+
+- `aac95bd0`: confirmed — outer default 10→5, 评议 (deliberate) made the default entry, field data "all convergences finished in 2-3 rounds".
+- `0137fceb`: confirmed — outer 5→8, blind 1→3, driven by two real convergences using outer 7/12 and blind 3/4 with findings progressing.
+- `20c8993`: confirmed — file-authoritative budget gate shipped with `max_inner_loops=3` (verified in that commit's `budget_gate.py`).
+- `d3c82cb`: confirmed — archived `.converge/done/20260826-doc-need-to-know/` contains `round-1..8.md` plus `blind-recheck-1.md` and `blind-recheck-2.md`; commit records final ultraverge verdict 可执行. Supports "blocking work through outer R8, passed only after blind recheck #2".
+
+### Current released vs. dirty budget state
+
+- Released HEAD `budget_gate.py` defaults: `8/3/3` — confirmed. Dirty worktree: new-state `3/1/1` under unpublished `defaults_version=2`, legacy sparse/no-version state falls back to `8/3/3` in-memory without byte rewrite, ultraverge blind overlay `2` present (lines ~364-366/397). All match the plan's claims, and D9's "no v3, no migration" approach is consistent with the code structure.
+
+### D11 trigger evidence (append-only streams)
+
+- Ledger: reservations `b049d3fdc9f3` / `3e93ca1186e5` (round 3 outer / round 2 blind) settled as `cancelled` with `pre_execution=true`.
+- Events 36/37: `invocation-started` (spawn) bound to those two reservations; events 43/44 (`7691a91c…` / `d6c2360f…`): `invocation-terminal` with `terminal_status=failed`, `failure_reason_code=process-interrupted`.
+- `model.py:678` pairing table: `cancelled` settlement pairs only with `cancelled` terminal → the `ledger-status-conflict` contradiction is real and, given both streams are append-only, permanently frozen. Verified.
+- `pre_execution` is an existing optional bool on `cancelled`/`spawn_failed` ledger events (`budget_gate.py:793-803`) — the clarification adds no field, consistent with "behavioral semantics clarification, not a schema extension".
+- Reservation `0579d0730291`: reserved (`consumes=none`, executor), settled `cancelled pre_execution=true`, no invocation-started → genuine orphan, matching the acceptance criterion `--declare-orphan-reservation 0579d0730291`.
+- Only two open reservations remain (`4bd2541195c7` outer round 5, `5e56487eb781` blind round 4) — these are the two active final same-byte review Spawns authorized by user-granted extensions (`ext-r2-outer-5`, `ext-r2-blind-4`, ceilings outer 5 / blind 4) on top of the explicit `3/2/1` state. Consistent with Phase 0.
+- User-message events `bdd405f3…` (27), `87c4f9f7…` (18), `65c07569…` (46), `d2232c8d…` (47) exist as typed; prior terminal decision `e4182ce3…` (17) exists with verdict 可执行.
+
+### D11 GATE_TO_RECOVER bug (source-verified)
+
+- `orchest.py:100`: `GATE_TO_RECOVER = {"failed": "failed", "cancelled": "cancelled"}` — bare strings.
+- `orchest.py:1067`: `rstatus, rreason = GATE_TO_RECOVER.get(st["status"], ("failed", "backend-error"))` — for `"failed"`/`"cancelled"` the lookup returns the bare string, so tuple unpacking raises `ValueError: too many values to unpack` (only the default path returns a pair). The bug is real; the planned fix (explicit `(status, reason)` tuples + finish recovery-path regression tests) is minimal and correct.
+
+### Reused machinery claimed by D8 exists
+
+- `EVIDENCE_MODES = {"metadata-only", "redacted", "exact"}`; `begin-invocation --prompt/--evidence-mode` and `complete-invocation --output/--evidence-mode` exist in `archive_convergence.py`.
+- `REVIEWER_AUTHORITIES` has `fresh` and `blank-slate`; `derive_supersedes_decision_event_id` graph-derived machinery exists in `model.py`/`capture.py` (`DERIVED_DECISION_FIELDS`).
+- `init-agent-docs/scripts/converge_orchestrator.py` is absent (deletion preserved).
+
+### Embedded calibration report
+
+- Exactly one `converge.calibration-report/v1` fence with `id=bootstrap-calibration-r2` exists in `plan.md` (4 json fences total). Canonical JSON (sorted keys, compact separators, UTF-8, one trailing LF) SHA-256 recomputed: `c13d39574369e3df70c038d51dfa852f26a1a72174b58eee458c75c275fade8d` — matches the preflight payload's calibration `sha256` exactly. No self-reference (sub-block hash).
+
+## Judgment
+
+- **Implementable**: file matrix, bounded phases, and acceptance criteria are concrete and anchored to verified code; reused machinery exists; explicit stop-and-amend clause if the exact-evidence foreign-key chain cannot be formed without schema edits.
+- **Minimal**: no Archive Contract event/schema expansion, no state v3, no migration CLI, no new cap; D11 uses an existing field and changes exactly one pairing rule; prior dirty baseline is preserved, not redesigned.
+- **Prevents the demonstrated regression**: restores the evidence-backed `8/3/3` released behavior, removes the unsupported ultraverge blind `2` overlay for new state, adds the narrow numeric empirical gate (D7) so future reductions require eligible comparable samples, and requires two same-byte fresh reviews after material revision (D8) — directly addressing the demonstrated single-review weakness.
+- **D11 correctness/narrowness**: the pairing clarification equates two vocabularies of the same fact (model never invoked) only when `pre_execution=true`; every other pairing still fails closed; no stream is rewritten or backfilled; the recovery-path repair fixes a verified crash with regression tests. Correct and sufficiently narrow for an append-only archive system.
+
+```yaml
+reviewed_plan_sha256: c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059
+verdict: 可执行
+blocking_issues: []
+suggestion_issues:
+  - "Bootstrap calibration report has zero eligible samples (all corpus entries quantitative_status=unavailable), so the numeric empirical gate cannot independently validate the 8/3/3 restoration quantitatively; the restoration rests on historical-commit narrative evidence. The plan states this honestly ('evidence-restored stop-loss ceilings', inner 3 as compatibility), so this is an accepted limitation, not a defect — but future numeric changes must not cite this bootstrap report as quantitative support."
+  - "material_revision.sha256 (attempts.md::json-fence[...material-r2-candidate-3]) was echoed per instructions but not independently re-derived, since attempts.md is off-limits to this blank-slate review; finish must recompute it via the locator as specified in D8 step 4-5."
+  - "An untracked NUL file exists in the repository root (likely a shell redirect artifact, pre-existing and outside the file matrix). Phase 7's 'no file outside the matrix acquired an r2 delta' check should treat it as non-r2 junk; recommend deleting it separately, not as part of this plan."
+```

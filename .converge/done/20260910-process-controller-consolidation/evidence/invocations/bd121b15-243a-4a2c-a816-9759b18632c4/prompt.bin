@@ -1,0 +1,39 @@
+## Mode: blank-slate recertification of a material governance revision
+
+You are the fresh blank-slate Reviewer. Review the frozen plan from first principles without reading any prior conclusion, attempt log, review output, retrospective, prompt, event, or invocation evidence.
+
+## Task
+
+Determine whether the complete implementation plan is executable with zero conceptual, architectural, structural, or empirical blockers. Stress-test whether its mechanisms can actually be implemented and deterministically tested, especially calibration, material-revision recertification, terminal closure, restored budget defaults, and instrumented-only accounting.
+
+The user quality goal is: "我原以为，通过 converge 流程，走多轮迭代式审计收敛，就可以集不同的视角来查漏补缺，得到一个相对更优的方案。但是现在看来并非如此。" The plan must provide bounded but sufficiently deep autonomous convergence, genuinely independent perspectives, and a real path for historical feedback to affect later governance decisions.
+
+## Input
+
+- Repository: `C:/Users/Administrator/Documents/Github/converge-skill`
+- Required and only `.converge/` input: `C:/Users/Administrator/Documents/Github/converge-skill/.converge/active/20260910-process-controller-consolidation/plan.md`
+- You may inspect `CONSTITUTION.md`, `SKILL.md`, relevant `refs/`, `scripts/`, `tests/`, the current Git diff, and commits `aac95bd`, `0137fce`, `20c8993`, and `d3c82cb` as read-only evidence.
+- Do not read `attempts.md`, any `round-*.md`, `blind-recheck-*.md`, `design-review.md`, `retrospective.md`, any other prompt, `_orchestrator-state.md`, `gate-ledger.jsonl`, `ocsr-dispatch-ledger.jsonl`, or anything under `evidence/`.
+
+Before reviewing, recompute the artifact SHA-256 and byte size. Fail closed on any mismatch. The material digest below is an orchestration binding, not permission to read the forbidden attempt log.
+
+```json
+{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+## Output
+
+- Write only `C:/Users/Administrator/Documents/Github/converge-skill/.converge/active/20260910-process-controller-consolidation/blind-recheck-2.md`.
+- The file will already contain YAML frontmatter binding the invocation. Preserve that frontmatter exactly and replace only the skeleton body.
+- Include a `reads:` list of every absolute path actually read and a `commands:` list with each read-only command and exit code.
+- Include exactly one fenced JSON block whose single payload line is byte-identical to the review-target line above.
+- Include one fenced YAML verdict block with `reviewed_plan_sha256`, `reviewed_plan_size`, `verdict` (`可执行|阻断需修复|需重新设计`), `blocking_issues`, `suggestion_issues`, and independent findings covering feasibility, internal consistency, regression prevention, boundary honesty, and user-goal alignment.
+- `可执行` requires `blocking_issues: []`. Do not accept prose that cannot be implemented or tested, and do not hide a blocker as a suggestion.
+
+## Boundaries
+
+Do not modify the plan, repository source, tests, Git state, or any path other than the one output file. Runtime checks must be read-only and must not generate caches or formatting changes. If a fact is unavailable, report it rather than guessing.
+
+## Execution Evidence
+
+Your final response must report the output path, byte size, and tools/commands used. Writing anywhere else invalidates the review.

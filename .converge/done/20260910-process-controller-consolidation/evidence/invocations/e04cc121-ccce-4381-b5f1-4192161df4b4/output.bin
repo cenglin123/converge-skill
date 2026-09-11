@@ -1,0 +1,45 @@
+# Fresh Reviewer C
+
+```yaml
+verdict: 阻断需修复
+blocking_issues:
+  - id: C-B1
+    severity: conceptual
+    plan_amendment_required: true
+    location: "plan.md D3/D9"
+    description: "证据支持 outer/blind 恢复为 8/3；inner=3 是兼容性保留而非同等级实证校准。应同时记录 aac95bd 的多数任务 2-3 轮证据，说明 8/3 是复杂任务止损上限而非目标调用量。"
+  - id: C-B2
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D10"
+    description: "现有最高 task tier cap=30 仍不足覆盖 8 outer × (1+3 Continue) 的局部最坏路径，更未计其他调用。必须明确 task-envelope 是用户主动选择的更严格覆盖层，可能先于 8/3/3 阻断；不得同时声称所有 tier 保证 8/3/3 可达。"
+  - id: C-B3
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D8"
+    description: "Material revision 的叙述触发与预置 frontmatter 触发矛盾；须定义 post-review 事件、触发权威、非重大边界、hash 失效粒度和完整终止矩阵。"
+  - id: C-B4
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D3"
+    description: "没有真实持久 v2 consumer 证据时，永久 v3 分层违反 Occam。恢复尚未发布的新状态默认即可，保留旧稀疏状态及显式配置不改写。"
+  - id: C-B5
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D7/D9"
+    description: "机械 empirical gate 应限于有可比运行数据的数值默认/阈值/停止条件；不要泛化到所有角色权限和核心机制，也不要用脆弱 Markdown DSL。"
+  - id: C-B6
+    severity: conceptual
+    plan_amendment_required: true
+    location: "plan.md Landing Sequence"
+    description: "用户已明确‘修复它’，不应新增无条件实施前人工确认；只保留宪法已有强制确认点及实际 commit/push 审批。"
+suggestions:
+  - "追加完整用户反馈事件，而非只记录‘好的，修复它吧’。"
+  - "明确 reopened state、旧 terminal decision 和未结 reservation 的恢复/收口。"
+minimum_acceptable_boundary:
+  - "完整历史时间线；outer/blind 实证恢复、inner 兼容恢复。"
+  - "恢复新状态 8/3/3、去 blind 倒挂，不为无消费者实验版本建永久兼容层。"
+  - "task-envelope 明确为可选且可能更早阻断的质量成本选择。"
+  - "实证门限于数值默认/阈值/停止条件；使用紧凑机器元数据。"
+  - "重大修订做最终 plan hash 的 blank-slate 复核；删除额外实施确认。"
+```

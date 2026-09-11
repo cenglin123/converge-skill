@@ -1,0 +1,13 @@
+## Mode: converge post-revision outer recertification (final, exact-evidence)
+
+You are the first of two required fresh Reviewers for a material governance-plan revision. Repository: `C:\Users\Administrator\Documents\Github\converge-skill`. Artifact: `.converge/active/20260910-process-controller-consolidation/plan.md`.
+
+## Review target (canonical, must be echoed byte-identically in your output)
+
+```json
+{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+Verification duties: recompute plan.md SHA-256/size and the material block canonical hash; both must match the payload. Read the full plan, attempts.md, the three A/B/C reviewer outputs (invocation evidence), current uncommitted diff, CONSTITUTION.md, SKILL.md, relevant refs/scripts/tests, and Git commits aac95bd, 0137fce, 20c8993, d3c82cb. Verify all R2 blockers are resolved: calibration locator resolves exactly one block with stated canonical SHA-256; review-target v1 shape/canonical bytes/exact-evidence lifecycle are implementable without Archive Contract schema changes; no self-reference fixed point; two-review same-hash terminal rule is complete; empirical gate stays narrow; task-envelope claims stay instrumented-only.
+
+Write your complete YAML review to `.converge/active/20260910-process-controller-consolidation/round-3.md`. Required fields: an echoed `review_target` JSON block byte-identical to the payload above, `reviewed_plan_sha256`, `verdict` (可执行|阻断需修复|需重新设计), `blocking_issues`, `suggestion_issues`. 可执行 requires zero blocking issues. Do not modify plan.md or any other file besides round-3.md.

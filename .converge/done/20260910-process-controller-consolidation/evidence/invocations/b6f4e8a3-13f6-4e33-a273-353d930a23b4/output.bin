@@ -1,0 +1,348 @@
+---
+status: proposed
+mode: ultraverge
+created_at: 2026-09-10
+reopened_revision: r2
+scope:
+  - converge-skill
+  - init-agent-docs
+---
+
+# Process Controller Consolidation Implementation Plan
+
+## Goal and Boundary
+
+Make Converge the sole top-level controller when it is selected, while keeping TDD, systematic debugging, and completion verification as Executor-local methods. Preserve the already implemented D1/D2/D4-D6 work in both dirty worktrees. Correct only the unsupported budget reduction and the review/calibration gaps described below.
+
+The repaired quality-loop behavior is:
+
+- New budget state uses released behavior `8 outer / 3 blind / 3 Continue`.
+- Standard and ultraverge use the same blind ceiling; remove the ultraverge blind `2` overlay for new state.
+- Outer `8` and blind `3` are evidence-restored stop-loss ceilings, not target call counts. Inner `3` is released compatibility behavior; it does not claim equally strong empirical calibration.
+- Optional task-envelope limits are a user-selected, stricter quality-cost overlay. They may stop an instrumented run before local `8/3/3` is reachable.
+
+This plan does not modify `CONSTITUTION.md`, add a controller/registry/renderer, create a new budget cap, or make generated projects depend on Converge.
+
+## Authoritative Evidence and Current State
+
+### Historical Timeline
+
+| Evidence | Verified fact | Decision use |
+|---|---|---|
+| `aac95bd05576e2de5cd2705ba216fae90c7ba8f4` | Field data said most ordinary work completed in 2-3 rounds; default outer was reduced `10 -> 5` and deliberate became the default entry. | Ordinary work normally finishes far below the ceiling. Do not describe outer `8` as expected usage. |
+| `0137fceb6dda934394fc101dfc7216785a599c13` | Two complex convergences used outer `7/12` and blind `3/4`, with findings still progressing; released defaults changed outer `5 -> 8`, blind `1 -> 3`. | Direct support for restoring outer `8` and blind `3` as complex-task stop-loss ceilings. |
+| `20c8993c17e1f97dcb9af5eea5ce1b423f2d3105` | File-authoritative budget gate shipped `max_inner_loops=3`. | Inner `3` is released behavior with no evidence supporting reduction to `1`; preserve for compatibility without calling it calibrated usage. |
+| `d3c82cb912f41fd1237b91d0e125008d6d3e26b6` and its archived convergence | A governance task still had blocking work through outer R8 and passed only after blind recheck #2. | Confirms complex governance work can productively reach the released boundary and that one post-revision review is weak evidence. |
+| Current `uv-init-1.md:65`, `round-1.md`, `retrospective.md:48`, and old `design-review.md` | The empirical conflict was noticed, downgraded, and then rationalized as cost-first. | Require a narrow numeric empirical gate and two same-byte fresh reviews after a material revision. |
+
+Git evidence was obtained with `git log -S`, value-history `git log -G`, `git show`, and `git blame`; command spelling is not itself proof. Preflight validates referenced objects, relevance, and report bindings. The knowledge-base input is `D:\OneDrive\Cr\Obsidian_Vault\110【知识管理】\【知识库方法与治理】\20260614-数据驱动的Harness训练-迭代式审计与AI产物的质量控制.md`.
+
+### User Messages
+
+| Event | Purpose |
+|---|---|
+| `bdd405f3-2b03-40eb-9db2-09a32afacae2` | Complete original quality goal: multi-perspective iterative audit should find omissions and converge on a better plan. Reviewer goal-alignment authority uses this event. |
+| `87c4f9f7-72f9-4c45-a2d2-409ae8d83120` | Short execution authorization, `好的，修复它吧`. It authorizes autonomous repair/landing after zero blockers; it is not a substitute for the complete goal. |
+
+### Reopened Object
+
+- `.reopen-state.json` identifies revision `r2`, parent revision `r1`, and parent manifest SHA-256 `9833752f46a4760c21ab5f82ca1282863215422a7c5490e9af393c018730e68f`.
+- Prior terminal decision `e4182ce3-fe3e-4683-9533-f36ecab465fd`, prior completed state, prior retrospective, and all r1 evidence remain immutable historical facts.
+- Current `_budget-state.json` has explicit `3/2/1`. It remains authoritative for this already active revision and is not migrated or rewritten.
+- Current ledger reservations through the three A/B/C calls and the R2 authority-review attempt are settled. Sequence 30 outer invocation `775c0a46-3ab9-463c-afb3-11aee26fda6e` and sequence 31 blank-slate invocation `ab822a65-85ec-4935-a5c4-370c3bcbeb15` terminated normally at sequences 32/33, but their prompts and outputs are `metadata-only`; outer blocked and this plan is changing. They remain historical review evidence and are permanently ineligible for final same-byte authority. Do not backfill or rewrite them.
+- Sequence 34 invocation `b6f4e8a3-13f6-4e33-a273-353d930a23b4` is this active Plan Executor Continue and must receive its normal terminal event before finish; it must not be prematurely recovered.
+- Reviewer exact outputs are invocation `77f4e293-2296-471c-b1a0-a509c7c05f71` (A), `9252ec00-0209-465b-9224-3df2958c21c0` (B), and `e04cc121-ccce-4381-b5f1-4192161df4b4` (C). All returned `阻断需修复`.
+- Final r2 closure appends a new retrospective revision section and a new terminal decision. Existing derived `supersedes_decision_event_id` machinery must make it supersede `e4182ce3-fe3e-4683-9533-f36ecab465fd`; no prior event or r1 manifest is rewritten.
+
+## Machine Preflight Input
+
+Preflight reads exactly one fenced JSON object with schema `converge.governance-change/v1`; it never infers controls or evidence from prose or Markdown tables.
+
+```json
+{
+  "schema": "converge.governance-change/v1",
+  "change_id": "20260910-process-controller-consolidation-r2",
+  "numeric_changes": [
+    {"control": "max_outer_loops", "kind": "default", "released": 8, "old": 3, "proposed": 8, "comparison": "outer", "basis": "empirical_restore"},
+    {"control": "max_blind_rechecks", "kind": "default", "released": 3, "old": 1, "proposed": 3, "comparison": "blind", "basis": "empirical_restore"},
+    {"control": "ultraverge.max_blind_rechecks_override", "kind": "stopping_condition", "released": 2, "old": 2, "proposed": 3, "comparison": "blind", "basis": "remove_lower_mode_overlay"},
+    {"control": "max_inner_loops", "kind": "default", "released": 3, "old": 1, "proposed": 3, "comparison": null, "basis": "released_compatibility_no_reduction_evidence"}
+  ],
+  "archaeology_refs": [
+    "git:aac95bd05576e2de5cd2705ba216fae90c7ba8f4",
+    "git:0137fceb6dda934394fc101dfc7216785a599c13",
+    "git:20c8993c17e1f97dcb9af5eea5ce1b423f2d3105",
+    "git:d3c82cb912f41fd1237b91d0e125008d6d3e26b6",
+    "archive:r1:9833752f46a4760c21ab5f82ca1282863215422a7c5490e9af393c018730e68f"
+  ],
+  "calibration": {
+    "path": "plan.md::json-fence[schema=converge.calibration-report/v1,id=bootstrap-calibration-r2]",
+    "sha256": "c13d39574369e3df70c038d51dfa852f26a1a72174b58eee458c75c275fade8d",
+    "corpus_digest": "8b9d1044da2c2954bbc2fb62b2fcfba35537ff93f7ad643c4bc82c2d0b30e6e0",
+    "freshness": {"repository_head": "85b9c2865704c2e0f745ba63766b1bde7ff09bb6", "source_archive_revision": "r1", "source_event_high_watermark": 17}
+  },
+  "counterevidence_refs": [],
+  "user_message_events": {
+    "quality_goal": "bdd405f3-2b03-40eb-9db2-09a32afacae2",
+    "execution_authorization": "87c4f9f7-72f9-4c45-a2d2-409ae8d83120"
+  }
+}
+```
+
+The calibration locator grammar is `<root-file>::json-fence[schema=<schema>,id=<id>]`; `root-file` must be a regular file already permitted by the Archive Contract root allowlist, and this locator names `plan.md`. Resolution opens that file, scans only fences whose opening line is three backticks followed immediately by `json`, strict-parses each payload as JSON, and selects by exact top-level `schema` and `id`. Exactly one match is required. A missing file or absent `id` is `path-not-found`; more than one exact match is `duplicate-target`; the requested `id` found only under another schema is `wrong-schema`. The resolved report hash is SHA-256 over UTF-8 canonical JSON with sorted keys, compact separators, and one trailing LF. It is a sub-block hash, not a hash of `plan.md`, so it has no self-reference. The block below is final before review and is never generated or changed after final review.
+
+```json
+{
+  "schema": "converge.calibration-report/v1",
+  "id": "bootstrap-calibration-r2",
+  "scope": "cited-history-bootstrap",
+  "freshness": {"repository_head": "85b9c2865704c2e0f745ba63766b1bde7ff09bb6", "source_archive_revision": "r1", "source_event_high_watermark": 17},
+  "corpus": [
+    {"ref": "git:aac95bd05576e2de5cd2705ba216fae90c7ba8f4", "quantitative_status": "unavailable", "reason": "legacy_aggregate_only"},
+    {"ref": "git:0137fceb6dda934394fc101dfc7216785a599c13", "quantitative_status": "unavailable", "reason": "legacy_unbound_run_counts"},
+    {"ref": "git:20c8993c17e1f97dcb9af5eea5ce1b423f2d3105", "quantitative_status": "unavailable", "reason": "released_default_not_usage_sample"},
+    {"ref": "git:d3c82cb912f41fd1237b91d0e125008d6d3e26b6", "quantitative_status": "unavailable", "reason": "legacy_unbound_run_counts"},
+    {"ref": "archive:r1:9833752f46a4760c21ab5f82ca1282863215422a7c5490e9af393c018730e68f", "quantitative_status": "unavailable", "reason": "retrospective_has_no_bound_sample"}
+  ],
+  "corpus_digest": "8b9d1044da2c2954bbc2fb62b2fcfba35537ff93f7ad643c4bc82c2d0b30e6e0",
+  "quantitative_aggregates": {"eligible_samples": 0, "status": "unavailable"}
+}
+```
+
+This is the single bootstrap exception because the compiler does not yet exist. After implementation, calibration and preflight replay this unchanged, already-present block and must resolve its locator and reproduce/validate its canonical bytes. Later governance changes require a generated report with the same schema and receive no bootstrap mode.
+
+## Decisions
+
+### D1-D6. Preserve the Correct Baseline
+
+Keep the prior plan's already implemented decisions without redesign:
+
+- Converge owns top-level orchestration only when selected; `init-agent-docs` Coordinator/Owner/Reviewer remain domain handoff roles and generated projects do not depend on Converge.
+- TDD, systematic debugging, and completion verification remain behavior-based Executor-local methods; artifact-modifying Executors verify before handoff, and fresh Reviewer verification remains independent.
+- One validated `budget_gate.py` initializer serves manual, adapter, and driver paths; active explicit config wins, equal values are idempotent, conflicts/malformed state fail closed.
+- `max_inner_loops` means true same-instance Continue only. `converge_loop.py` remains an honestly named fresh-review scheduler; `driver_config.max_executor_repair_attempts` separately defaults to released driver behavior `3`, and every repair routes to a fresh outer Reviewer.
+- `init-agent-docs` retains the four Small/Medium+ by Git/no-Git profiles, mode-aware sync, no-Git maintenance/audit closure, and dead-link-free fixtures.
+- Preserve copy-default synchronization with explicit hardlink mode and preserve static/synthetic/advisory evaluation separation.
+- Preserve deletion of `init-agent-docs/scripts/converge_orchestrator.py`.
+
+### D7. Calibration and Narrow Numeric Preflight
+
+Each retrospective created or extended after this feature lands contains exactly one sample for its current revision. The following is the contract shape; angle-bracket values are illustrative and are invalid in a real sample:
+
+```json
+{
+  "schema": "converge.calibration-sample/v1",
+  "revision_id": "<revision-id>",
+  "bindings": {
+    "budget_state": {"path": "_budget-state.json", "sha256": "<hex64>"},
+    "gate_ledger": {"path": "gate-ledger.jsonl", "sha256": "<hex64>", "high_watermark": 0},
+    "rounds": [{"path": "round-1.md", "sha256": "<hex64>", "invocation_id": "<uuid>"}],
+    "attempts": {"path": "attempts.md", "sha256": "<hex64>"}
+  },
+  "configured_limits": {"outer": 8, "blind": 3, "inner": 3, "task_envelope": "unavailable"},
+  "usage": {"outer": 0, "blind": 0, "inner_max_per_outer": 0},
+  "productive_at_or_after_limit": {
+    "outer": {"value": "unavailable", "evidence_refs": []},
+    "blind": {"value": "unavailable", "evidence_refs": []},
+    "inner": {"value": "unavailable", "evidence_refs": []}
+  },
+  "accounting_scope": "instrumented_dispatch_only",
+  "accounting_coverage": "unavailable",
+  "model_invocations": "unavailable",
+  "terminal": {"value": "可执行", "reviewer_terminal_event_id": "<uuid>"}
+}
+```
+
+Sample rules are deliberately small:
+
+- `finish` fail-closes if the current revision's sample is missing, duplicated, malformed, or disagrees with state, ledger high-water mark, round/blind/UV products, invocation bindings, attempts digest, or the referenced successful Reviewer terminal/verdict.
+- Every derived field is recomputed. `configured_limits` binds state; usage and call counts bind ledger/products; blocking/productivity evidence binds named round and attempts references.
+- Each productivity value is `true`, `false`, or `unavailable`. `true` and `false` both require non-empty, verifiable `evidence_refs`; inability to prove either is `unavailable`, never default `false`.
+- An older retrospective without a sample is reported as `unavailable`. Missing/malformed/unbound old data is excluded from quantitative aggregates and cannot support a threshold/default recommendation.
+- `distill_antipatterns.py --calibration` emits a canonical report containing ordered corpus entries, each sample/binding digest, `corpus_digest`, event high-water marks, and quantitative eligibility. Freshness means the recomputed corpus digest and high-water marks equal the report; mismatch is stale and fail-closed.
+- The numeric empirical gate applies only to changed numeric defaults, thresholds, and stopping conditions that have eligible comparable samples. It compares the declared old/proposed values with the report and returns `BLOCK:empirical_conflict` when productive comparable evidence is undercut without newer counterevidence or a bound user tradeoff decision.
+- Role permissions and general core mechanisms never pass or fail by this numeric parser. Reviewer semantic review handles them. A command string or non-empty archaeology list is not evidence sufficiency.
+
+### D8. Material Revision and Terminal Matrix
+
+Material revision is a post-review fact, not author-selected frontmatter. The Orchestrator records a `converge.material-revision/v1` machine block in append-only `attempts.md` only after completed initial-review evidence and before the next Reviewer spawn.
+
+Material triggers are limited to revisions caused by conceptual/architectural blocking, an empirical conflict, or a change to a core numeric default/threshold/stopping condition. Pure structural or implementation repair is non-material unless it also changes one of those controls. Ambiguity fails closed for material classification. This r2 revision is material because A/B/C supplied conceptual/architectural blockers and the numeric stopping defaults changed.
+
+The attempts block binds `revision_id`, trigger kinds, triggering Reviewer invocation IDs, prior terminal decision ID, and final candidate plan SHA-256/size. It is appended only after final plan bytes are fixed. It does not by itself prove review.
+
+Each new authority prompt contains exactly one block of this shape; this is a schema example, not this plan's own target and therefore contains no self-hash:
+
+```json
+{
+  "schema": "converge.review-target/v1",
+  "target_id": "<revision-id>-plan",
+  "revision_id": "<revision-id>",
+  "artifact": {"path": "plan.md", "sha256": "<hex64>", "size": "<positive-int>"},
+  "material_revision": {
+    "locator": "attempts.md::json-fence[schema=converge.material-revision/v1,id=<material-id>]",
+    "sha256": "<hex64>"
+  },
+  "quality_goal_event_id": "<uuid>"
+}
+```
+
+The generated payload is one canonical JSON line with sorted keys and compact separators, encoded UTF-8 and terminated by one LF. Prompt and output locators use the same exact schema/id rule as calibration. The two prompts may have different surrounding role instructions, but their extracted canonical target payload bytes must be identical. The echoed output payload must be byte-identical as well.
+
+For a material revision, two distinct fresh Spawns must review the same final bytes:
+
+1. Freeze `plan.md`, compute its SHA-256/size, append the uniquely identified material block, compute that block's canonical SHA-256, then deterministically generate the target payload. No plan hash is embedded in `plan.md`.
+2. Write two new prompt files containing the identical payload. Before either Spawn, run `archive_convergence.py begin-invocation ... --prompt <file> --evidence-mode exact`. One start role is `outer-reviewer`; the other is `blind-reviewer`/blank-slate. Invocation IDs and instance IDs must differ.
+3. Each Reviewer output echoes the identical target payload and gives zero blockers. `complete-invocation ... --output <file> --evidence-mode exact` captures each output; the round product retains its invocation binding.
+4. `finish` resolves the latest material-block locator, recomputes its canonical hash, then selects two successful invocation terminals whose started events are Spawns with the required roles. For each it requires exact prompt/output paths, resolves one matching target block in each, checks all four payloads byte-equal, follows `started_event_id`, `invocation_id`, output event, and verdict-product references, and verifies zero blockers.
+5. `finish` finally recomputes on-disk `plan.md` SHA-256/size and compares it with the common target artifact and material candidate. Missing paths, metadata-only evidence, duplicate/wrong-schema targets, role/instance reuse, broken references, or mismatched bytes fail closed. Hashes cannot be supplied after Spawn.
+6. Any later byte change to `plan.md` invalidates both reviews. If either Reviewer blocks and the plan changes, both roles review the new hash again.
+
+This reuses current exact prompt/output evidence and existing terminal-decision fields, so Archive Contract v1 gains no event type or field. Existing `capture.py` graph-derived `supersedes_decision_event_id` is also reused.
+
+| Situation | Required authority before `finish` | User confirmation |
+|---|---|---|
+| Ordinary first review, zero blockers, no material event | Existing one fresh Reviewer rule | None |
+| Ultraverge initial Reviewers all pass, no material event | Existing ultraverge all-pass rule, then advisory design review | None |
+| Pure structural/implementation repair, no material event | Existing fresh outer Reviewer rule; existing count-based blind rule remains | None |
+| Material revision after initial review | Two different fresh Spawns, outer + blank-slate, both zero-blocking on identical final plan bytes; advisory design review follows | None |
+| Either same-hash Reviewer blocks | Repair; if plan bytes change, invalidate both and repeat both | None unless another existing mandatory gate fires |
+| Reopened object reaches strict pass | New reviewer-verdict terminal decision, automatically superseding the prior terminal decision | None |
+| Terminal-b/c or subjective acceptance | Existing user-decision path and exact user-message binding | Existing explicit confirmation required |
+| `需重新设计`, budget exhaustion, mode switch, fail-closed, or illegal role | Existing stop/decision path | Existing constitutional confirmation/decision remains |
+
+### D9. Defaults Without a New Migration System
+
+Budget-state default version and loop-spec version are unrelated:
+
+- Budget state: keep the already implemented, unpublished `defaults_version=2`; change its new-state defaults directly back to `8/3/3`. Do not add version 3.
+- Released sparse/no-version budget state continues resolving released `8/3/3` without byte rewrite.
+- Any explicit active config is authoritative and is never rewritten on resume. This object's explicit `3/2/1` therefore remains in force for r2.
+- There is no evidence of a persistent external consumer of the uncommitted `3/1/1` default, so there is no permanent compatibility table and no state migration command.
+- Loop spec `version: 1|2` remains solely the already implemented separation of true Continue from driver-local fresh Executor retry. Do not rename it or couple it to `defaults_version`.
+
+### D10. Instrumented Task Envelope
+
+Keep existing tier values unchanged. Task envelope is opt-in and may block before local quality-loop ceilings. Initialization displays local ceilings, selected envelope initial/cap, and `quality_path_guaranteed: false`; selection is an explicit quality-cost tradeoff, not a promise that `8/3/3` worst case is reachable.
+
+The claim is limited to supported instrumented dispatch paths: `orchest.py` reserve/register/cancel lifecycle, `ocsr_spawn_adapter.py`, and `converge_loop.py` through that adapter. Native host or other out-of-band model calls cannot be proven or blocked on OpenCode auditable-only and are outside the count unless separately host-observed.
+
+For each instrumented model call:
+
+- Mint one `call_id`. For Spawn paths, one atomic gate operation validates both ceilings and appends the role reservation plus task-envelope companion reservation with reciprocal `call_id`/reservation references, or appends neither. Task companion is checked first but no half-pair is committed.
+- Continue retains its no-local-reservation contract; its `call_id` links the task-envelope reservation directly to the existing invocation-started event. This is the explicit single-reservation exception, not a fabricated Spawn reservation.
+- Register/cancel settles the linked records idempotently. Repeating the same result is a no-op; a conflicting result fails closed. Failure before dispatch cancels pre-execution; a terminal call, including backend failure after dispatch, consumes the envelope once.
+- Crash recovery resolves from the invocation graph: no started invocation cancels a pair pre-execution; a terminal invocation settles to its terminal status; a started/no-terminal invocation remains unresolved and blocks finish rather than being guessed. Duplicate/missing/cross-call companion links fail closed.
+- `accounting_coverage` is `instrumented_complete`, `partial`, or `unavailable` and always states `accounting_scope=instrumented_dispatch_only`. A numeric `model_invocations` is allowed only for `instrumented_complete`; otherwise it is `unavailable`. No value claims complete host-wide accounting on auditable-only.
+- Legacy ledger events without `call_id` remain valid historical evidence but make accounting coverage `unavailable`; they are never backfilled or reinterpreted.
+
+## Exact File Matrix
+
+### `converge-skill`
+
+| File | Existing dirty baseline ownership | r2 planned delta |
+|---|---|---|
+| `SKILL.md`, `README.md`, `README_en.md`, `scripts/README.md` | Prior D1-D3 guidance work; preserve | Align evidence wording, `8/3/3`, no blind overlay, material matrix, calibration, and instrumented-envelope limits |
+| `refs/executor-prompt.md`, `refs/executor-discipline.md` | Prior D2 work; preserve | No new mechanism; only remove stale numeric wording if a focused static test proves it |
+| `refs/reviewer-prompt.md`, `refs/reviewer-discipline.md` | Prior D1/D2 work; preserve | Add machine-input reference, narrow numeric empirical issue, full goal event, and same-hash output echo |
+| `refs/orchestrator-guide.md` | Prior D1-D3 work; preserve | Record post-review material event, exact same-hash dispatch, bootstrap/reopen closure, and task-envelope disclosure |
+| `refs/state-schema.md` | Clean baseline | Add only the two versioned fenced JSON contracts and calibration sample/report contracts; no new root sidecar |
+| `scripts/budget_gate.py` | Prior initializer/validation/task-tier implementation, including uncommitted `3/1/1`; preserve valid parts | Restore version-2 new-state `8/3/3`, remove blind overlay, add JSON preflight and atomic Spawn companion/call recovery validation |
+| `scripts/orchest.py` | Prior effective-Continue and finish work; preserve | Same-hash two-Reviewer finish gate, current-revision sample validation, reopened superseding decision path, call lifecycle |
+| `scripts/converge_loop.py` | Prior loop-spec v2/fresh-review separation; preserve | Keep loop-spec version independent; add outer1+material blank path and call linkage |
+| `scripts/ocsr_spawn_adapter.py` | Prior initializer delegation; preserve | Remove new-state blind overlay and use call/companion lifecycle |
+| `scripts/distill_antipatterns.py` | Clean baseline | Add read-only calibration report mode only |
+| `scripts/archive_contract/model.py` | Clean baseline | No change: current exact prompt/output, invocation, authority, and decision-chain fields are sufficient |
+| `scripts/archive_contract/capture.py` | Existing 8-line malformed EventLock fail-closed fix belongs to the prior dirty baseline, not r2 | No r2 change; reuse exact prompt/output and derived supersedes behavior |
+| `scripts/archive_convergence.py` | Clean baseline | No change; existing begin/complete/record-decision APIs suffice |
+| `tests/test_process_controller_contract.py` | Existing untracked D1/D2 tests; preserve | Add narrow static stale-default/machine-contract checks |
+| `tests/test_budget_gate.py` | Prior D3 tests; preserve | Add `8/3/3`, no overlay, JSON preflight regression, bootstrap locator path-not-found/duplicate-target/wrong-schema, and atomic companion success/failure/duplicate/crash tests |
+| `tests/test_continue_extension.py` | Prior true Continue tests; preserve | Add Continue call/task companion and idempotent recovery cases |
+| `tests/test_converge_loop.py` | Prior loop-spec v2/fresh-review tests; preserve | Add material+outer1 blank routing, state/spec version independence, call accounting coverage |
+| `tests/test_ocsr_spawn_adapter.py` | Prior delegation tests; preserve | Add companion linkage and no-overlay cases |
+| `tests/test_loop_a_coverage.py` | Prior Loop A coverage; preserve | Add two distinct Reviewer same-hash, changed-byte invalidation, sample fail-closed, reopened superseding decision, and open-invocation cases |
+| `tests/test_distill_antipatterns.py` | New file | Calibration sample verification, unavailable semantics, corpus digest, freshness, and exclusion tests |
+| `tests/test_archive_convergence.py` | Existing 35-line malformed EventLock tests belong to the prior dirty baseline, not r2 | No r2 change; existing reopen/supersedes test remains the Archive Contract regression |
+
+No Archive Contract schema expansion is authorized. If implementation proves exact prompt/output cannot form the specified foreign-key chain, stop and return for plan amendment instead of silently editing `model.py`, `capture.py`, or `archive_convergence.py`.
+
+### `init-agent-docs`
+
+All currently dirty `init-agent-docs` files and tests are the prior D4-D6 baseline. Preserve and verify them without adding r2 scope. In particular, keep `scripts/converge_orchestrator.py` deleted. No new `init-agent-docs` file change is authorized by r2.
+
+## Bounded Implementation Sequence
+
+### Phase 0. Freeze and Review This Final Plan
+
+1. Finish sequence 34 Plan Executor invocation normally. Preserve sequence 30/31 starts and 32/33 terminals as non-qualifying metadata-only history; never backfill them.
+2. Compute final plan SHA-256/size once, append a new uniquely identified material block that supersedes the prior candidate block, and compute its canonical hash. From that point, do not edit `plan.md` before both reviews finish.
+3. Deterministically create two new prompts containing byte-identical canonical `converge.review-target/v1` payloads. Using current explicit `3/2/1`, call `begin-invocation` with each real prompt path and `evidence-mode=exact` before spawning one new `outer-reviewer` and one new `blind-reviewer`.
+4. Capture both outputs with `evidence-mode=exact`; require each to echo the identical target payload. Register verdict products through the normal path.
+5. If either blocks and plan bytes change, append an attempt/new material candidate, compute a new hash, and repeat both Spawns. Never repair after the final same-hash reviews.
+6. When both return zero blockers, run the required advisory ultraverge design review. If its advice causes a material plan edit, repeat both authority reviews; otherwise the plan is approved for autonomous landing.
+
+### Phase 1. Write Failing Contracts
+
+1. Add red tests for sample absence/schema/binding/productivity-unavailable, stale corpus digest, prose/table non-parsing, and bootstrap locator path-not-found/duplicate-target/wrong-schema.
+2. Add the negative `3/1/1` fixture with eligible comparable samples and expect `BLOCK:empirical_conflict`; add role/core-mechanism fixtures proving the numeric parser does not adjudicate them.
+3. Add red tests for material+outer1, two different Spawns/same hash, post-review plan byte change, post-hoc/missing prompt target, reopened superseding decision, and existing open invocation.
+4. Add red tests for Spawn companion success, pre-dispatch failure, post-dispatch failure, crash, duplicate/conflicting settle, Continue linkage, and partial/unavailable coverage.
+
+### Phase 2. Restore Defaults Without Migration
+
+1. Change only unpublished version-2 new-state defaults to `8/3/3` and remove ultraverge blind overlay.
+2. Preserve sparse/no-version `8/3/3`, explicit active config authority, this object's `3/2/1`, and independent loop-spec v1/v2 behavior.
+3. Run focused budget/adapter/driver/Continue tests to green.
+
+### Phase 3. Implement Calibration and JSON Preflight
+
+1. Implement strict extraction of the unique versioned JSON block and reject duplicate, malformed, unknown-field, stale-hash, stale-corpus, or missing-event input.
+2. Implement sample validation in `finish` and deterministic calibration report generation. Old unavailable data remains non-quantitative.
+3. Implement the numeric-only empirical comparison and Reviewer handoff fields.
+4. Replay calibration/preflight against this unchanged bootstrap plan; reproduce the embedded report and record the result without editing `plan.md`.
+
+### Phase 4. Implement Material Closure and Reopen Supersession
+
+1. Reuse exact prompt/output evidence to enforce the two-Spawn same-byte chain and byte-change invalidation.
+2. Update driver routing so material+outer1 cannot skip blank-slate review.
+3. Make `finish` on a reopened strict pass append a new reviewer-verdict decision whose graph-derived supersedes value points to the prior terminal decision; never reuse the old decision.
+4. Keep design review advisory and keep all existing user-decision/mandatory-stop paths.
+
+### Phase 5. Instrument Supported Dispatch
+
+1. Implement atomic Spawn reservation pairs and the explicit Continue single-reservation linkage.
+2. Implement idempotent settle/cancel, graph-based crash recovery, duplicate/cross-call rejection, and scoped coverage reporting.
+3. Surface `quality_path_guaranteed: false` at configured-envelope initialization; retain all current tier values.
+
+### Phase 6. Preserve and Verify Prior Baseline
+
+1. Do not revert unrelated dirty changes, including the archive EventLock fix and its tests.
+2. Verify prior D1/D2/D4-D6 changes and the deleted bespoke controller against their existing focused suites.
+3. Append the r2 retrospective section and bound calibration sample after implementation evidence is final; do not rewrite r1 evidence.
+
+### Phase 7. Full Verification and Finish
+
+Run focused suites first, then both repository full suites, compile checks, `git diff --check`, exact dirty-baseline attribution, and deterministic stale-text scans. Confirm no file outside the matrix acquired an r2 delta. `finish` must close the current invocation, validate the r2 sample and two-Reviewer chain, append the superseding terminal decision, stamp current markers, archive once, and pass archive check.
+
+## Acceptance Criteria
+
+- New state resolves `8/3/3`; ultraverge has no lower blind overlay. Sparse state and explicit active config remain byte-stable. No v3 or migration command exists.
+- Historical wording distinguishes ordinary 2-3-round usage, complex outer/blind stop-loss evidence, and inner compatibility.
+- Preflight consumes only `converge.governance-change/v1`; numeric comparison is limited to comparable defaults/thresholds/stops. The bootstrap locator resolves exactly one already-present report and rejects path-not-found, duplicate-target, and wrong-schema.
+- The current revision's calibration sample is required and cross-bound; unprovable productivity and incomplete call coverage are `unavailable`.
+- Reports expose corpus digest and high-water freshness; legacy unavailable samples cannot support quantitative claims.
+- Material status is recorded after review. Material finish requires different outer and blank-slate Spawns on identical final bytes, with exact pre-spawn prompt and exact output evidence.
+- Reopened finish appends a terminal decision superseding `e4182ce3-fe3e-4683-9533-f36ecab465fd`; old state/events/manifest remain unchanged.
+- Instrumented calls have one `call_id`; Spawn pairs are atomic, Continue linkage is explicit, settlement is idempotent, and crashes/duplicates fail closed or recover from facts.
+- Accounting claims only instrumented scope. Partial coverage makes `model_invocations` unavailable; no auditable-only host-wide guarantee is stated.
+- Configured task envelope warns it may block before local ceilings and does not promise any tier can reach the `8/3/3` worst path.
+- Existing D1/D2/D4-D6 and all `init-agent-docs` dirty work remain preserved, including deletion of `scripts/converge_orchestrator.py`.
+- Zero blockers autonomously proceeds to landing under event `87c4...`; only existing constitutional gates and commit/push authorization can require the user.
+
+## Non-Goals
+
+- No Archive Contract event/schema change, state v3, state migration CLI, new controller, new task tier, or new hard cap.
+- No claim that local ceilings are expected usage or that task envelope guarantees those ceilings are reachable.
+- No claim that OpenCode auditable-only detects out-of-band calls.
+- No general empirical taxonomy beyond numeric comparable controls plus Reviewer semantic review.
+- No unconditional implementation confirmation. Do not commit or push without later explicit authorization.

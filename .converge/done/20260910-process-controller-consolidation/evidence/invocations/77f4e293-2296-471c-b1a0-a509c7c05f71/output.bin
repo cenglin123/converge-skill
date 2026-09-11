@@ -1,0 +1,44 @@
+# Fresh Reviewer A
+
+```yaml
+verdict: 阻断需修复
+blocking_issues:
+  - id: A1
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D9"
+    description: "Calibration 尚未闭环：finish 未强制样本存在且可验证，缺失样本会被 distill 静默排除；productive_at_or_after_limit 缺证据引用与 unavailable 语义。"
+  - id: A2
+    severity: structural
+    plan_amendment_required: true
+    location: "plan.md D7"
+    description: "Governance preflight 缺少机器可读输入契约、source-corpus digest 和 freshness 规则，不能可靠解析自然语言表格，也不能在最终 hash 复核前稳定引用 calibration report。"
+  - id: A3
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D8"
+    description: "重大修订仍可能只靠一个 blank-slate 样本终止；最终 plan hash 应至少绑定两个不同 fresh Spawn：main-loop/outer Reviewer 与 blank-slate Reviewer。"
+  - id: A4
+    severity: implementation
+    plan_amendment_required: true
+    location: "plan.md D8; scripts/orchest.py finish"
+    description: "Reopened revision 已有旧 terminal decision；现有 finish 不会自动建立 supersedes 链。计划须明确新的 superseding terminal decision 路径和回归测试。"
+  - id: A5
+    severity: architectural
+    plan_amendment_required: true
+    location: "plan.md D10"
+    description: "OpenCode auditable-only 下无法机械保证所有原生模型调用均计量。承诺应收窄为受支持/instrumented dispatch，并输出 accounting_coverage；覆盖不完整时 model_invocations 必须 unavailable。"
+suggestions:
+  - "未证实存在持久 v2 active state 时，不应为未发布实验版本增加永久兼容层。"
+  - "不要把 git log -S/git blame 字面命令当作证据充分性的代理，应验证结构化引用和语义相关性。"
+empirical_conflict:
+  policy_upgrade_correct: true
+  mechanically_closed: false
+calibration:
+  will_be_real_feedback: false
+historical_evidence_verified:
+  0137fce: "outer 7/12、blind 3/4 且持续推进，支持 8/3。"
+  20c8993: "引入 file-authoritative budget gate，inner=3。"
+  d3c82cb: "治理任务到 outer R8、blind #2 才通过。"
+additional_fact: "当前记录的 user-message 只有‘好的，修复它吧’，不足以代表完整原始目标。"
+```

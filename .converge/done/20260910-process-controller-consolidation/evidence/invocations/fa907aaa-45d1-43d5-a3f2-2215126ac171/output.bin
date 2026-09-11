@@ -1,0 +1,79 @@
+# Round 3 · Final Outer Review (fresh, exact-evidence)
+
+Reviewer: fresh outer Reviewer（prompt-final-outer.md，invocation 证据见 evidence/events sequence 39，`begin-invocation --evidence-mode exact`，prompt sha256 `12615eb5346c970f5baa03d25e87e96a40ee37eaa57adaef7f5ee0946e404005`）。
+
+## Review Target（逐字节回显）
+
+```json
+{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+## Integrity Verification（重算证据）
+
+- `plan.md`：重算 SHA-256 = `ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb`，size = 34302 字节，与 payload 一致 ✓
+- `attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]`：locator 在 attempts.md 两个 json fence 中精确命中唯一 1 块（另一块无 `id`，不匹配）；按 plan.md 第 92 行规则（sorted keys、compact separators、UTF-8、单个尾随 LF）重算 canonical SHA-256 = `c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90`，与 payload 一致 ✓
+- 附带核验：plan.md 内嵌 `bootstrap-calibration-r2` report 的 canonical hash = `c13d3957…fade8d`，与 `converge.governance-change/v1` preflight 块声明一致 ✓
+
+## R2 Blocker 复核
+
+### R2-B1（calibration locator）— 已解决
+
+- plan.md 第 92 行定义完整 locator 文法：root allowlist、仅扫描 ```json fence、strict parse、schema+id 精确选择、恰好一个匹配；`path-not-found / duplicate-target / wrong-schema` 三类 fail-closed。
+- 实际解析 plan.md：4 个 json fence，schema 分别为 governance-change / calibration-report / calibration-sample / review-target，`bootstrap-calibration-r2` 精确唯一命中，无重复目标。
+- report hash 是子块 canonical hash，不引用自身或 plan 整体 hash；plan.md 全文不包含自身 sha256（已扫描确认）；governance 块引用 report hash，report 不反向引用——无自引用不动点。
+- bootstrap 例外有界：compiler 落地后必须对本计划原样复跑该校验（Phase 3 step 4），后续治理变更无此例外。
+
+### R2-B2（review-target v1 + exact evidence 链）— 已解决
+
+- D8 给出 `converge.review-target/v1` 精确 shape、canonical 单行字节规则（sorted keys / compact / UTF-8 / 单 LF）及 prompt/output locator 复用同一文法。实际产物 `prompt-final-outer.md`（2027 B）与 `prompt-final-blind.md`（1826 B）各自恰好含 1 个 json fence，两者 payload 逐字节相同、单行、canonical——该规则已被本次执行实例化验证。
+- 不扩张 Archive Contract：model.py 已有 `EVIDENCE_MODES={metadata-only, redacted, exact}`，exact 允许 blob path；`archive_convergence.py begin/complete-invocation --prompt/--output --evidence-mode` 已存在；invocation-started/terminal 事件已携带 prompt_evidence/output_evidence + invocation_id + started_event_id 外键（sequence 34/35 的 executor Continue 即完整示范，其 output.bin 恰为当前 plan 字节）；capture.py 已有图派生 `supersedes_decision_event_id`。finish 所需的全部校验（四个 payload 字节相等、角色/实例区分、路径与引用闭合、落盘重算）均可在现有事件字段上实现。plan 第 267 行还设有安全阀：若 FK 链无法成形则停回报修，禁止静默改 model/capture/archive_convergence。
+- 两评审同字节终局规则完整：D8 矩阵覆盖普通/ultraverge/非 material 修复/material 修订/阻断后修复/重开 supersede/terminal-b-c/重新设计全分支；任一评审阻断且字节变化则两份同 hash 评审同时作废重跑（step 6）；sequence 30–33 确认为 metadata-only（已逐事件核验 evidence_mode），永久无终局资格且禁止回填。
+- 角色权威：refs/state-schema.md `REVIEWER_AUTHORITIES` 确认 `outer-reviewer ∈ fresh`、`blind-reviewer ∈ blank-slate`，两类不同 fresh Spawn 满足"不同视角"要求。
+
+### 其余既有 blocker 域
+
+- 经验门保持窄化（D7）：仅作用于有合格可比样本的数值默认/阈值/停止条件；角色权限与一般机制不交数值解析器；`unavailable` 语义明确（不可证即 unavailable，绝不默认 false）；bootstrap `eligible_samples: 0`，门不误触发。
+- 历史证据核验：四个 commit 全部对账——`aac95bd`（2026-06-05，默认转评议、outer 10→5）、`0137fce`（2026-08-16，body 明确记录两次真实收敛 outer 实际 7/12、blind 实际 3/4，默认 5→8/1→3）、`20c8993`（2026-06-19，file-authoritative budget gate）、`d3c82cb`（2026-08-26）。与 plan 时间线表逐项一致。
+- task-envelope 保持 instrumented-only（D10）：承诺限 `orchest.py` / `ocsr_spawn_adapter.py` / `converge_loop.py` 经适配器路径；budget_gate.py 现有 `task_envelope_initial/cap`、硬顶语义与 `quality_path_guaranteed:false` 披露方向一致；`accounting_scope=instrumented_dispatch_only`，不完整即 `model_invocations=unavailable`，无 auditable-only 全宿主计量承诺。
+- A/B/C 三份 exact output（77f4e293 / 9252ec00 / e04cc121 的 output.bin）均已读，verdict 全为 `阻断需修复`，其 blocker 与 attempts.md 合并 disposition 及本 plan 的 D7–D10 修复一一对应。
+- 现场一致性：`.reopen-state.json`（r2、父 manifest `9833752f…`）、`_budget-state.json` 显式 `3/2/1` 权威保留、dirty diff 归属（capture.py 恰 8 行 EventLock fail-closed、test_archive_convergence.py 恰 35 行、test_process_controller_contract.py untracked）与 plan 文件矩阵逐条吻合；CONSTITUTION.md 未被触碰，plan 的终局矩阵保留宪法既有用户确认点与 commit/push 授权边界。
+
+## YAML Review Output
+
+```yaml
+review_target: '{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}'
+reviewed_plan_sha256: ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb
+reviewed_plan_size: 34302
+verdict: 可执行
+blocking_issues: []
+suggestion_issues:
+  - id: S1
+    severity: process-note
+    plan_amendment_required: false
+    location: "evidence/events sequence 36/37"
+    description: "前一对 exact-evidence 评审 invocation（18aa7b5e outer / bd121b15 blind）只有 started 事件、无 terminal，其产出未注册为证据。按 plan D10 崩溃恢复语义，started/no-terminal 不得猜测、须由 Orchestrator 以 cancelled/failed terminal 如实收口后方可 finish。属执行侧义务，plan 规则已覆盖，不构成计划缺陷。"
+  - id: S2
+    severity: process-note
+    plan_amendment_required: false
+    location: "attempts.md A/B/C entry vs plan.md L53"
+    description: "attempts.md 合并 blocker 条目所记'当前 Plan Executor invocation 8ec4465c'是该条目写入时点的事实；其后 R2 评审打回产生新的 Continue（sequence 34，b6f4e8a3，已于 sequence 35 正常收口）。历史 entry 按宪法第 4 条只追加不改写，plan.md 的现行陈述准确，无需处理。"
+integrity:
+  plan_sha256_verified: true
+  material_block_locator_unique: true
+  material_block_canonical_sha256_verified: true
+  embedded_calibration_report_sha256_verified: true
+  self_reference_fixed_point: absent
+r2_blockers:
+  R2-B1_calibration_locator: resolved
+  R2-B2_exact_evidence_chain: resolved
+  archive_contract_v1_expansion: not_required
+  two_review_same_hash_terminal_rule: complete
+  empirical_gate_scope: narrow_as_required
+  task_envelope_scope: instrumented_only
+verification_basis:
+  - "plan.md/attempts.md 全文、A/B/C 三份 exact output.bin、.reopen-state.json、_budget-state.json、gate-ledger 相关事件 sequence 30-40"
+  - "git show aac95bd/0137fce/20c8993/d3c82cb 全量对账（0137fce body 实证数值逐项一致）"
+  - "scripts/archive_contract/model.py（EVIDENCE_MODES/exact blob）、capture.py（派生 supersedes）、archive_convergence.py（begin/complete-invocation CLI）"
+  - "refs/state-schema.md REVIEWER_AUTHORITIES、SKILL.md 现行 ultraverge blind overlay 段、CONSTITUTION.md 全文、dirty diff 归属逐行抽查"
+  - "prompt-final-outer.md 与 prompt-final-blind.md 内嵌 payload 逐字节同一性实测"
+```

@@ -1,0 +1,521 @@
+---
+status: proposed
+mode: ultraverge
+created_at: 2026-09-10
+material_revision: true
+scope:
+  - converge-skill
+  - init-agent-docs
+---
+
+# Process Controller Consolidation Implementation Plan
+
+## Goal
+
+Make Converge the sole top-level controller for this OpenCode workflow and for any review/orchestration flow in which Converge is selected. TDD, systematic debugging, and completion verification become bounded Executor-local methods. Preserve the evidence-calibrated `8/3/3` stock quality-loop ceiling, use the existing task envelope for optional task-level cost control, and upstream only demonstrated cross-project defects in `init-agent-docs` without making generated projects depend on Converge.
+
+## Authoritative Inputs
+
+- Repositories:
+  - `C:\Users\Administrator\Documents\Github\converge-skill`
+  - `C:\Users\Administrator\Documents\Github\init-agent-docs`
+- At initial planning time both repositories were clean and `0 0` ahead/behind their configured upstream branches after `git fetch`; the branches were `master` and `main` respectively. At this repair, both worktrees contain the reviewed but uncommitted D1/D2/D4-D6 implementation. Those edits are protected input: preserve them, do not reset or overwrite them, and implement only the eventual corrective delta.
+- Converge governance changes require ultraverge before implementation: at least three independent initial reviewers, convergence of all blocking findings, and a mandatory post-convergence design review.
+- The three ultraverge initial reviews disagreed on `需重新设计` versus `阻断需修复`; the credible conceptual minority finding upgrades this plan to full convergence.
+- While this repair is authored, only this active `plan.md` and append-only `attempts.md` may change. No implementation file may be changed, and nothing may be committed or pushed.
+
+## Historical Evidence
+
+| Affected mechanism | Command/evidence | Result and decision implication |
+|---|---|---|
+| `max_outer_loops`, `max_blind_rechecks` | `git log -S 'max_outer_loops' -- scripts/budget_gate.py`; `git log -G 'max_outer_loops.*[0-9]' -- scripts/budget_gate.py`; `git log -G 'max_blind_rechecks.*[0-9]' -- scripts/budget_gate.py`; `git show 0137fce -- scripts/budget_gate.py SKILL.md`; `git blame -L 60,68 HEAD -- scripts/budget_gate.py` | The `-S` query returns `20c8993`, where the key was introduced. The `-G` value-history queries return `0137fce` and its predecessors. `0137fce` changed outer `5 -> 8` and blind `1 -> 3` after two real convergences used outer `7/12` and blind `3/4`, with findings still progressing. Blame attributes the released `8/3` defaults and rationale to that commit. This directly contradicts an unqualified `3/1` reduction. |
+| `max_inner_loops` | `git log -S 'max_inner_loops' -- scripts/budget_gate.py scripts/converge_loop.py scripts/orchest.py`; `git show 20c8993 -- scripts/budget_gate.py`; the same blame range | Commit `20c8993` introduced the file-authoritative gate with `max_inner_loops=3`; later commits added true Continue and the loop driver. No newer run evidence supports reducing true Continue to `1`. Preserve `3` while separating driver-local fresh Executor retries. |
+| Recertification depth | `git show --stat d3c82cb`; `.converge/done/20260826-doc-need-to-know/round-1.md` through `round-8.md`, `blind-recheck-1.md`, `blind-recheck-2.md`, and `retrospective.md` | A real governance task still had blocking work through outer R8 and reached acceptance only after the second blind recheck. One fresh outer result after a material rewrite is therefore not an adequate independent recertification sample. |
+| Current plan-review failure | `uv-init-1.md:65`; current `round-1.md`, `retrospective.md:48`, and `design-review.md` | An initial Reviewer identified the empirical contradiction, but it was downgraded to suggestion and later rationalized as cost-first. The repair must make this class of conflict blocking, preserve the user's original quality objective, and prevent design review from substituting for authority review. |
+
+| Mechanism | Released/current behavior | Rejected plan behavior | Repaired proposal |
+|---|---|---|---|
+| Local defaults | `8 outer / 3 blind / 3 Continue` | `3/1/1` | New v3 state remains `8/3/3` |
+| Ultraverge blind | Explicit operational overlay `2` below released standard blind `3` | Preserve the inversion while standard fell to `1` | Remove the new-state overlay; inherit blind `3` |
+| Active-state compatibility | Sparse/explicit state with no effective-default version contract | Resume could inherit changed code defaults | Freeze absent/v1 and existing v2 semantics; write v3 only for new state; explicit migration only |
+| Empirical conflict | Reviewer may downgrade verified contradiction to suggestion | Extension escape hatch used to rationalize lower defaults | `BLOCK:empirical_conflict` absent newer counterevidence or recorded user tradeoff decision |
+| Material recertification | Count-based path can finish after one fresh post-repair outer Reviewer | Design review treated as compensating check | Require zero-blocking blank-slate review of exact final plan hash; design review remains advisory |
+| Task-level cost | Existing optional task envelope does not cover every real model call | Lower local quality ceilings used as coarse cost control | Keep tier values; when configured, account every real model call exactly once |
+
+The associated historical commit subjects are `0137fce feat: 预算默认额度调优 outer 5→8 / blind 1→3(复盘实证驱动)`, `20c8993 feat: 预算执行硬化 — file-authoritative budget gate (auditable-only core)`, and `d3c82cb docs: land agent-need-to-know reduction (script backstop, agent judgment) (#17)`. The authoritative knowledge-base input is `D:\OneDrive\Cr\Obsidian_Vault\110【知识管理】\【知识库方法与治理】\20260614-数据驱动的Harness训练-迭代式审计与AI产物的质量控制.md`; its applicable rule for D7-D10 is to prefer accumulated run evidence and simple general mechanisms over opinion-driven special cases.
+
+## Decisions
+
+### D1. Controller and Handoff Boundary
+
+Converge owns top-level mode selection, role transitions, budget, independent review, stopping, terminal decisions, and landing for this OpenCode workflow and whenever a user or host selects Converge. This does not make Converge a dependency of every project generated by `init-agent-docs`.
+
+| Entity | May own | Must not own |
+|---|---|---|
+| Converge Orchestrator | Converge mode, budget, reviewer/executor transitions, gates, terminal verdict, landing | Artifact implementation |
+| Executor-local method | The steps and evidence for its assigned change | Spawn policy, budget, gates, reviewer verdict, terminal decision |
+| `init-agent-docs` Coordinator | Domain handoff data: decomposition, owner assignment, dependency/status table, merge handoff | Global process mode, Converge budget, Converge role transitions, terminal Converge decision |
+| `init-agent-docs` Owner | Assigned implementation and evidence | Self-approval or global orchestration |
+| `init-agent-docs` Reviewer guidance | Independent domain review requested by the selected controller or user | A second top-level repair loop, budget, or terminal authority |
+
+Required wording and behavior changes:
+
+1. `init-agent-docs` Step 8 remains an independent perspective check, but becomes a single quality-check handoff under the currently selected controller. If Converge is selected, its Orchestrator dispatches and adjudicates the check. If Converge is not installed or selected, the host/user may request the check directly; generated files contain no Converge import, command, link, or required terminology.
+2. `workflow-patterns.md` describes Coordinator/Owner/Reviewer as domain handoff roles. It must explicitly defer global mode, budget, terminal decisions, and any repeated repair/review loop to the selected controller. It may describe file-based handoff without becoming a controller.
+3. `AGENTS.md.tpl` replaces the independent `plan -> subagent audit -> user confirmation -> execution -> subagent acceptance` controller with conditional handoff guidance. It must not require a subagent, Converge, Git, or a plan directory when the selected profile omits them.
+4. `init-agent-docs/SKILL.md` Step 0 work modes and the final work-mode section become initialization/profile choices and domain handoff shapes, not a second process state machine.
+5. Static contract tests scan all four sources above and fail if Coordinator, Owner, Step 8, or generated AGENTS text claims budget, mode-switch, gate-waiver, terminal-verdict, or autonomous repeated-loop authority.
+
+### D2. Executor-Local Methods
+
+| Method | Behavior-based activation | Required behavior | Evidence returned |
+|---|---|---|---|
+| Test-driven change | Executable behavior is added or corrected and a pre-change failure can be observed without testing implementation trivia | Add or identify a test that fails for the intended reason, implement the smallest causal change, rerun to green | Test identity, red result, green result |
+| Systematic debugging | A bug, unexpected behavior, or failing test is being diagnosed | Reproduce, collect evidence, form a falsifiable hypothesis, change one causal variable, add a regression check | Reproduction, evidence, hypothesis, fix, regression result |
+| Completion verification | Every artifact-modifying Executor before handing control back | After the final write, run the focused checks and required broader suite; report commands, exit codes, and limitations | Fresh command/result table |
+
+The red step is behavior-based, not artifact-category-based. Generated code, configuration, or templates require a red step when they change testable behavior. A red step is inapplicable only when there is no executable behavior change, no reliable pre-change failure can be constructed without coupling to implementation detail, or the relevant harness is unavailable; the Executor must state the exact reason and provide the strongest available alternative check. A behavior-preserving refactor uses characterization evidence before and after rather than manufacturing a new failure.
+
+Completion-verification boundaries:
+
+- Any Executor that writes `plan.md`, implementation, governance, generated output, contract final text, or another durable artifact verifies the changed artifact before return.
+- A no-write analysis role is exempt because it has no changed artifact to verify.
+- A Round 0 contract proposer that only returns a non-authoritative proposal is exempt from repository suites, but must check its proposal against the contract template and requested assertions. A contract finalizer that writes `contract.md` is not exempt and verifies structure, references, and required assertions.
+- Verification is Executor self-checking only. It never replaces fresh Reviewer verification or authorizes an `Accepted`/terminal verdict.
+
+### D3. Evidence-Calibrated Defaults, Shared Initialization, Distinct Loop Semantics
+
+#### Stock budgets
+
+Keep the released standard defaults at `8 outer / 3 blind / 3 Continue`. Preserve `ultraverge_min_reviewers=3`. Remove the proposed ultraverge `max_blind_rechecks=2` overlay: a newly initialized ultraverge run inherits blind `3`, so its stock blank-slate capacity is never lower than standard. Explicit user-reviewed per-run overrides remain legal and continue to use the existing extension and fail-closed contracts.
+
+The existing total-cap formula and `total_safety=1.5` remain unchanged. With `8/3/3` and `ultraverge_min_reviewers=3`, both standard and ultraverge derive a stock local total cap of `63`; no new hard cap is invented. These are local stop-loss ceilings, not a target invocation count. Task-level cost control is D10.
+
+#### One configuration initializer
+
+`scripts/budget_gate.py` gains the host-independent state initializer/resolver used by all paths. This is a typed configuration boundary, not a new controller.
+
+| Entry path | Required initialization behavior |
+|---|---|
+| Manual Orchestrator | Run the host-independent initializer before first reserve; standard and ultraverge both resolve the current `8/3/3` defaults unless an explicit reviewed override exists |
+| `ocsr_spawn_adapter.py config-init` | Delegate to the same initializer; retain its CLI as a compatibility facade |
+| `converge_loop.py run` | Call the same initializer using explicit spec mode/config before creating the journal or reserving |
+
+Resolution and fail-closed rules:
+
+1. With no active state, initialize `mode=standard` when mode is omitted, use current defaults version `3`, then apply explicit CLI/spec values. Ultraverge has no lower blind overlay.
+2. With an existing state, validate the complete state and ledger before use. An omitted spec field inherits active state. An explicitly repeated equal value is a no-op. A conflicting explicit mode or config value fails closed instead of silently overwriting active state.
+3. Existing active state is therefore authoritative after creation; changing it requires the existing explicit, reviewed migration/initialization path, never an incidental resume.
+4. Unknown keys, booleans used as integers, strings, negative values, malformed JSON, malformed FSM, or invalid extensions fail closed before journal creation or reserve.
+5. Tests cover empty standard, empty ultraverge, active-only override, spec-only override, equal active/spec values, active/spec conflict, and malformed values for manual, adapter, and driver entry paths.
+
+`defaults_version` is an effective-default compatibility contract, not a release label:
+
+| State version | Meaning | Resume behavior |
+|---|---|---|
+| absent / `1` | Released sparse-state baseline, `8/3/3`; existing explicit config wins | Resolve exactly as before and do not rewrite bytes merely by reading or resuming. |
+| `2` | Already-created experimental state from the uncommitted `3/1/1` implementation; ultraverge may contain explicit blind `2` | Compatibility-only: resolve with the v2 table so an in-flight run does not change silently; never create new v2 state. Emit a deprecation notice. |
+| `3` | Current new-state baseline, `8/3/3`, no ultraverge blind overlay | All newly created states use v3. |
+
+There is no automatic in-place version upgrade. Existing v1/v2 active runs either finish under their frozen semantics or take an explicit reviewed migration before the next reserve. A behavior-preserving migration materializes the old effective values as explicit config before changing the version; adopting current `8/3/3` during an active v2 run is a behavior change and therefore requires a recorded user decision. Extensions, FSM history, ledger bytes, and task-envelope configuration are preserved. Unknown future versions fail closed.
+
+#### Continue versus driver repair retries
+
+`max_inner_loops` has exactly one meaning: the number of `orchest.py reserve-round --continue-of` calls allowed on the same succeeded Reviewer instance. `orchest.py` reads the effective value from validated active state. `SKILL.md`, `refs/orchestrator-guide.md`, `refs/executor-discipline.md`, and `scripts/README.md` point to effective config rather than restating `3`.
+
+`converge_loop.py` cannot faithfully Continue an OCSR reviewer instance with its current backend. It must not claim that it does. The smallest honest design is:
+
+- Keep the driver as an explicitly documented fresh-review scheduler.
+- Rename `inner_streak` to `executor_repair_streak`.
+- Add `driver_config.max_executor_repair_attempts`, default `3`, to bound consecutive fresh Executor retries before a fresh Reviewer. This preserves the historical driver behavior that was previously, incorrectly, borrowed from `max_inner_loops`; the key is driver-local, is not in `budget_gate.DEFAULTS`, and does not govern Continue.
+- After every artifact-modifying Executor, the driver requires a fresh outer Reviewer before phase completion. An orchestrator `accepted` response may route to that Reviewer; it cannot itself satisfy Reviewer verification.
+- A repair originating in ultraverge initial or blind review also routes through the next fresh outer review; no repaired artifact is completed directly from an Executor report.
+
+Backward compatibility for loop specs is explicit:
+
+- New loop specs use `version: 2`, `budget_config.max_inner_loops` only for true Continue state, and `driver_config.max_executor_repair_attempts` for fresh Executor retries.
+- Existing `version: 1` specs remain loadable. For v1 only, an explicit `budget_config.max_inner_loops` is migrated in memory to `driver_config.max_executor_repair_attempts`, is not written as the active-state Continue limit, and emits a deprecation warning. An absent v1 value preserves the historical driver retry default `3`.
+- If a v1 spec and an existing active state both exist, the migrated retry value remains driver-local while validated active `max_inner_loops` remains the Continue limit. No number is presented as governing both events.
+- Invalid v1/v2 retry values fail closed; v2 with both old and new retry forms is rejected as ambiguous.
+
+The extension authorization, Archive Contract, and local total formula remain unchanged. D10 closes task-envelope coverage without changing its existing tier values.
+
+### D4. `init-agent-docs` Profile and No-Git Contract
+
+Repository capability and initialization size are independent axes. The skill asks once for Git/no-Git and size, records both in the birth record, and renders exactly the selected profile.
+
+| Profile | Required generated outputs | Git-specific behavior | Explicit omissions |
+|---|---|---|---|
+| Small + Git | `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`, root `README.md`, `docs/CURRENT.md`, `docs/CHANGELOG.md`, `docs/audit-checklist.md`, and only `agent_links.py`, `changelog.py`, `audit.py`, `check_all.py` | Existing upstream may be checked using configured names; hooks only if separately justified and confirmed | No plans, memory, maintain, worktrees, or hooks by default |
+| Small + no-Git | Same files and scripts as Small + Git | No Git command, history, commit, hook, branch, remote, or worktree guidance; CURRENT + CHANGELOG provide file-based handoff/history | Same omissions plus all Git-only sections |
+| Medium/Large + Git | Full current docs, plans, memory, maintenance scripts; module hints for Large | Configured upstream checks; hooks/worktrees only after their existing confirmations | No assumed `origin`, `main`, or automatic `git init` |
+| Medium/Large + no-Git | Full docs, plans, memory, maintenance scripts; module hints for Large | `maintain.py` detects no repository before any Git subprocess and uses timestamps + CHANGELOG; no hooks/worktrees/commit/history guidance | All Git-only sections and assets are skipped |
+
+Concrete closure rules:
+
+1. An existing Git repository uses its configured upstream and current branch. A non-Git directory becomes Git only after explicit user confirmation; there is no automatic `git init`.
+2. `CURRENT.md.tpl` uses a plan link only for Medium/Large. Small output uses an inline task/handoff field and no `docs/plans/` reference.
+3. `audit-checklist.md.tpl` has rendered branches: overview/plan checks only when those files exist; Git history checks only for Git profiles; no-Git uses CHANGELOG/current files.
+4. `README.md.tpl`, `AGENTS.md.tpl`, `STRUCTURE.md.tpl`, `MEMORY.md.tpl`, and `bugfix.md.tpl` receive the same conditional history/link treatment. Medium/Large no-Git keeps plans and overview but replaces Git archaeology with CHANGELOG plus current-file evidence.
+5. `workflow-patterns.md` separates file handoff from Git transport. Commit/worktree steps are conditional Git transport details, and Coordinator/Owner/Reviewer remain domain roles under the selected controller.
+6. Generated targets never link to skill-internal `assets/references/...`. The AGENTS worktree section points to installed `scripts/worktree_task.py --help` and is emitted only when that script is installed.
+7. Templates/instructions emit canonical plan frontmatter `in_progress | done | cancelled`; parsers retain documented legacy read compatibility.
+8. Project-specific OA paths, credentials, archive history, usernames, and a mandatory no-Git rule are not upstreamed.
+
+### D5. Synchronization Contract
+
+`agent_links.py repair` defaults to copy and copy repair breaks an existing hardlink group even when bytes already match. Non-force repair refuses divergent content; `--mode copy --force` and explicit `--mode hardlink` remain available.
+
+Every generated AGENTS file declares one exact sync contract:
+
+- Copy: `repair --mode copy --force` followed by `check --mode copy`.
+- Hardlink: `repair --mode hardlink --force` followed by `check --mode hardlink`.
+
+The four `pre-commit-*.sh` assets, the inline hook example, `check_all.py`, checklist, and README do not recommend bare `repair`. Their remediation points to the exact command in target `AGENTS.md` section `同步声明`; this prevents a hardlink project from being silently converted to copy. Safe non-force refusal remains covered by direct script tests, while routine commands use force only after `AGENTS.md` is the reviewed source of truth.
+
+### D6. Verification Layers
+
+| Layer | What it proves | Gate status |
+|---|---|---|
+| Static governance contract tests | Required ownership, profile, command, and non-goal wording is present and contradictory wording is absent | Deterministic gate |
+| Executable synthetic fixtures | Budget/state transitions, sync inode behavior, audit discovery/status, no-Git script behavior, dead-link-free canonical profile fixtures | Deterministic gate |
+| Agent/human behavior eval | A fresh Agent actually asks the right questions, renders the selected profile, avoids Git in no-Git mode, and produces useful docs | Advisory evidence; not a deterministic gate |
+
+No new controller, registry, renderer, or runner is created merely to test prose. Synthetic fixtures exercise existing scripts and canonical expected file sets; `eval-baseline.md` retains fresh-Agent and human/Agent scoring as explicitly non-deterministic evaluation.
+
+On Windows, Converge tests have a reproducible path precondition: `TEMP` and `TMP` must point to an existing long-form path such as `C:\Users\Administrator\AppData\Local\Temp`, not its 8.3 alias. Record the values used. A failure that remains after this normalization is a genuine test failure and must not be waived. Other platforms run unchanged.
+
+### D7. Historical Evidence and Empirical-Conflict Gate
+
+This decision mechanizes only the observed failure. It does not introduce a general taxonomy of every possible bad product decision.
+
+Governance plans that change an existing default, threshold, stopping condition, role permission, or core mechanism must contain a `Historical Evidence` section and pass `budget_gate.py preflight` before the first Reviewer spawn. The section must state the affected key/mechanism, old and proposed behavior, and one of these evidence paths:
+
+1. Git available: exact `git log -S` query/result, relevant `git blame` lines, and associated retrospective or issue records.
+2. Git unavailable: explicit `git_archaeology: unavailable` plus the CHANGELOG and existing run/decision records used instead. Unavailability is valid; silently omitting archaeology is not.
+
+The same evidence block, not a summary invented by the Orchestrator, is injected into every Reviewer prompt together with the calibration report reference. `refs/reviewer-prompt.md` and `refs/reviewer-discipline.md` require the Reviewer to verify that archaeology was actually performed and that the cited records support the plan's claim.
+
+An **empirical conflict** exists when a proposal contradicts already available, directly relevant, verifiable run data or historical calibration. Unless the plan cites newer counterevidence or a canonical recorded user message explicitly accepting the quality-cost tradeoff, the Reviewer must emit a blocking issue with:
+
+```yaml
+empirical_conflict: true
+user_decision_required: true
+```
+
+These are the only new issue fields. Evidence references remain in the existing `description` and `location` fields. The issue cannot be downgraded to `suggestion`, relabeled as an unreviewable "product choice", or cleared merely because an extension escape hatch exists. If newer counterevidence is cited, the Reviewer independently checks relevance and recency. If the user accepts the tradeoff, `user_decision_required` becomes false only after the exact user message has been recorded and referenced; the plan still requires D8 recertification because its core behavior changed.
+
+The existing `scripts/budget_gate.py preflight` command gains a narrow governance-plan check. It parses the declared old/proposed parameter table, archaeology status, calibration-report reference, newer-counterevidence references, and recorded user-decision reference. It returns `BLOCK:empirical_conflict` when a proposed lower loop/stop value undercuts productive observed usage in the referenced report without either permitted override. This is intentionally narrower than semantic Reviewer judgment; malformed or missing required metadata fails closed.
+
+This plan is the bootstrap case because the new check does not exist yet. Before implementation, its fresh Reviewer performs the same requirements manually against this `Historical Evidence` section, the current user-message record, and a hand-assembled calibration input; the Reviewer records pass/block evidence. After Phase 2 lands, the generated report and implemented preflight rerun against this plan must pass before Phase 3 changes any default. No later governance plan receives this bootstrap exception.
+
+### D8. Original Goal and Post-Revision Blank-Slate Recertification
+
+Before plan review, the Orchestrator records the original user request with the existing `scripts/archive_convergence.py record-user-message` path. Reviewer required reading includes that canonical event plus any reference materials, after the Reviewer first forms an independent view of the plan itself.
+
+Reviewer Q6 changes from advisory mismatch detection to this bounded rule:
+
+- Compare the complete plan with the original goal/recorded user message.
+- A newly introduced core product tradeoff not authorized by that source is conceptual blocking with `user_decision_required: true`.
+- Legitimate scope narrowing that does not change a core product tradeoff remains advisory; ordinary wording or implementation-detail drift does not gain a new mandatory review cycle.
+
+A revision is **material** only when it is conceptual/architectural, or changes a core default, stopping condition, role permission, or core mechanism. After ultraverge initial review, any such revision requires at least one post-revision blank-slate recertification of the complete final plan, even if the full-convergence outer count is only one. The existing blind-reviewer path is reused; no new reviewer role or design-review mode is created.
+
+Mechanical closure uses the existing round and finish path:
+
+1. Material plans carry `material_revision: true` in frontmatter; governance preflight requires it for the trigger set above.
+2. `orchest.py record-verdict` records the SHA-256 of the reviewed plan in the successful blank-slate product.
+3. `orchest.py finish` requires a zero-blocking blank-slate authority whose recorded plan hash equals the final `plan.md` hash whenever `material_revision: true` or an unresolved empirical-conflict/user-decision gate occurred.
+4. Any later material edit invalidates the hash and requires recertification again.
+5. The mandatory ultraverge design review remains advisory and cannot satisfy this gate or own the terminal verdict.
+
+One fresh Reviewer with zero blockers is one independent sample. It remains sufficient for ordinary small, non-material changes. Empirical conflict and material revision require the additional independent blank-slate confirmation above; the two triggers may be satisfied by the same qualifying recertification.
+
+### D9. Structured Calibration Feedback
+
+Each new `retrospective.md` includes one fenced JSON `converge.calibration-sample/v1` block. It contains only data already produced by the current process:
+
+```json
+{
+  "schema": "converge.calibration-sample/v1",
+  "mode": "standard|ultraverge",
+  "task_tier": "small|medium|feature|critical|null",
+  "configured_limits": {"outer": 8, "blind": 3, "inner": 3, "task_envelope": null},
+  "usage": {"outer": 0, "blind": 0, "inner_max_per_outer": 0, "model_invocations": 0},
+  "blocking_trajectory": [{"phase": "outer", "index": 1, "count": 0, "verdict": "可执行"}],
+  "extensions": {"outer": 0, "blind": 0, "total": 0, "task_envelope": 0},
+  "productive_at_or_after_limit": {"outer": false, "blind": false, "inner": false},
+  "terminal": "可执行|user-accepted|stopped"
+}
+```
+
+`productive_at_or_after_limit` is true only when findings or accepted fixes continued to make forward progress at the configured limit or after an authorized extension; merely consuming calls does not qualify. The narrative retrospective remains useful, but parameter calibration consumes this structured block.
+
+Reuse `scripts/distill_antipatterns.py`: add a `--calibration` read-only mode that scans `done/*/retrospective.md`, validates samples against gate ledger/round products where those records exist, and writes a deterministic JSON report only when `--output` is supplied. Missing fields in old retrospectives are reported as unavailable and excluded from quantitative claims rather than guessed. The report includes source slugs, parse/verification status, usage distributions, extension frequency, blocking trends, and productive-at-limit samples; it does not auto-select new defaults.
+
+Before any plan proposes changing a default, threshold, or stop condition, it must generate and reference a calibration report under that convergence object's `evidence/` directory, including path and SHA-256. Governance preflight rejects absent, malformed, stale, or unreferenced reports. Human/Reviewer judgment still decides whether the data warrants change; the report prevents historical evidence from disappearing from the decision surface.
+
+### D10. Task Envelope Is the Cost Boundary
+
+`8/3/3` remains the local quality-loop ceiling. Cost control uses the already implemented optional `task-envelope`; the existing `small (4/8)`, `medium (8/16)`, `feature (16/24)`, and `critical (20/30)` values, extension authorization, and unconfigured A8 fallback remain unchanged. This plan introduces no new tier and no new hard-cap number.
+
+When a task envelope is configured, every real model invocation consumes it exactly once, independent of local `ROLE_CONSUMES`. This includes outer/ultraverge/blind Reviewers, true Continue, Executor and contract/arbitration/design roles formerly marked `consumes=none`, post-convergence revision, landing, final audit, and model-based preflight. Deterministic scripts that do not call a model do not consume it.
+
+The smallest compatible wiring keeps the existing `task-envelope` reservation scope:
+
+- Existing spawn entry points (`orchest.py`, `ocsr_spawn_adapter.py`, and `converge_loop.py`) pair each model dispatch with one task-envelope reservation when configured and settle/cancel both from the same host result. Continue receives the same companion reservation even though it has no local outer/total reservation.
+- Landing, final audit, and model-based preflight, which may sit outside the local Converge loop, use the existing standalone `--role task-envelope` reserve/settle path before dispatch.
+- Reserve the task envelope first; if the local role reserve or dispatch fails before model execution, cancel the companion with `pre_execution=true`. A task-envelope BLOCK prevents the new invocation but never prevents settlement of an already reserved invocation.
+- If no task tier/envelope is configured, no companion reservation is created and all existing role/ledger behavior remains byte-compatible.
+- Existing active ledgers and extensions remain valid. Do not reinterpret old reservations as task-envelope consumption or backfill history.
+
+Focused tests prove exactly-once accounting for each listed path, no double count, pre-execution cancellation, existing extension behavior, and unchanged tier ceilings.
+
+## Non-Goals
+
+- Do not change Converge's three-role separation, terminal semantics, Archive Contract, extension authorization, or independent Reviewer requirement.
+- Do not add true Continue to `converge_loop.py` until a backend can faithfully preserve and expose the same reviewer instance.
+- Do not add a controller, controller registry, renderer, or target-project Converge dependency.
+- Do not remove or promote `task-envelope`.
+- Do not change the existing task-tier numbers or infer a new hard cap from the small current sample set.
+- Do not modify `CONSTITUTION.md`; D7-D10 implement the observed failure within its existing Bitter Lesson, Occam, role-separation, and user-authorization boundaries.
+- Do not create a broad ontology of empirical errors or product decisions; add only the two issue flags and one calibration sample described above.
+- Do not exempt generated artifacts or documentation categorically from behavior-based red-step reasoning.
+- Do not hard-code OA locations, usernames, browser profiles, archive layouts, branch names, remote names, or no-Git policy into generated projects.
+- Do not copy `assets/references/workflow-patterns.md` into targets solely to preserve an internal link.
+- Do not commit or push; human-controlled integration remains outside this plan.
+
+## Exact File Change Matrix
+
+### `converge-skill`
+
+| File | Planned change |
+|---|---|
+| `SKILL.md` | Preserve D1/D2; document `8/3/3`, equal standard/ultraverge blind defaults, evidence conflict/original-goal gates, material-revision recertification, and task-envelope coverage |
+| `refs/executor-prompt.md` | Apply method activation/evidence and completion verification to every artifact-modifying Executor |
+| `refs/executor-discipline.md` | Canonical method rules, behavior-based red applicability, no-write/contract exceptions, effective Continue limit |
+| `refs/reviewer-prompt.md` | Preserve method review; inject recorded original goal, Git/record archaeology, and calibration report; expose empirical-conflict fields |
+| `refs/reviewer-discipline.md` | Preserve method rules; make verified empirical conflicts and unauthorized core tradeoffs blocking; define the two minimal issue flags |
+| `refs/orchestrator-guide.md` | Remove hard-coded Continue count; document shared initialization, selected-controller boundary, evidence capture, and material-revision recertification |
+| `refs/state-schema.md` | Add the compact calibration-sample contract and reviewed-plan hash/recertification fields; retain all existing Archive and attempt contracts |
+| `scripts/budget_gate.py` | Restore new-state defaults to `8/3/3`; remove ultraverge blind `2` overlay; implement v1/v2/v3 resolution, narrow governance preflight, and existing task-envelope pairing support |
+| `scripts/orchest.py` | Replace `MAX_INNER_LOOPS=3` with effective validated state; enforce reviewed-plan hash recertification and exactly-once task-envelope pairing |
+| `scripts/converge_loop.py` | Preserve shared initialization and fresh-review routing; implement v1/v2/v3 precedence, keep retry semantics separate with historical default `3`, and pair task-envelope use |
+| `scripts/ocsr_spawn_adapter.py` | Preserve initializer delegation/CLI compatibility; remove lower blind overlay and pair configured task-envelope reservations |
+| `scripts/distill_antipatterns.py` | Add read-only `--calibration` report compilation from retrospective samples; do not auto-tune defaults or change existing antipattern/rule modes |
+| `scripts/README.md` | Document initialization versions, governance preflight, calibration command, recertification, effective Continue config, and full task-envelope call coverage |
+| `README.md` | Align hierarchy, evidence-calibrated budget profile, initialization, recertification, task envelope, and driver semantics |
+| `README_en.md` | Keep the English mirror aligned |
+| `tests/test_process_controller_contract.py` | Preserve controller/method contracts; add static archaeology, original-goal, conflict, recertification, and no-stale-`3/1/1` contracts |
+| `tests/test_budget_gate.py` | `8/3/3`, equal blind/cap `63`, v1/v2/v3 compatibility, governance preflight regression fixture, exactly-once task-envelope accounting, extensions unchanged |
+| `tests/test_continue_extension.py` | Three stock Continues, active/spec override coverage, parent/instance/settlement invariants, task-envelope companion accounting |
+| `tests/test_converge_loop.py` | Empty modes, active/spec/version precedence, retry separation/default `3`, mandatory fresh-review routing, task-envelope pairing |
+| `tests/test_ocsr_spawn_adapter.py` | Shared initializer delegation, no lower ultraverge overlay, equal/conflicting state, cap and task-envelope expectations |
+| `tests/test_loop_a_coverage.py` | Finish rejects missing/stale material-revision blank-slate hash and covers model-call task-envelope wiring |
+| `tests/test_distill_antipatterns.py` | New focused calibration parser/report tests using synthetic retrospectives and ledgers |
+
+`CONSTITUTION.md`, `GOVERNANCE-DECISIONS.md`, Archive Contract code under `scripts/archive_contract/`, `scripts/archive_convergence.py`, framework adapters, and terminal-chain specs are intentionally unchanged. The existing `archive_convergence.py record-user-message` command is reused rather than duplicated. Unrelated dirty files are neither reverted nor silently added to this plan's landing set.
+
+### `init-agent-docs`
+
+| File | Planned change |
+|---|---|
+| `SKILL.md` | Add repository-mode decision, four profile outputs, controller/handoff boundary, conditional Step 8, sync contract, and verification layers |
+| `README.md` | Align target Git/no-Git support, profiles, sync and audit behavior while retaining this source repo's own Git maintenance instructions |
+| `scripts/converge_orchestrator.py` | Delete stale bespoke controller |
+| `assets/scripts/agent_links.py` | True copy default; break equal-content hardlinks in copy mode; preserve refusal and explicit hardlink |
+| `assets/scripts/audit.py` | Discover root `README*.md`, existing `scripts/README*.md`, and all plan Markdown; validate active/completed status and birth records |
+| `assets/scripts/check_all.py` | Remove unused Git helper; mode-aware sync check/remediation via declared AGENTS contract; retain audit delegation |
+| `assets/scripts/maintain.py` | Detect no-Git before Git subprocesses and use mtime/CHANGELOG fallback |
+| `assets/hooks/pre-commit-generic.sh` | Point sync remediation to declared AGENTS mode |
+| `assets/hooks/pre-commit-python.sh` | Same remediation closure |
+| `assets/hooks/pre-commit-node.sh` | Same remediation closure |
+| `assets/hooks/pre-commit-go.sh` | Same remediation closure |
+| `assets/templates/zh/AGENTS.md.tpl` | Domain handoff boundary, exact sync mode command, profile-conditional plan/Git/worktree text, no internal assets link |
+| `assets/templates/zh/README.md.tpl` | Git and no-Git quick-start/contribution branches; profile-conditional overview links |
+| `assets/templates/zh/CURRENT.md.tpl` | Small inline handoff versus Medium/Large plan pointer |
+| `assets/templates/zh/audit-checklist.md.tpl` | Profile-conditional overview/plan/Git checks and declared sync remediation |
+| `assets/templates/zh/plan.md.tpl` | Canonical file status versus display-state distinction |
+| `assets/templates/zh/frontmatter-schemas.md.tpl` | Canonical write values and legacy read compatibility |
+| `assets/templates/zh/STRUCTURE.md.tpl` | No-Git archaeology wording and conditional optional links |
+| `assets/templates/zh/MEMORY.md.tpl` | No-Git timestamp fallback wording |
+| `assets/templates/zh/bugfix.md.tpl` | No-Git timestamp fallback wording |
+| `assets/references/workflow-patterns.md` | Domain handoff roles under selected controller; Git transport conditional; no terminal authority |
+| `assets/references/eval-baseline.md` | Four profile cases and explicit static/synthetic/behavior layers |
+| `assets/pitch/presentation.html` | Replace unconditional Git claims with profile branch and controller boundary |
+| `tests/test_agent_links.py` | Equal-content hardlink conversion, explicit hardlink, non-force refusal, force copy overwrite |
+| `tests/test_audit.py` | New Git-free synthetic coverage for dead links, plan directories/status, legacy normalization, birth records |
+| `tests/test_skill_guidance.py` | Four profile matrices, no automatic Git, controller boundary, no internal dead link, mode-aware hooks |
+| `tests/test_maintain.py` | No-Git path performs no Git subprocess and delegated audit failures propagate |
+
+No other implementation file is authorized. `worktree_task.py` and `reference-transaction.sh` remain Git-only optional assets and are skipped outside confirmed Git collaborative profiles. `pre-commit-config.yaml` has no conflicting repair remediation and remains unchanged.
+
+## Bounded Implementation Sequence
+
+### Phase 0. Reopen Evidence and Recertify the Revised Plan
+
+1. Preserve the three initial review artifacts, all existing attempts, the design review, and this appended post-convergence repair entry.
+2. All future prompts begin with explicit `## Mode: <mode>`; record the omitted marker in the first three prompts as an orchestrator-origin process defect.
+3. Record the complete current user message through existing `archive_convergence.py record-user-message`; inject that event, the knowledge-base article, the Git archaeology table, and the hand-assembled bootstrap calibration evidence into the next Reviewer prompt. The deterministic report is generated after its compiler lands in Phase 2.
+4. Apply the documented bootstrap preflight manually because the mechanical extension is not yet implemented. The revised plan is explicitly material; no implementation begins until a fresh Reviewer records that the equivalent archaeology, original-goal, empirical-conflict, and calibration checks pass.
+5. Dispatch a fresh outer Reviewer with the complete revised plan and all authoritative inputs. If repair is required, use a fresh Executor and same-reviewer Continue where supported.
+6. After a fresh Reviewer returns `可执行`, run at least one blank-slate recertification against the final plan hash even if the outer count remains one. If it blocks and the plan changes materially again, repeat against the new hash.
+7. Run the mandatory ultraverge design review as advisory evidence only; it cannot replace step 6 or own the verdict.
+
+### Phase 1. Lock Controller and Method Contracts
+
+1. Add failing static contract tests for D1/D2 across every listed governance/reference/template source.
+2. Run `python -m unittest tests.test_process_controller_contract -v`; confirm failures correspond to current contradictory authority or method text.
+3. Update the listed Converge and `init-agent-docs` guidance files, keeping detailed method rules in `executor-discipline.md` and detailed domain handoff rules in `workflow-patterns.md`.
+4. Rerun the focused tests to green.
+
+### Phase 2. Add Calibration and Governance Preflight Before Touching Defaults
+
+1. Add failing tests for `converge.calibration-sample/v1` parsing, ledger/product cross-checking, missing-data exclusion, deterministic report output, and no automatic recommendation.
+2. Add an inline regression fixture whose report contains `outer 7/12`, `blind 3/4`, and the R8 + blind#2 sample, while the plan proposes `3/1/1` with no newer counterevidence or user tradeoff decision. Confirm current preflight incorrectly returns clean; the red expectation is `BLOCK:empirical_conflict`.
+3. Add static red tests requiring the plan and Reviewer prompt to contain archaeology, original-message, calibration, `empirical_conflict`, and `user_decision_required` contracts.
+4. Implement `distill_antipatterns.py --calibration` and the narrow `budget_gate.py preflight` extension. Keep existing default values untouched during this step.
+5. Generate `.converge/active/20260910-process-controller-consolidation/evidence/calibration-report.json`, record its SHA-256 in Reviewer input, and verify it includes `0137fce`/`d3c82cb` evidence or explicitly marks legacy raw evidence that cannot be mechanically cross-checked.
+6. Run `python -m unittest tests.test_distill_antipatterns tests.test_budget_gate tests.test_process_controller_contract -v` to green before Phase 3.
+
+### Phase 3. Restore Defaults, Version State, and Preserve Loop Semantics
+
+1. Add failing tests for new v3 standard and ultraverge `8/3/3`, no ultraverge blind overlay, formula-derived cap `63` for both modes, three true Continues, and driver retry default `3` as a separate event.
+2. Add v1/v2/v3 fixtures: absent/v1 resolves `8/3/3` without rewriting sparse bytes; existing v2 resolves `3/1/1` and any explicit blind `2` without rewriting bytes; new initialization writes v3 `8/3/3`; unknown versions fail closed; resume never rewrites solely because code defaults changed.
+3. Restore `budget_gate.DEFAULTS` to `8/3/3`, remove new ultraverge blind overlay, and implement the version table in the shared initializer. Preserve all already-implemented validation, active/spec conflict handling, and candidate-state checks.
+4. Keep `max_inner_loops` limited to true same-instance Continue; keep `max_executor_repair_attempts` driver-local with historical default `3`; retain mandatory fresh Reviewer routing after every repair.
+5. Update docs and run `tests.test_budget_gate`, `tests.test_continue_extension`, `tests.test_converge_loop`, `tests.test_ocsr_spawn_adapter`, and `tests.test_process_controller_contract` to green.
+
+### Phase 4. Enforce Material Recertification and Whole-Task Accounting
+
+1. Add red tests proving `finish` currently accepts a material plan after one fresh outer Reviewer with no blank-slate review, and proving `consumes=none`, Continue, landing, final audit, and model-preflight calls can currently escape task-envelope accounting.
+2. Implement reviewed-plan SHA-256 recording and `finish` rejection for missing, blocking, or stale-hash recertification. Do not change Archive Contract event types or terminal authority.
+3. Pair configured task-envelope reserve/settle across existing dispatch paths. Preserve unconfigured A8 behavior and all four existing tier values.
+4. Run `python -m unittest tests.test_loop_a_coverage tests.test_budget_gate tests.test_continue_extension tests.test_converge_loop tests.test_ocsr_spawn_adapter -v` to green.
+
+### Phase 5. Correct Sync End to End
+
+1. Add failing inode/refusal/force tests before changing `agent_links.py`.
+2. Implement copy default and equal-content hardlink breakage; preserve safe non-force refusal.
+3. Update all four hook assets, inline hook guidance, `check_all.py`, templates, checklist, and README to defer to the declared exact mode.
+4. Run `python -m unittest tests.test_agent_links tests.test_skill_guidance -v`.
+
+### Phase 6. Close Audit and Profile Templates
+
+1. Add Git-free synthetic audit tests for root README, existing scripts README, active/completed plans, canonical/legacy status, and both birth-record locations.
+2. Extend `audit.py` with one deduplicated discovery path and directory-aware status checks.
+3. Update the exact profile-bearing templates/references in the matrix; do not add a renderer.
+4. Build four canonical fixture trees in tests and assert only their expected files/links/instructions are present. The fixtures test installed-file contracts, not Agent behavior.
+5. Add no-Git `maintain.py` tests that place a failing sentinel `git` executable on `PATH`; any invocation fails the test.
+6. Run `python -m unittest tests.test_audit tests.test_maintain tests.test_skill_guidance -v`.
+
+### Phase 7. Preserve Bespoke-Controller Deletion and Run Behavior Eval
+
+1. Preserve the already implemented deletion of `scripts/converge_orchestrator.py`; never recreate it. Confirm static tests cover its absence and the domain-role replacement.
+2. Update eval baseline and presentation.
+3. Run one advisory fresh-Agent evaluation for Small + no-Git and one for Medium + Git. Record prompts, selected profile, generated path list, commands actually invoked, and evaluator result. Do not treat this evidence as a deterministic gate.
+
+### Phase 8. Repository Verification
+
+On Windows first set `TEMP` and `TMP` to an existing long-form path and record it. Then run:
+
+```text
+converge-skill: python -W always::ResourceWarning -m unittest discover -s tests -p "test_*.py" -v
+converge-skill: python -m py_compile scripts/budget_gate.py scripts/orchest.py scripts/converge_loop.py scripts/ocsr_spawn_adapter.py scripts/distill_antipatterns.py
+init-agent-docs: python -W always::ResourceWarning -m unittest discover -s tests -p "test_*.py" -v
+init-agent-docs: python -m py_compile assets/scripts/agent_links.py assets/scripts/audit.py assets/scripts/maintain.py assets/scripts/check_all.py
+both repositories: git diff --check; git status --short
+```
+
+Deterministic repository scans must use test helpers that exclude `.git/`, `.converge/`, historical `docs/CHANGELOG.md`, archived plans, and the assertion source itself. They must fail on current authoritative/runtime files containing:
+
+- stock `3/1/1`, cap `21/23`, or default ultraverge blind `2` claims outside the explicit v2 compatibility table and the named negative regression fixture;
+- hard-coded Continue limits in guidance instead of effective-config pointers, while allowing `8/3/3` in the compiled defaults, calibration report, and historical evidence sections;
+- loop-driver language equating Executor retry with Reviewer Continue;
+- governance default/threshold/stop-condition changes lacking archaeology, calibration report, original user-message reference, or material-revision recertification;
+- model-dispatch paths that omit configured task-envelope accounting, including `consumes=none`, Continue, landing, final audit, and model preflight;
+- the stale controller dependency/path outside the deletion test fixture;
+- automatic `git init`, assumed `origin/main`, bare sync-repair remediation, or generated links to `assets/references/`;
+- Small/no-Git canonical fixture references to Git, plans, memory, overview, hooks, or worktrees.
+
+## Acceptance Criteria
+
+### Controller and Methods
+
+- Converge is the sole top-level controller for this OpenCode workflow and whenever selected, without becoming a generated-project dependency.
+- Coordinator/Owner/Reviewer guidance is domain handoff material and has no budget, global mode, gate-waiver, terminal, or autonomous repair-loop authority.
+- Every artifact-modifying Executor supplies fresh completion evidence before handoff; no-write and non-authoritative contract-proposal exceptions are explicit.
+- Red-step applicability follows changed behavior, not file category.
+- Independent Reviewer verification remains mandatory after Executor repair.
+
+### Budget and Loop Semantics
+
+- Empty v3 standard initialization yields outer `8`, blind `3`, Continue `3`, cap `63`.
+- Empty v3 ultraverge initialization yields outer `8`, blind `3`, Continue `3`, at least three initial reviewers, and cap `63`; no stock path writes a lower blind overlay.
+- Active-only and spec-only valid overrides work; equal values are idempotent; conflicts and malformed values fail closed before reserve.
+- `max_inner_loops=3` allows exactly three same-instance Continues in the manual `orchest.py` path and never controls fresh Executor retries.
+- `driver_config.max_executor_repair_attempts=3` allows three consecutive fresh Executor attempts and never claims Continue.
+- Every driver repair reaches a fresh Reviewer before phase completion.
+- Missing/v1, existing v2, and new v3 active states behave according to the version table without resume-time byte changes; valid extensions and v1/v2 loop specs retain their defined semantics.
+
+### Evidence, Recertification, and Cost
+
+- The inline `3/1/1` regression fixture is mechanically rejected as `BLOCK:empirical_conflict` when the calibration report contains productive higher usage and there is no newer counterevidence or recorded user tradeoff decision.
+- A Git-backed governance plan changing a default/threshold/stop condition/role permission/core mechanism cannot pass preflight without `git log -S`, `git blame`, associated retrospective references, original user-message reference, and calibration report hash. A no-Git fixture passes the archaeology-shape check only when it explicitly declares Git unavailable and cites CHANGELOG/existing records.
+- Reviewer output supports `empirical_conflict` and `user_decision_required`; verified empirical conflict and unauthorized core product tradeoff are blocking, not suggestions.
+- A material plan with only one zero-blocking fresh outer Reviewer cannot finish. A zero-blocking blank-slate review of the exact final plan hash is required; any subsequent material edit invalidates it. Design review cannot satisfy the gate.
+- Ordinary non-material small changes retain the existing one-fresh-Reviewer termination path and incur no mandatory extra recertification.
+- Every new retrospective calibration sample is mechanically parseable. The report distinguishes verified, unverifiable legacy, and malformed samples, and never fabricates missing counts or auto-selects defaults.
+- With a configured task envelope, every model invocation is counted exactly once, including former `consumes=none`, Continue, post-revision, landing, final audit, and model-preflight calls. Pre-execution cancellation does not consume a completed-call slot; unconfigured behavior and existing tier ceilings remain unchanged.
+
+### `init-agent-docs`
+
+- Static contracts define all four profile outputs exactly and contain no contradictory unconditional Git/plan/overview instructions.
+- Synthetic Small + no-Git fixtures contain no `.git`, plans, memory, overview, hooks, worktrees, dead links, or Git invocation; Medium/Large no-Git maintenance reaches no Git subprocess.
+- Existing Git projects use configured upstreams; no path assumes `origin/main`; no non-Git target runs `git init` without explicit user choice.
+- Default copy repair produces independent files even from an intact hardlink group; explicit hardlink mode preserves one inode group; non-force divergence refuses; force copy overwrites reviewed targets.
+- Hook and completion-check remediation follows the target's declared sync mode and cannot silently convert explicit hardlink projects.
+- Audit covers root README, existing scripts README, active/completed plans, canonical/legacy statuses, and both birth-record locations.
+- No generated target links to skill-internal `assets/references/...`.
+- Templates write only canonical plan status values.
+- Fresh-Agent profile evaluation is recorded separately and is not used to claim deterministic proof.
+- Both full suites, compile checks, and `git diff --check` pass under the stated Windows path precondition.
+
+## Compatibility and Migration
+
+- Existing active Converge directories with explicit valid config retain it. Missing/v1 states continue to resolve `8/3/3`; existing v2 states continue to resolve their experimental `3/1/1` table and explicit ultraverge blind `2` without byte rewrite. New states use v3 `8/3/3` and never receive the overlay.
+- There is no implicit active-state migration. A behavior-preserving v1/v2 -> v3 migration materializes old effective values as explicit config; adopting v3 values mid-run requires a recorded user decision. Existing extensions, FSM/ledger history, and task-envelope settings survive either reviewed path.
+- Existing budget extensions remain unchanged. Task-envelope pairing applies only to new invocations after upgrade; old ledger entries are not reinterpreted or backfilled.
+- Existing v1 loop specs follow the documented in-memory retry migration and warning. Authors migrate to v2 by moving fresh-Executor retry intent to `driver_config.max_executor_repair_attempts` and configuring true Continue separately; the separated driver default is `3`.
+- Existing `init-agent-docs` targets are not rewritten automatically. New profile rules apply only during intentional initialization/migration.
+- Existing hardlink targets retain explicit `--mode hardlink` repair/check commands. Copy becomes the default only for newly selected/default copy contracts.
+- Legacy plan statuses remain read-compatible; all new writes use `in_progress`, `done`, or `cancelled`.
+- No-Git support is additive. Git projects retain hooks/worktrees when selected; no-Git projects use file-based handoff and history.
+
+## Landing Sequence
+
+1. Assemble and reference the bootstrap calibration evidence, record the original user message, complete full convergence, complete final-hash blank-slate recertification, and then run the mandatory advisory design review of this plan. Generate the deterministic calibration report and rerun the implemented preflight in Phase 2 before Phase 3.
+2. Obtain the required human confirmation before implementing protected governance changes.
+3. Spawn a fresh Plan-Execution Executor with this exact matrix; no implementation file outside it may change.
+4. Preserve the existing uncommitted D1/D2/D4-D6 and `init-agent-docs` changes, including deletion of `scripts/converge_orchestrator.py`; apply only the corrective delta in phases, with red/green evidence before each behavior change and completion verification after each artifact-modifying handoff.
+5. Run focused then full deterministic gates, followed by the advisory behavior eval.
+6. Have an independent Reviewer inspect the implementation and exact path list. Resolve findings through Converge.
+7. Do not commit or push unless a later user instruction explicitly authorizes it.
+
+## Ultraverge Review Checklist
+
+1. Is Converge authority scoped to selected orchestration rather than imposed on generated projects?
+2. Are Coordinator/Owner/Reviewer permissions domain handoff only?
+3. Are Continue and fresh Executor retries named, configured, and tested as different events?
+4. Do manual, adapter, and driver paths share one validated v1/v2/v3 initialization contract with `8/3/3` for new v3 states and no ultraverge blind inversion?
+5. Does the plan and Reviewer prompt contain actual Git archaeology (or explicit no-Git substitutes), the original recorded user message, and a hashed calibration report?
+6. Is any conflict with verifiable calibration data blocking unless newer counterevidence or an explicit recorded user tradeoff decision exists?
+7. Does any material revision require a blank-slate review of the exact final plan hash regardless of outer count, with design review remaining advisory?
+8. Are retrospective samples mechanically extractable and is any default change preceded by a calibration report rather than post-hoc rationalization?
+9. Does configured task-envelope accounting cover every model invocation exactly once without changing the existing tier values?
+10. Are standard/ultraverge state versions, overrides, conflicts, malformed values, and migration covered?
+11. Are Small/Medium+ x Git/no-Git outputs mechanically explicit and dead-link-free?
+12. Do all sync remediation paths preserve declared copy/hardlink mode and safe refusal?
+13. Are static, synthetic, and behavior evaluations labeled honestly?
+14. Does every artifact-modifying Executor verify before handoff, with only explicit no-write/proposal exceptions?
+15. Does every file in the matrix close a demonstrated contradiction, with no new controller, registry, runner, or target dependency?

@@ -1,0 +1,13 @@
+## Mode: converge post-revision outer recertification (final, exact-evidence, candidate-3)
+
+You are the first of two required fresh Reviewers for a material governance-plan revision. Repository: `C:\Users\Administrator\Documents\Github\converge-skill`. Artifact: `.converge/active/20260910-process-controller-consolidation/plan.md`.
+
+## Review target (canonical, must be echoed byte-identically in your output)
+
+```json
+{"artifact":{"path":"plan.md","sha256":"c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059","size":38827},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-3]","sha256":"e1fc65989ae1e7f345503289cc4b9e461e2f23bd3cc8032466a8cd33ca983db6"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+Verification duties: recompute plan.md SHA-256/size and the material-r2-candidate-3 block canonical hash; both must match the payload. Read the full plan (note D11 is new), attempts.md, current uncommitted diff, CONSTITUTION.md, SKILL.md, scripts/archive_contract/model.py (pairing table at validate_ledger), scripts/orchest.py (GATE_TO_RECOVER at line ~100 and its unpack at finish step 3), refs/state-schema.md, and relevant tests. Verify: D11's cancelled(pre_execution)/failed pairing clarification is narrow, honest, and sufficient to archive this object; the GATE_TO_RECOVER repair is a real bug fix with regression coverage; no date/ruling patch comments are prescribed for code; all prior D7-D10 properties still hold; file matrix and tests cover the new delta.
+
+Write your complete YAML review to `.converge/active/20260910-process-controller-consolidation/round-5.md`. Required: an echoed `review_target` JSON block (as a standalone ```json fence) byte-identical to the payload above, `reviewed_plan_sha256`, `verdict` (可执行|阻断需修复|需重新设计), `blocking_issues`, `suggestion_issues`. 可执行 requires zero blocking issues. Do not modify plan.md or any other file besides round-5.md.

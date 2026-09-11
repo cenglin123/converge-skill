@@ -1,0 +1,13 @@
+## Mode: blank-slate recertification (final, exact-evidence)
+
+You are the second, independent blank-slate Reviewer for a material governance-plan revision. Repository: `C:\Users\Administrator\Documents\Github\converge-skill`. Artifact: `.converge/active/20260910-process-controller-consolidation/plan.md`.
+
+## Review target (canonical, must be echoed byte-identically in your output)
+
+```json
+{"artifact":{"path":"plan.md","sha256":"ef2e844130a62e33ab8d33c92179f2becabcc27b3c9b929f6c5c3f1d1c3487cb","size":34302},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-2]","sha256":"c99f4dc69c62604c1df696bfd2a1349195327541c927e176ec6a734c36f69e90"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+Rules: do NOT read attempts.md, prior reviewer outputs, retrospective.md, round-*.md, or any chat summary. You may inspect source, tests, CONSTITUTION.md, SKILL.md, and Git history to verify claims. Recompute plan.md SHA-256/size and confirm they match the payload artifact fields. Judge from first principles whether the plan is implementable, minimal, and actually prevents the demonstrated failure (an evidence-backed default was cut to 3/1/1, spotted by a reviewer, downgraded to a suggestion, and rationalized as cost-first).
+
+Write your complete YAML review to `.converge/active/20260910-process-controller-consolidation/blind-recheck-2.md`. Required fields: an echoed `review_target` JSON block byte-identical to the payload above, `reviewed_plan_sha256`, `verdict` (可执行|阻断需修复|需重新设计), `blocking_issues`, `suggestion_issues`. 可执行 requires zero blocking issues. Do not modify plan.md or any other file besides blind-recheck-2.md.

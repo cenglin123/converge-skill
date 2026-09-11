@@ -1,0 +1,74 @@
+{
+  "config": {
+    "max_outer_loops": 3,
+    "max_blind_rechecks": 2,
+    "max_inner_loops": 1
+  },
+  "extensions": [
+    {
+      "extension_id": "ext-r2-outer-4",
+      "ts": "2026-09-11T00:55:51Z",
+      "scope": "outer",
+      "triggering_block_event_id": "3cf985e1b6fe",
+      "granted_at_usage": 3,
+      "prior_ceiling": 3,
+      "new_ceiling": 4,
+      "supersedes": null,
+      "user_quote": "授权扩展完成双审",
+      "user_message_event_id": "29c90690-7bd7-47f1-98a8-f7c727f86216",
+      "round_stamp": "r2-final-recertification"
+    },
+    {
+      "extension_id": "ext-r2-blind-3",
+      "ts": "2026-09-11T00:55:51Z",
+      "scope": "blind",
+      "triggering_block_event_id": "9ad44bad2780",
+      "granted_at_usage": 2,
+      "prior_ceiling": 2,
+      "new_ceiling": 3,
+      "supersedes": null,
+      "user_quote": "授权扩展完成双审",
+      "user_message_event_id": "29c90690-7bd7-47f1-98a8-f7c727f86216",
+      "round_stamp": "r2-final-recertification"
+    },
+    {
+      "extension_id": "ext-r2-outer-5",
+      "ts": "2026-09-11T01:38:54Z",
+      "scope": "outer",
+      "triggering_block_event_id": "9a855dfa78cb",
+      "granted_at_usage": 4,
+      "prior_ceiling": 4,
+      "new_ceiling": 5,
+      "supersedes": "ext-r2-outer-4",
+      "user_quote": "走正常流程确保没有问题更好（用户选择含重跑双审的路径）",
+      "user_message_event_id": "d2232c8d-76f9-4cd0-8164-fdcd45411d65",
+      "round_stamp": "r2-final-recertification-2"
+    },
+    {
+      "extension_id": "ext-r2-blind-4",
+      "ts": "2026-09-11T01:38:54Z",
+      "scope": "blind",
+      "triggering_block_event_id": "d4edc182b21e",
+      "granted_at_usage": 3,
+      "prior_ceiling": 3,
+      "new_ceiling": 4,
+      "supersedes": "ext-r2-blind-3",
+      "user_quote": "走正常流程确保没有问题更好（用户选择含重跑双审的路径）",
+      "user_message_event_id": "d2232c8d-76f9-4cd0-8164-fdcd45411d65",
+      "round_stamp": "r2-final-recertification-2"
+    }
+  ],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {
+      "2": [
+        "architectural",
+        "structural"
+      ],
+      "3": [
+        "structural",
+        "implementation"
+      ]
+    }
+  }
+}

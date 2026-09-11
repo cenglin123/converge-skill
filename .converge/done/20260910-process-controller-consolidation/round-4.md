@@ -1,0 +1,108 @@
+---
+round: 5
+reviewer_backend: kimi-for-coding
+reviewer_role: outer-reviewer
+invocation_id: 59e4c977-2a95-4a78-904d-4c2a383a2593
+started_event_sequence: 50
+generated_at: 2026-09-11T00:00:00+00:00
+verdict: 可执行
+reviewer_instance_id: ses_f71e036e1ffelySY5Z2aQSFBL0
+---
+# Round 5 · Post-Revision Outer Recertification (fresh, exact-evidence, candidate-3)
+
+Reviewer: fresh outer Reviewer（`prompt-final2-outer.md`，`begin-invocation --evidence-mode exact`，sequence 50，prompt sha256 `7450d6852104fefafbaea70ca969aada07d33c9667a766cd4320365ebf786a59` 与落盘文件逐字节一致；reservation `4bd2541195c7`）。
+
+## Review Target（逐字节回显）
+
+```json
+{"artifact":{"path":"plan.md","sha256":"c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059","size":38827},"material_revision":{"locator":"attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-3]","sha256":"e1fc65989ae1e7f345503289cc4b9e461e2f23bd3cc8032466a8cd33ca983db6"},"quality_goal_event_id":"bdd405f3-2b03-40eb-9db2-09a32afacae2","revision_id":"r2","schema":"converge.review-target/v1","target_id":"r2-plan"}
+```
+
+## Integrity Verification（重算证据）
+
+- `plan.md`：重算 SHA-256 = `c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059`，size = 38827 字节，与 payload 一致 ✓
+- `attempts.md::json-fence[schema=converge.material-revision/v1,id=material-r2-candidate-3]`：attempts.md 含 3 个 material-revision/v1 fence，按 schema+id 精确选择唯一命中 candidate-3（首个无 `id`，candidate-2 id 不同）；按 canonical 规则（sorted keys、compact separators、UTF-8、单尾随 LF）重算 SHA-256 = `e1fc65989ae1e7f345503289cc4b9e461e2f23bd3cc8032466a8cd33ca983db6`，与 payload 一致 ✓
+- payload 本身符合 D8 canonical 形态：单行、键序字典序、紧凑分隔符 ✓；outer/blind 两份 prompt（`prompt-final2-outer.md` / `prompt-final2-blind.md`）的 payload 行 `cmp` 逐字节相同 ✓
+- exact 证据链已就位：sequence 50/51（outer round 5 / blind round 4）均 `prompt_evidence.evidence_mode=exact`，prompt sha256 与两个落盘 prompt 文件一致；ledger 存在匹配 reservation `4bd2541195c7` / `5e56487eb781`（目标角色/轮次与 started 事件一致）✓
+- 附带核验：plan.md 内嵌 `bootstrap-calibration-r2` report 的 canonical hash = `c13d39574369e3df70c038d51dfa852f26a1a72174b58eee458c75c275fade8d`，与 `converge.governance-change/v1` preflight 块声明一致 ✓
+- material 块的 `candidate_plan.sha256/size` 与 plan.md 实际字节一致，`supersedes_candidate_plan_sha256` 指向 candidate-2（`ef2e8441…3487cb`），`triggering_reviewer_invocation_ids` 为空而改由 `triggering_user_message_event_ids`（`65c07569…` / `d2232c8d…`，均存在于 evidence/events sequence 46/47）承载——与本次触发来源（归档机械拦截 + 用户裁决史）如实对应 ✓
+
+## D11 核验
+
+### 触发证据 — 属实
+
+- `gate-ledger.jsonl`：`b049d3fdc9f3`（outer round 3）与 `3e93ca1186e5`（blind round 2）均先 `reserved` 后 `cancelled`，cancelled 行携带 `"pre_execution": true` ✓
+- evidence/events：sequence 36/37 为对应 invocation-started（spawn，exact prompt）；sequence 43/44（事件 `7691a91c-e97c-4797-b87e-abc04929cec1` / `d6c2360f-19c4-454e-8660-1054a464875f`）为其 terminal，`terminal_status=failed`、`failure_reason_code=process-interrupted`、`resolution_reason_code=invocation-failed-before-resolution`、`settlement_ref` 正确绑定两条 reservation ✓
+- `scripts/archive_contract/model.py:678`：现行配对表 `{"spawn_succeeded": {"succeeded"}, "spawn_failed": {"failed", "timeout"}, "cancelled": {"cancelled"}}`——cancelled 结算确实只配 cancelled 终态；本对象实际形态（cancelled 结算 + failed 终态）必然触发 `ledger-status-conflict`，且两条流均 append-only，矛盾永久固化。触发证据逐条属实 ✓
+
+### 配对澄清 — 窄、诚实（一处边界见 S1）、充分
+
+- **窄**：仅豁免"cancelled 结算且 `pre_execution=true`"配对 `failed` 终态；非 pre_execution 的 cancelled（缺失或 false）仍只配 cancelled；其余配对规则不变、仍 `ledger-status-conflict` fail-closed。无新事件类型/字段，不改写、不回填任一流 ✓
+- **诚实**：对本对象两条终态（failed/process-interrupted，且 schema 强制其 `resolution_reason_code=invocation-failed-before-resolution`），两侧确实共同断言"模型从未被调用" ✓；对 failed 全集中含 dispatched 失败（backend-error）的过度豁免见建议 S1
+- **充分**：澄清后本对象两条冲突配对通过；孤儿 reservation `0579d0730291`（cancelled + pre_execution、无 invocation）走既有 `--declare-orphan-reservation` 披露路径（`validate_ledger` 的 `acknowledged_orphan_reservations` 与 `find_orphan_reservations` 均已实现且语义匹配），验收标准"archive 通过且 check valid"可达 ✓
+- **schema 措辞同步**：`refs/state-schema.md` 当前为 clean baseline（git 未改），规范句按矩阵落一处、不写日期/裁决者，与"model.py 是可执行单源、schema 文档解释同一字段"的既有分工一致 ✓
+
+### 恢复路径修复 — 真 bug、有回归覆盖
+
+- `scripts/orchest.py:100`：`GATE_TO_RECOVER = {"failed": "failed", "cancelled": "cancelled"}`（裸字符串值）；`:1067`：`rstatus, rreason = GATE_TO_RECOVER.get(st["status"], ("failed", "backend-error"))` 按二元组解包。
+- 实际复核 `status` 来源：`_ledger_status` 的 status 取 settle 事件名（`TERMINAL_SETTLE_EVENTS = ("spawn_succeeded", "spawn_failed", "cancelled")`，:116），故 `cancelled` 命中裸字符串 `"cancelled"` → 9 字符解包 → `ValueError: too many values to unpack`，bug 属实且与 sequences 36/37 观察一致；`spawn_failed` 落默认元组不炸（键 `"failed"` 永不命中，属既有死键，见 S3）✓
+- 矩阵在 `tests/test_orchest.py`（现存的 clean baseline 文件，非新建）增加干跑 + 真实恢复回归，覆盖 cancelled settle 经 `GATE_TO_RECOVER` 解析为显式 `(status, reason)` 对且无解包失败 ✓
+
+### 流程约束 — 满足
+
+- 无日期/裁决式补丁注释：plan L249 与 Non-Goals 明确"Implementation carries no adjudication/date patch comments; history is carried by git and the archive" ✓
+- 用户裁决史如实：事件 `65c07569`（直接裁决，补丁式实现已撤回回退）被 `d2232c8d`（走正常评审流程）取代，两事件不可改地保留（sequence 46/47 均在）✓
+- materiality：改核心 closure-validation 语义，按 D8 疑义 fail-closed 判 material、重跑双 fresh 同字节复核——与本次候选-3 双 Spawn（sequence 50/51）的实际执行一致 ✓
+
+## D7–D10 保持性核验
+
+- **D7**：calibration sample fail-closed、productivity 三态与 evidence_refs 绑定、legacy unavailable 不进定量、corpus digest + high-water freshness、数值门仅限可比数值默认/阈值/停止条件——文本完整保留；内嵌 bootstrap report hash 重算一致（见上）✓
+- **D8**：material-revision 记录后置、review-target/v1 canonical 单行字节规则、双 fresh Spawn 同字节、四 payload 字节相等外键链、字节变更双失效、reopen superseding decision——文本完整保留，且被本次执行实例化（两 prompt payload 逐字节相同、exact capture 先于 Spawn）✓
+- **D9**：与代码事实一致——HEAD 的 `budget_gate.py` DEFAULTS 为 `8/3/3` 且无 `defaults_version`（未发布属实）；当前 dirty 树新状态默认 `3/1/1` + ultraverge blind 叠加 `2`（:63-66/:364/:397），LEGACY_DEFAULTS 保持 `8/3/3`；本对象 `_budget-state.json` 显式 `3/2/1` 权威不改写；无 v3、无迁移命令 ✓
+- **D10**：call_id、Spawn 原子 companion 对、Continue 单 reservation 例外、幂等 settle/cancel、崩溃恢复事实驱动、coverage 三态与 `model_invocations` 门控、legacy 无 call_id 不回填——文本完整保留；本对象 sequence 34/35（executor Continue，无 reservation、正常 succeeded 收口）即为 Continue 例外的实例化证据 ✓
+
+## 文件矩阵与测试覆盖（新 delta）
+
+- `model.py` 行由 "No change" 改为窄澄清，限定 `validate_ledger` 一处；`capture.py` 明确不动（其 dirty 8 行 EventLock fail-closed 修复经 git diff 逐行复核确为 prior baseline 归属，与矩阵声明一致）✓
+- `refs/state-schema.md` 行由 Clean baseline 改为一句规范句；`scripts/orchest.py` 行追加 GATE_TO_RECOVER 修复；`tests/test_orchest.py`（clean baseline 现存文件）与 `tests/test_archive_convergence.py`（两个方向回归：放行 pre_execution cancelled+failed / 拒绝非 pre_execution cancelled+failed）覆盖全部新 delta ✓
+- 安全阀保留："若 exact prompt/output 无法构成指定外键链则停回报修，禁止静默改 model/capture/archive_convergence" ✓
+
+## Verdict
+
+```yaml
+reviewed_plan_sha256: c56e656d4d1486f49a95e74b73b6932219c97ad978834bff36d96d8b12dc6059
+verdict: 可执行
+blocking_issues: []
+suggestion_issues:
+  - id: S1
+    severity: suggestion
+    topic: D11 配对豁免的 failed 全集边界
+    detail: >-
+      D11 允许 cancelled(pre_execution=true) 配对任意 failed 终态，但论证"两侧共同断言模型从未被调用"只对
+      pre-dispatch 失败（process-interrupted 等）成立；failed/backend-error 按 D10 语义是 dispatch 后失败，
+      与 pre_execution 断言方向相反。当前形态下，一对互相矛盾的人工作账（pre_execution 取消 +
+      backend-error 恢复终态）会被静默接受。建议实现时把豁免收窄到 failure_reason_code=process-interrupted
+      （或 resolution_reason_code=invocation-failed-before-resolution）的 failed 终态——对本对象充分性不变，
+      两行配对代码即可表达。不判阻断：该矛盾对需要双重矛盾人工作账才可达，对本对象充分性与其余配对规则无影响，
+      且矩阵保留了实现期发现语义不足时停回报修的安全阀。
+  - id: S2
+    severity: suggestion
+    topic: 仓库根目录 NUL 垃圾文件
+    detail: >-
+      converge-skill 仓库根目录存在未跟踪文件 `NUL`（约 99 MB，mtime 2026-09-11 09:07），不在文件矩阵内。
+      不属于 r2 delta，但 Phase 7 的"无矩阵外文件获得 r2 delta"与 dirty-baseline 归属扫描前应删除或排除，
+      避免归属证据被污染。
+  - id: S3
+    severity: suggestion
+    topic: GATE_TO_RECOVER 既有死键
+    detail: >-
+      现映射键 "failed" 永不命中（status 取 settle 事件名 "spawn_failed"），实际只有 "cancelled" 键会被命中且必炸。
+      修复为显式 (status, reason) 元组时应以 settle 事件名为键（spawn_failed/cancelled），
+      由矩阵已规定的 test_orchest.py 干跑+真实恢复回归兜底；plan 未指定键名属实现自由度，不构成阻断。
+```
+
+## 结论
+
+候选-3 的字节、material 块、calibration 子块三重 hash 全部重算一致；D11 触发证据逐条属实，澄清窄化且对本对象充分，`GATE_TO_RECOVER` 为实证 bug 并附回归测试；未给代码规定任何日期/裁决式补丁注释；D7–D10 全部保持；文件矩阵与测试完整覆盖新 delta。零阻断，verdict **可执行**。
+terminal_decision_event_id: 777a0e2d-859f-462d-80a5-7d135d5f04b5
+terminal_decision_value: 可执行
