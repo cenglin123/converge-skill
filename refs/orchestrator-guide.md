@@ -14,13 +14,16 @@
 
 bootstrap 只在 staging 副本导入 legacy raw evidence。绑定必须由 ledger reservation、state instance registry、round log 或显式 mapping 唯一确定；无法唯一绑定即停止，不按文件名猜 role/model。旧 done 目录由 scan 报 legacy，只读且不原地升级。
 
-## Material revision 与同字节两-authority 审查
+## Material revision 与分级复核审查
 
 Material revision 是 post-review 事实（非作者选择的 frontmatter）。Orchestrator 在完成初始审查证据后、下一个 Reviewer spawn 前，在 append-only `attempts.md` 中记录 `converge.material-revision/v1` 机器块。
 
 ### 触发条件
 
 Material triggers 仅限：概念/架构阻断导致的修订、empirical conflict、或核心 numeric default/threshold/stopping condition 变更。纯结构性/实现修复非 material（除非同时变更上述控制项）。模糊时 fail closed。
+每次 material 修订在块内声明 `change_class` 与 `changed_sections`：`decisional` = 触及数值默认/阈值/停止条件、角色与权限、verdict 语义、fail-closed 行为、File Matrix、Acceptance 或 D 决策本体；`non-decisional` = 行号/符号引用、非规范性措辞、附录、与判定无关的文档同步。凡触及第三部清单文件的规范性句子一律 decisional。归类由作者声明、复核者挑战；争议 = decisional。
+**12 项受控章节词表**（`changed_sections`/`decisional_anchors` 共用）：`D-decisions`、`file-matrix`、`acceptance`、`triggers`、`verdict-semantics`、`roles-permissions`、`fail-closed`、`numeric-defaults`、`doc-refs`、`wording`、`appendix`、`tests-non-assertive`。`decisional_anchors` = revision 全量判定承载章节快照；门对 non-decisional 块 `changed_sections` 与所有先前 decisional 块 anchors 的**并集**求交，非空即 fail closed；缺省 anchors 的旧 decisional 块（及完全旧块）出现于当前段时，**仅对当前段末块维持 full-pair（行为等价于 last-supersedes-all 现状；D1 选 A）**。
+（D5 收口）`decisional` 定义亦含 `triggers`（material trigger 变更）——trigger 变更与数值/权限/verdict/fail-closed/File Matrix/Acceptance/D 决策本体同属判定承载，任一被 `changed_sections` 命中且落入先前 decisional anchors 并集即 fail closed。
 
 ### 同字节两-Spawn 流程
 
@@ -30,6 +33,8 @@ Material triggers 仅限：概念/架构阻断导致的修订、empirical confli
 4. `finish` 解析最新 material-block locator，重算 canonical hash，选取两个成功的 invocation terminals（started events 为 Spawn 且角色正确）。对每个要求 exact prompt/output paths，解析匹配的 target block，检查四个 payloads byte-equal。
 5. `finish` 最后重算 on-disk `plan.md` SHA-256/size 并与 common target artifact 比较。
 6. 任何后续 `plan.md` 字节变化使两份审查同时失效。若任一 Reviewer 阻断且 plan 变更，两角色重新审查新 hash。
+7. **non-decisional 增量例外**：`change_class=non-decisional` 不重跑双权威，改由单个 fresh `outer-reviewer`（exact 证据）作 delta 复核：payload 增 `delta{base_plan_sha256,current_plan_sha256,change_class}`，实核 diff 未触及 decisional 内容且前轮 blocking 已闭合，verdict 必须 `可执行`。材料门回溯至最近 `decisional` 块要求全量对，其后每块要求 delta 候选，且 `changed_sections` 与所有先前 decisional 块 anchors 并集无交集；任何一环缺失 fail closed。链段首块非 decisional 直接 fail closed；缺省 anchors 的旧 decisional 块（及完全旧块）出现于当前段时，**仅对当前段末块维持全量对（行为等价于 last-supersedes-all 现状；D1 选 A）**。
+   （D4 最小输入契约）delta reviewer 的 prompt **必须内嵌链上前一有效块全文与当前 `plan.md` 全文**（或等价的 byte 级引用）；机械门不校验该内嵌文本与其 hash 的绑定（无 base 快照仓，残余见 §10 R-2），但输入不得缺失——缺前块或当前文本即 fail closed。
 
 ### Bootstrap locator 例外
 

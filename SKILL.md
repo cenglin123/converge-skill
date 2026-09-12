@@ -459,7 +459,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 >
 > **治理 preflight 机器输入**：`converge.governance-change/v1` 是 Orchestrator/preflight 的唯一机器输入（prose/表格不进入机器解析），详见 `refs/state-schema.md`。
 >
-> **Material revision 两-authority 同字节规则**：material revision 后须两个不同 fresh Spawn（outer + blank-slate）审查相同最终 plan 字节；任何字节变化使两份审查同时失效。详见 `refs/orchestrator-guide.md` §Material revision。
+> **Material revision 分级复核规则**：`decisional` 修订须两个不同 fresh Spawn（outer + blank-slate）审查相同最终 plan 字节；任何字节变化使两份失效。`non-decisional` 修订走单 fresh delta reviewer 增量复核（delta payload + 块链 hash + 并集交集 fail-safe），任何一环缺失 fail closed。详见 `refs/orchestrator-guide.md` §Material revision。
 >
 > **Calibration sample/report**：`converge.calibration-sample/v1`（retrospective 唯一样本）和 `converge.calibration-report/v1`（`distill_antipatterns.py --calibration` 输出）的定位器语法与验证规则见 `refs/state-schema.md`。
 >

@@ -217,6 +217,42 @@ class OpEnvelopeToolingHardeningTest(unittest.TestCase):
         self.assertIsNotNone(material_src)
         self.assertIn('"metadata-only"', material_src)
 
+    def test_material_gate_constants_single_source(self):
+        """O6/A-5/F6：材料门常量与 ``_material_cur`` 单源在 orchest.py，且 12 项受控
+        词表与 refs/orchestrator-guide.md 的枚举 token 集合机械等值（防双写漂移）。"""
+        orchest = self._orchest()
+        self.assertIn('MATERIAL_CHANGE_CLASSES = frozenset({"decisional", "non-decisional"})',
+                      orchest)
+        self.assertIn("MATERIAL_SECTION_VOCAB = frozenset({", orchest)
+        self.assertIn("def _material_cur(", orchest)
+
+        tree = ast.parse(orchest)
+        vocab: set[str] | None = None
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "MATERIAL_SECTION_VOCAB":
+                        value_node = node.value
+                        if (isinstance(value_node, ast.Call)
+                                and isinstance(value_node.func, ast.Name)
+                                and value_node.func.id == "frozenset"
+                                and value_node.args):
+                            value_node = value_node.args[0]
+                        vocab = set(ast.literal_eval(value_node))
+        self.assertIsNotNone(vocab, "MATERIAL_SECTION_VOCAB assignment not found")
+        assert vocab is not None
+        self.assertEqual(len(vocab), 12, f"expected 12-item vocab, got {sorted(vocab)}")
+
+        guide = read(ROOT, "refs/orchestrator-guide.md")
+        marker = "**12 项受控章节词表**"
+        self.assertIn(marker, guide)
+        after = guide.split(marker, 1)[1]
+        after = after.split("：", 1)[1] if "：" in after else after
+        body = after.split("。", 1)[0]
+        doc_tokens = set(re.findall(r"`([^`]+)`", body))
+        self.assertEqual(doc_tokens, vocab,
+                         f"guide tokens {sorted(doc_tokens)} != orchest {sorted(vocab)}")
+
     def test_reserve_dry_run_display_is_parameter_linked(self):
         orchest = self._orchest()
         self.assertNotIn("evidence-mode=metadata-only", orchest)

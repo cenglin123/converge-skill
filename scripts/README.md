@@ -14,7 +14,7 @@
 python scripts/orchest.py reserve-round --active-dir <dir> --role outer-reviewer \
     --round 1 --phase review --attempt 1 --prompt-file <已落盘的自足 prompt> \
     --requested-provider <p> --requested-model <m> \
-    [--evidence-mode exact]   # material-revision 两-authority 审查时必传 exact
+    [--evidence-mode exact]   # material-revision（任一级别：decisional 双权威 / non-decisional delta）审查时必传 exact
 # 输出 reservation_id + invocation_id（LLM 全程不经手 invocation_id 的转录）
 # begin 失败 → reservation 保持 open，修复后同 rid 重试：
 python scripts/orchest.py reserve-round ... --resume-reservation <rid>
@@ -148,7 +148,7 @@ ledger/budget 双计数风险；同一 active 目录同一时刻只允许一条�
 - `ocsr_spawn_adapter.py dispatch`：`--evidence-mode` 透传至 begin/complete，CLI 默认 `metadata-only`。
 - `converge_loop.py`：loop-spec 顶层 `evidence_mode`（默认 `metadata-only`，取值校验 `archive_contract.model.EVIDENCE_MODES`）由 `Driver.reserve` / `Driver.register` 透传；不使用 `meta` 通道承载。
 
-`--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision 两-authority 同字节审查。material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集。
+`--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision **分级复核**。decisional material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集；non-decisional 场景下单 fresh delta reviewer 的 prompt/output 亦须 `exact` 模式采集。
 
 ### `--manual-fallback` / `--orchest-managed`（budget_gate reserve / settle 来源声明门，D3/O7）
 

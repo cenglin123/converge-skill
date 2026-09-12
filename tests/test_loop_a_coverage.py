@@ -1430,5 +1430,449 @@ class TestMaterialGateQualifyByCurrentBlock(TestMaterialClosureGate):
         self.assertTrue((self.done_root / self.SLUG).is_dir())
 
 
+# ── Phase 4: O6 material 增量复核（non-decisional delta 路径）──────────────
+# 新测试仅追加文件末尾；既有 4 个 TestMaterial* 类（17 条）测试体零删改（A-12）。
+
+from orchest import _validate_material_gate  # noqa: E402
+
+
+class TestMaterialDeltaPath(TestMaterialClosureGate):
+    """O6: decisional 全量对 + non-decisional 单 fresh delta 复核。
+
+    覆盖 §7 A-5..A-11 与 §11 对抗清单 A-11-1..A-11-13（A-11-14 为语义残余，
+    机械不可判，不计入本类断言——D6 选 A）。
+    """
+
+    D_REV = "r2"
+    D_ID = "material-r2-decisional"
+    N_ID = "material-r2-non-decisional"
+
+    # ---- 低层构造器 --------------------------------------------------------
+
+    def _write_full_material_block(self, revision_id, material_id, plan_sha256,
+                                   plan_size, trigger_iids, change_class,
+                                   changed_sections, decisional_anchors=None):
+        """追加一个带 change_class 的 material 块，返回 (block, canonical hash)。
+
+        ``decisional_anchors=None`` → 省略该键（legacy 兼容形态）；
+        ``decisional_anchors=()`` → 写入空列表（域门 fail-closed 形态）。
+        """
+        block = {
+            "schema": "converge.material-revision/v1",
+            "id": material_id,
+            "revision_id": revision_id,
+            "trigger_kinds": ["conceptual", "architectural"],
+            "triggering_invocation_ids": list(trigger_iids),
+            "prior_terminal_decision_id": "e4182ce3-fe3e-4683-9533-f36ecab465fd",
+            "candidate_artifact": {"path": "plan.md", "sha256": plan_sha256,
+                                   "size": plan_size},
+            "change_class": change_class,
+            "changed_sections": list(changed_sections),
+        }
+        if decisional_anchors is not None:
+            block["decisional_anchors"] = list(decisional_anchors)
+        raw = _canonical_json_bytes(block)
+        block_hash = _sha256_hex(raw)
+        attempts = self.active / "attempts.md"
+        existing = attempts.read_text(encoding="utf-8") if attempts.is_file() else ""
+        attempts.write_text(existing + f"\n```json\n{raw.decode('utf-8').rstrip()}\n```\n",
+                            encoding="utf-8", newline="\n")
+        return block, block_hash
+
+    def _payload(self, revision_id, material_id, plan_sha256, plan_size,
+                 material_sha256, delta=None, locator_id=None):
+        lid = locator_id if locator_id is not None else material_id
+        p = {
+            "schema": "converge.review-target/v1",
+            "target_id": f"{revision_id}-plan",
+            "revision_id": revision_id,
+            "artifact": {"path": "plan.md", "sha256": plan_sha256, "size": plan_size},
+            "material_revision": {
+                "locator": ("attempts.md::json-fence[schema=converge.material-revision/v1,"
+                            f"id={lid}]"),
+                "sha256": material_sha256,
+            },
+            "quality_goal_event_id": "bdd405f3-2b03-40eb-9db2-09a32afacae2",
+        }
+        if delta is not None:
+            p["delta"] = delta
+        return p
+
+    def _register_review(self, rid, iid, role, payload, verdict="可执行",
+                         output_payload=None, output_transform=None):
+        prompt_content = self._make_prompt_with_target(payload)
+        echo = payload if output_payload is None else output_payload
+        output_content = self._make_output_with_target(echo, verdict=verdict)
+        if output_transform is not None:
+            output_content = output_transform(output_content)
+        blob_dir = self.active / "evidence" / "material" / iid
+        blob_dir.mkdir(parents=True, exist_ok=True)
+        (blob_dir / "prompt.bin").write_bytes(prompt_content)
+        out_file = self.root / f"_output_{iid}.bin"
+        out_file.write_bytes(output_content)
+        rc, out, err = self.register(rid, f"inst-{role}-{iid[:6]}",
+                                     output=str(out_file), evidence_mode="exact")
+        self.assertEqual(rc, 0, f"register {role}: rc={rc} out={out} err={err}")
+
+    def _store_review(self, role, round_no, payload, **kw):
+        rid, iid = self.reserve(role=role, round_no=round_no)
+        self._register_review(rid, iid, role, payload, **kw)
+        return iid
+
+    def _setup_chain(self, *, write_n=True,
+                     d_anchors=("numeric-defaults", "acceptance"),
+                     d_sections=("numeric-defaults", "acceptance"),
+                     n_change_class="non-decisional", n_sections=("wording",),
+                     full_pair_delta=False, fresh_verdict="可执行",
+                     blind_wrong_anchor=False, blind_fresh_set=False,
+                     delta_present=True, delta_base_sha=None,
+                     delta_change_class=None, delta_verdict="可执行",
+                     delta_output_payload=None, delta_output_transform=None,
+                     delta_artifact_sha=None, n_material_sha=None,
+                     delta_locator_id=None):
+        """构造 [D(decisional) → N(non-decisional)] 同段链并注册全部证据。
+
+        所有 reservation 都注册（settle），负例通过改变 payload 内容实现，
+        避免 finish 步骤 2 抢先失败。
+        """
+        base_bytes = "# Base plan\n".encode("utf-8")
+        base_sha, base_size = _sha256_hex(base_bytes), len(base_bytes)
+        disk_sha, disk_size = self._write_plan("# Final plan\n")
+
+        rid_o, iid_o = self.reserve(role="outer-reviewer", round_no=1)
+        rid_b, iid_b = self.reserve(role="blind-reviewer", round_no=1)
+        if delta_present:
+            rid_d, iid_d = self.reserve(role="outer-reviewer", round_no=2)
+        else:
+            rid_d, iid_d = None, ""
+
+        D, D_hash = self._write_full_material_block(
+            self.D_REV, self.D_ID, base_sha, base_size,
+            [i for i in (iid_o, iid_b) if i], "decisional", d_sections,
+            decisional_anchors=(list(d_anchors) if d_anchors is not None else None))
+        N = N_hash = None
+        if write_n:
+            N, N_hash = self._write_full_material_block(
+                self.D_REV, self.N_ID, disk_sha, disk_size,
+                [i for i in (iid_d,) if i], n_change_class, n_sections)
+
+        d_delta = ({"base_plan_sha256": base_sha, "current_plan_sha256": base_sha,
+                    "change_class": "non-decisional"} if full_pair_delta else None)
+        d_payload = self._payload(self.D_REV, self.D_ID, base_sha, base_size,
+                                  D_hash, delta=d_delta)
+
+        n_payload = None
+        if write_n and delta_present:
+            eff_base = delta_base_sha if delta_base_sha is not None else base_sha
+            eff_cc = delta_change_class if delta_change_class is not None else n_change_class
+            n_art = delta_artifact_sha or disk_sha
+            n_mat = N_hash if n_material_sha is None else n_material_sha
+            n_payload = self._payload(
+                self.D_REV, self.N_ID, n_art, disk_size, n_mat,
+                delta={"base_plan_sha256": eff_base,
+                       "current_plan_sha256": disk_sha,
+                       "change_class": eff_cc},
+                locator_id=delta_locator_id)
+
+        self._register_review(rid_o, iid_o, "outer-reviewer", d_payload,
+                              verdict=fresh_verdict)
+        blind_payload = (n_payload if (blind_wrong_anchor and n_payload is not None)
+                         else d_payload)
+        blind_role = "outer-reviewer" if blind_fresh_set else "blind-reviewer"
+        self._register_review(rid_b, iid_b, blind_role, blind_payload)
+        if write_n and delta_present:
+            self._register_review(rid_d, iid_d, "outer-reviewer", n_payload,
+                                  verdict=delta_verdict,
+                                  output_payload=delta_output_payload,
+                                  output_transform=delta_output_transform)
+
+        self.record_verdict(1, "可执行")
+        return {"base_sha": base_sha, "base_size": base_size,
+                "disk_sha": disk_sha, "disk_size": disk_size,
+                "D": D, "D_hash": D_hash, "N": N, "N_hash": N_hash}
+
+    # ---- 正向：delta 路径通过 ---------------------------------------------
+
+    def test_decisional_plus_non_decisional_delta_passes(self):
+        """D 全量对 + N 单 fresh delta → finish 通过。"""
+        self._setup_chain()
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertEqual(rc, 0, f"delta path should pass: stdout={out} stderr={err}")
+        self.assertTrue((self.done_root / self.SLUG).is_dir())
+
+    def test_gate_uses_last_block_segment_not_reopen_state(self):
+        """A-5：链段 = 末块 revision_id 段；``.reopen-state.json`` 声称 r9 不影响门。"""
+        self._setup_chain()
+        (self.active / ".reopen-state.json").write_text(
+            json.dumps({"revision_id": "r9"}), encoding="utf-8")
+        events = _read_events(self.active)
+        # 门必须不因 reopen-state=r9 而改变判定（直接单测门，避开归档对 reopen 的处理）
+        _validate_material_gate(self.active, events)
+
+    # ---- 负向：delta 候选缺失 / base 不匹配 / verdict 不合法 ---------------
+
+    def test_delta_missing_candidate_fails_closed(self):
+        """A-7/A-11：non-decisional 块无 delta reviewer → fail closed。"""
+        self._setup_chain(delta_present=False)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "missing delta candidate must fail closed")
+        self.assertIn("delta", (out + err).lower())
+
+    def test_delta_base_hash_mismatch_fails_closed(self):
+        """A-8/A-11-2：delta.base_plan_sha256 伪造 → fail closed。"""
+        self._setup_chain(delta_base_sha="0" * 64)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "delta base hash mismatch must fail closed")
+        self.assertIn("base", (out + err).lower())
+
+    def test_delta_change_class_mismatch_fails_closed(self):
+        """A-11-5：delta.change_class ≠ 块 change_class → fail closed。"""
+        self._setup_chain(delta_change_class="decisional")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "delta change_class mismatch must fail closed")
+        self.assertIn("change_class", (out + err).lower())
+
+    def test_delta_verdict_blocking_fails_closed(self):
+        """A-9/A-11-1：delta verdict 阻断 → 正向门 fail。"""
+        self._setup_chain(delta_verdict="阻断需修复")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "blocking delta verdict must fail closed")
+        self.assertIn("verdict", (out + err).lower())
+
+    def test_delta_verdict_redesign_fails_closed(self):
+        """A-9/A-11-9：delta verdict = 需重新设计 → fail closed。"""
+        self._setup_chain(delta_verdict="需重新设计")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "non-executable delta verdict must fail closed")
+        self.assertIn("verdict", (out + err).lower())
+
+    def test_delta_verdict_two_literals_fails_closed(self):
+        """D3 选 A：规范 verdict 载体（首个 yaml fence）内含两个 verdict 字面量
+        → 解析契约 fail closed（区域外字面量不计，见 B2 锚定）。"""
+        self._setup_chain(
+            delta_output_transform=lambda b: b.replace(
+                "verdict: 可执行".encode("utf-8"),
+                "verdict: 可执行\nverdict: 可执行".encode("utf-8"), 1))
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "multiple verdict literals must fail closed")
+        combined = (out + err).lower()
+        self.assertTrue("verdict" in combined, combined)
+
+    def test_historical_double_verdict_frontmatter_passes(self):
+        """B2 回归：真实历史 reviewer 输出形态——首块 YAML frontmatter 载
+        ``verdict: 可执行``，正文另含一个 ``verdict: 可执行``（HEAD 门 PASS）。
+        校验前锚定只计数 frontmatter 载体 → 新门同样 PASS（HEAD 行为 = 新门行为）。"""
+        def to_historical(b: bytes) -> bytes:
+            fm = ("---\nround: 5\nreviewer_role: outer-reviewer\n"
+                  "generated_at: 2026-09-11T00:00:00+00:00\n"
+                  "verdict: 可执行\n---\n").encode("utf-8")
+            return fm + b
+
+        self._setup_chain(delta_output_transform=to_historical)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertEqual(
+            rc, 0,
+            f"historical double-verdict output must pass (HEAD == new gate): "
+            f"stdout={out} stderr={err}")
+
+    def test_historical_frontmatter_blocking_elsewhere_executable_fails(self):
+        """B2 反向回归：规范载体（frontmatter）为 ``阻断需修复``，正文别处为
+        ``可执行`` → 仍须 fail closed（锚定以载体为准，不以区域外正向值放行）。"""
+        def to_blocking_fm(b: bytes) -> bytes:
+            fm = ("---\nround: 5\nverdict: 阻断需修复\n---\n").encode("utf-8")
+            return fm + b
+
+        self._setup_chain(delta_output_transform=to_blocking_fm)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertEqual(rc, 30, f"carrier blocking must fail closed: {out}{err}")
+        self.assertIn("verdict-not-executable", out + err)
+
+    def test_delta_payload_output_mismatch_fails_closed(self):
+        """A-11-6：delta prompt 与 reviewer 输出回显不一致 → fail closed。"""
+        other = self._payload("r2", "material-r2-non-decisional",
+                              "0" * 64, 1, "1" * 64)
+        self._setup_chain(delta_output_payload=other)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "delta echo mismatch must fail closed")
+        self.assertIn("payload", (out + err).lower())
+
+    def test_delta_not_anchored_to_target_block_fails_closed(self):
+        """A-11-13：delta payload 不绑定目标块（material hash 伪造）→ fail closed。"""
+        self._setup_chain(n_material_sha="0" * 64)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "mis-anchored delta must fail closed")
+        combined = (out + err).lower()
+        self.assertTrue("delta" in combined or "material" in combined, combined)
+
+    def test_delta_locator_names_wrong_block_fails_closed(self):
+        """A-11-13：locator id 指向其他块 → 三重锚定 fail。"""
+        self._setup_chain(delta_locator_id="material-r2-nonexistent")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "wrong locator id must fail closed")
+
+    # ---- 负向：交集 fail-safe / 域门 / legacy ------------------------------
+
+    def test_delta_touches_decisional_anchor_fails_closed(self):
+        """A-10/A-11-4：changed_sections ∩ 先前 decisional anchors ≠ ∅ → fail。"""
+        self._setup_chain(n_sections=("numeric-defaults",))
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "intersection must fail closed")
+        self.assertIn("anchor", (out + err).lower())
+
+    def test_invalid_change_class_enum_fails_closed(self):
+        """A-11-10：change_class 非法枚举 / 大小写变体 → 域门 fail。"""
+        self._setup_chain(n_change_class="Decisional")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "invalid change_class enum must fail closed")
+        self.assertIn("change-class-enum", (out + err))
+
+    def test_empty_changed_sections_fails_closed(self):
+        """A-11-11：changed_sections = [] → 非空域门 fail。"""
+        self._setup_chain(n_sections=())
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "empty changed_sections must fail closed")
+        self.assertIn("sections-vocab", (out + err))
+
+    def test_out_of_vocab_changed_sections_fails_closed(self):
+        """A-11-11：changed_sections 含词表外值 → 域门 fail。"""
+        self._setup_chain(n_sections=("bogus-section",))
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "out-of-vocab changed_sections must fail closed")
+        self.assertIn("sections-vocab", (out + err))
+
+    def test_empty_decisional_anchors_fails_closed(self):
+        """A-11-11：decisional_anchors 空列表 → anchors 域门 fail。"""
+        self._setup_chain(d_anchors=())
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "empty decisional_anchors must fail closed")
+        self.assertIn("anchors-vocab", (out + err))
+
+    def test_legacy_decisional_missing_anchors_requires_full_pair(self):
+        """A-11-12（R2-NB-1(b)）：旧 decisional 缺 anchors → legacy 自其起 full-pair；
+        仅有 delta 候选 → rc≠0（不硬断言专用码）。"""
+        self._setup_chain(d_anchors=None)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "legacy missing-anchors must require full pair")
+
+    def test_legacy_block_without_change_class_requires_full_pair(self):
+        """A-11-8：完全旧块（无 change_class）按 decisional 要求 full-pair；
+        仅有 delta 候选 → fail closed。"""
+        plan_sha, plan_size = self._write_plan()
+        rid_o, iid_o = self.reserve(role="outer-reviewer", round_no=1)
+        self._write_material_block("r2", plan_sha, plan_size, [iid_o])
+        mat = _find_material_block(self.active, "r2")
+        self.assertIsNotNone(mat)
+        _block, mat_hash = mat
+        payload = self._payload(
+            "r2", "r2-material", plan_sha, plan_size, mat_hash,
+            delta={"base_plan_sha256": "0" * 64,
+                   "current_plan_sha256": plan_sha,
+                   "change_class": "non-decisional"})
+        self._register_review(rid_o, iid_o, "outer-reviewer", payload)
+        self.record_verdict(1, "可执行")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "legacy block must require full pair")
+
+    def test_deleted_non_decisional_block_fails_closed(self):
+        """A-11-3（审计 B1 修复）：构造同段链 ``D → N1 → N2`` 后从 attempts.md
+        移除 ``N1``，令 ``N2.delta.base_plan_sha256 == canon(N1)`` 而链上前块实为
+        ``D`` → base 不匹配计入 skip → 材料门 fail closed
+        ``material-gate:delta-candidate-missing``（rc=30）。所有 reservation 均
+        settle，确保失败点在材料门而非 finish 步骤 2。"""
+        disk_sha, disk_size = self._write_plan("# Final plan\n")
+        base_bytes = "# Base plan\n".encode("utf-8")
+        base_sha, base_size = _sha256_hex(base_bytes), len(base_bytes)
+        n1_bytes = "# Intermediate plan N1\n".encode("utf-8")
+        n1_sha, n1_size = _sha256_hex(n1_bytes), len(n1_bytes)
+
+        rid_o, iid_o = self.reserve(role="outer-reviewer", round_no=1)
+        rid_b, iid_b = self.reserve(role="blind-reviewer", round_no=1)
+        rid_d, iid_d = self.reserve(role="outer-reviewer", round_no=2)
+
+        D, D_hash = self._write_full_material_block(
+            self.D_REV, self.D_ID, base_sha, base_size, [iid_o, iid_b],
+            "decisional", ("numeric-defaults", "acceptance"),
+            decisional_anchors=("numeric-defaults", "acceptance"))
+        N1, _N1_hash = self._write_full_material_block(
+            self.D_REV, "material-r2-non-decisional-1", n1_sha, n1_size,
+            [], "non-decisional", ("wording",))
+        N2, N2_hash = self._write_full_material_block(
+            self.D_REV, self.N_ID, disk_sha, disk_size, [iid_d],
+            "non-decisional", ("wording",))
+
+        # 从 attempts.md 移除 N1 的 fence（模拟链中删除一个 non-decisional 块）
+        attempts = self.active / "attempts.md"
+        n1_raw = _canonical_json_bytes(N1).decode("utf-8").rstrip()
+        fence = f"\n```json\n{n1_raw}\n```\n"
+        text = attempts.read_text(encoding="utf-8")
+        self.assertIn(fence, text)
+        attempts.write_text(text.replace(fence, "", 1),
+                            encoding="utf-8", newline="\n")
+        self.assertNotIn(n1_raw, attempts.read_text(encoding="utf-8"))
+
+        # D 全量对（fresh + blank-slate）；N2 delta 锚定已删除的 N1 字节
+        d_payload = self._payload(self.D_REV, self.D_ID, base_sha, base_size, D_hash)
+        self._register_review(rid_o, iid_o, "outer-reviewer", d_payload)
+        self._register_review(rid_b, iid_b, "blind-reviewer", d_payload)
+        n2_payload = self._payload(
+            self.D_REV, self.N_ID, disk_sha, disk_size, N2_hash,
+            delta={"base_plan_sha256": n1_sha,
+                   "current_plan_sha256": disk_sha,
+                   "change_class": "non-decisional"})
+        self._register_review(rid_d, iid_d, "outer-reviewer", n2_payload)
+
+        self.record_verdict(1, "可执行")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertEqual(
+            rc, 30,
+            f"chain deletion must fail closed at the material gate: "
+            f"stdout={out} stderr={err}")
+        self.assertIn("material-gate:delta-candidate-missing", out + err)
+
+    # ---- 负向：decisional 段仍须全量对 -------------------------------------
+
+    def test_decisional_missing_blank_slate_fails_closed(self):
+        """A-6/A-11-7：decisional 段缺 blank-slate 权威 → full-pair fail。"""
+        self._setup_chain(blind_wrong_anchor=True)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "missing blank-slate must fail closed")
+        self.assertIn("qualifying", (out + err).lower())
+
+    def test_full_pair_with_delta_rejected(self):
+        """A-6：full-pair payload 含 delta → 禁止 → fail closed。"""
+        self._setup_chain(full_pair_delta=True)
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "full-pair with delta must fail closed")
+
+    def test_full_pair_non_executable_verdict_fails_closed(self):
+        """A-6：decisional full-pair verdict 非 可执行 → fail closed。"""
+        self._setup_chain(fresh_verdict="阻断需修复")
+        self.write_retrospective()
+        rc, out, err = self.finish()
+        self.assertNotEqual(rc, 0, "non-executable full-pair verdict must fail closed")
+
+
 if __name__ == "__main__":
     unittest.main()

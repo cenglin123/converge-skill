@@ -106,6 +106,21 @@ GATE_TO_RECOVER = {
     "cancelled": ("cancelled", "cancelled-by-host"),
 }
 
+# ── O6 material revision 分级复核：常量单源（F6/A-5；D2 错误码单源）─────────────
+# `MATERIAL_CHANGE_CLASSES` 与 `MATERIAL_SECTION_VOCAB` 是材料门的唯一权威定义；
+# `refs/orchestrator-guide.md` §Material revision 的 12 项 token 集合必须与之等值
+# （由 tests/test_process_controller_contract.py 的静态断言机械核验，防双写漂移）。
+MATERIAL_CHANGE_CLASSES = frozenset({"decisional", "non-decisional"})
+MATERIAL_SECTION_VOCAB = frozenset({
+    "D-decisions", "file-matrix", "acceptance", "triggers",
+    "verdict-semantics", "roles-permissions", "fail-closed",
+    "numeric-defaults", "doc-refs", "wording", "appendix",
+    "tests-non-assertive",
+})
+# fail-closed 错误码单源：统一 `<namespace>:<kebab-code>`，经 budget_gate.FailClosed
+# 抛出 → main() 打印 `FAIL_CLOSED:<reason>`、exit 30（D2 选 A）。
+MATERIAL_ERROR_NS = "material-gate"
+
 # 骨架正文模板：单一常量。cancel-round 的机械占位判据②用它做逐字比较——不采用
 # 创建时记录内容 hash 方案（那需要新增状态存储，违反非目标 3）。
 SKELETON_BODY = (
@@ -1092,6 +1107,36 @@ def _canonical_json_bytes(obj: dict) -> bytes:
                        ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _material_cur(block: dict) -> dict:
+    """Target block candidate descriptor.
+
+    二名兼容（BLK-4）：字段名在不同代块间为 ``candidate_plan`` 或
+    ``candidate_artifact``；空/缺失归 ``{}``（后续与盘上 plan 比较即不匹配）。
+    """
+    return block.get("candidate_plan") or block.get("candidate_artifact") or {}
+
+
+def _material_error(code: str, summary: str) -> budget_gate.FailClosed:
+    """fail-closed 错误单源（D2 选 A）：``material-gate:<kebab-code>: <human summary>``。
+
+    main() 捕获 budget_gate.FailClosed → 打印 ``FAIL_CLOSED:<reason>``、exit 30。
+    human summary 保留既有可读措辞（如 "no qualifying pair"），便于既有测试与诊断。
+    """
+    return budget_gate.FailClosed(f"{MATERIAL_ERROR_NS}:{code}: {summary}")
+
+
+def _locator_id(locator: str) -> str | None:
+    """从 ``...json-fence[schema=...,id=<id>]`` locator 抽取 ``id=`` 值。"""
+    marker = "id="
+    start = locator.find(marker)
+    if start == -1:
+        return None
+    end = locator.find("]", start)
+    if end == -1:
+        return None
+    return locator[start + len(marker):end]
+
+
 def _find_material_block(active: Path, revision_id: str | None = None) -> tuple[dict, str] | None:
     """Find converge.material-revision/v1 block in attempts.md.
 
@@ -1131,234 +1176,416 @@ def _detect_revision_id(active: Path) -> str:
 
 
 def _validate_material_gate(active: Path, events: list[dict]) -> None:
-    """Validate material-revision same-hash gate (D8).
+    """Validate the material-revision gate (D8；O6 分级复核).
 
-    Raises FailClosed on any violation. Returns silently when no material block
-    exists (backward compatible).
+    Raises ``budget_gate.FailClosed`` on any violation. Returns silently when no
+    material block exists (backward compatible).
 
-    The gate resolves the CURRENT material block FIRST (the latest block in
-    attempts.md), validates it against the on-disk plan.md, and then qualifies
-    candidates against it.  Candidates whose payloads reference a superseded
-    material block or a stale plan hash are SKIPPED (non-qualifying), not
-    treated as contradictions.
+    分级语义（candidate-4 + 设计复审 D1-D6）：
+      * 链 = 当前 revision 段（末块 ``revision_id`` 所属段；不用
+        ``_detect_revision_id``，R2-BLK-1）。段首必须 decisional。
+      * ``decisional``：仍要求两个不同 fresh/blank-slate authority 的**同字节
+        全量对**（payload 禁含 ``delta``），两 payload byte-equal，verdict 正向
+        ``== 可执行``。
+      * ``non-decisional``：单 fresh delta reviewer，payload 增
+        ``delta{base_plan_sha256,current_plan_sha256,change_class}``，与目标块
+        三重锚定，verdict 正向 ``== 可执行``；``changed_sections`` 与所有先前
+        decisional 块 ``decisional_anchors`` 的并集相交即 fail closed。
+      * legacy（缺 ``change_class`` 的完全旧块，或缺 ``decisional_anchors`` 的
+        旧 decisional 块）：D1 选 A（Occam）——当前段存在任一 legacy 块时**仅对
+        当前段末块 require_full_pair**（等价现状：末块全量对认证终局字节，
+        last-supersedes-all 不被改写）。
 
-    Non-qualifying legacy terminals (metadata-only evidence, missing blobs,
-    no review-target block, wrong schema) are **skipped** — not failed — so
-    that legacy ultraverge-initial or other metadata-only authority terminals
-    do not block the gate when a qualifying exact-evidence pair exists.
+    非合格候选（metadata-only、缺 blob、CRLF、payload 回显不一致、锚定到其他块）
+    一律 **skip 而非 fail**；但**所要求的那一类**候选缺失即 fail closed，不降级。
     """
-    revision_id = _detect_revision_id(active)
-    # Quick existence check: any material block at all?
-    result = _find_material_block(active)
-    if result is None:
+    attempts_path = active / "attempts.md"
+    if not attempts_path.is_file():
+        return  # 无 attempts.md → 无 material 块 → 向后兼容
+    all_blocks = _extract_fenced_json_blocks(
+        attempts_path.read_text(encoding="utf-8"),
+        "converge.material-revision/v1")
+    if not all_blocks:
         return  # no material block → backward compatible
+
+    # ── 链分段（R2-BLK-1）：当前段 = 末块 revision_id 段 ────────────────────
+    rev_cur = all_blocks[-1].get("revision_id")
+    if rev_cur is not None:
+        blocks = [b for b in all_blocks if b.get("revision_id", rev_cur) == rev_cur]
+        hist = [b for b in all_blocks if b.get("revision_id", rev_cur) != rev_cur]
+    else:
+        blocks = list(all_blocks)
+        hist = []
+
+    # 历史段仅校验每段段首为 decisional（不入当前链）
+    seg_rid = object()
+    for b in hist:
+        rid = b.get("revision_id")
+        if rid != seg_rid:
+            seg_rid = rid
+            if b.get("change_class", "decisional") != "decisional":
+                raise _material_error(
+                    "first-block-must-be-decisional",
+                    f"historical revision segment {rid!r} first block is not decisional")
 
     # ── Read on-disk plan.md ────────────────────────────────────────────────
     plan_path = active / "plan.md"
     if not plan_path.is_file():
-        raise budget_gate.FailClosed("material-gate: plan.md not found")
+        raise _material_error("plan-missing", "material-gate: plan.md not found")
     plan_bytes = plan_path.read_bytes()
     plan_sha256 = hashlib.sha256(plan_bytes).hexdigest()
     plan_size = len(plan_bytes)
 
-    # ── Resolve the CURRENT material block (step 1: locator resolution) ───
-    # The current block is the last material block in attempts.md (append-only).
-    # Its canonical hash is the reference against which all candidates qualify.
-    current_block, current_block_hash = result
-    # Also validate the current block's candidate artifact against on-disk plan.
-    # The field name varies: "candidate_plan" in some blocks, "candidate_artifact"
-    # in others.  Check both.
-    ca = current_block.get("candidate_plan") or current_block.get("candidate_artifact") or {}
+    # ── 末块候选字节必须等于盘上 plan（原 :1171-1175；二名兼容）────────────
+    current = blocks[-1]
+    ca = _material_cur(current)
     if ca.get("sha256") != plan_sha256 or ca.get("size") != plan_size:
-        raise budget_gate.FailClosed(
-            "material-gate: current material block candidate_plan "
-            "sha256/size mismatch with on-disk plan.md")
+        raise _material_error(
+            "current-block-plan-mismatch",
+            "current material block candidate sha256/size mismatch with on-disk plan.md")
 
-    # ── Build candidate list (step 2: qualify by current block + plan) ────
-    # Collect all successful Spawn invocations whose role is in the fresh or
-    # blank-slate authority sets.  For each, attempt to load exact prompt and
-    # output evidence blobs.  Skip (do NOT fail) when: evidence_mode is not
-    # "exact", blob file is missing, blob is empty, CRLF detected, no
-    # single converge.review-target/v1 block can be extracted, payload
-    # artifact doesn't match on-disk plan, or payload material_revision
-    # doesn't match the resolved (current) material block.
+    # ── 新块域校验 + legacy 标记（完全旧块绕过域门，BLK-2）──────────────────
+    cc_of: list[str] = []
+    legacy: int | None = None
+    for i, b in enumerate(blocks):
+        if "change_class" not in b:                       # 完全旧块
+            cc_of.append("decisional")
+            if legacy is None:
+                legacy = i
+            continue
+        cc = b["change_class"]
+        if cc not in MATERIAL_CHANGE_CLASSES:
+            raise _material_error(
+                "change-class-enum",
+                f"block {b.get('id')!r} change_class {cc!r} not in "
+                f"{sorted(MATERIAL_CHANGE_CLASSES)}")
+        changed_sections = b.get("changed_sections")
+        if not changed_sections or not set(changed_sections) <= MATERIAL_SECTION_VOCAB:
+            raise _material_error(
+                "sections-vocab",
+                f"block {b.get('id')!r} changed_sections must be non-empty and ⊆ "
+                f"12-item vocabulary")
+        if cc == "decisional":
+            anchors = b.get("decisional_anchors")
+            if anchors is None:
+                if legacy is None:
+                    legacy = i                          # 缺失 anchors → legacy 兼容
+            elif not anchors or not set(anchors) <= MATERIAL_SECTION_VOCAB:
+                raise _material_error(
+                    "anchors-vocab",
+                    f"block {b.get('id')!r} decisional_anchors must be non-empty "
+                    f"and ⊆ 12-item vocabulary")
+        cc_of.append(cc)
+
+    if cc_of[0] != "decisional":
+        raise _material_error(
+            "first-block-must-be-decisional",
+            "current revision segment first block must be decisional")
+
     fresh_roles = model.REVIEWER_AUTHORITIES["fresh"]
     blank_roles = model.REVIEWER_AUTHORITIES["blank-slate"]
-    fresh_candidates: list[dict] = []
-    blank_candidates: list[dict] = []
-    skipped: list[str] = []  # reason summaries for error message
+    skipped_generic: list[str] = []   # 证据/回显通用门 skip 原因
+    skipped_anchor: list[str] = []    # 块锚定/delta 字段 skip 原因
 
-    for e in events:
-        if (e.get("event_type") != "invocation-started"
-                or e.get("invocation_kind") != "spawn"):
-            continue
-        role = e.get("role", "")
-        if role not in fresh_roles and role not in blank_roles:
-            continue
-        iid = e.get("invocation_id", "")
-        # Find the matching succeeded terminal
-        terminal = next((t for t in events
-                         if t.get("event_type") == "invocation-terminal"
-                         and t.get("started_event_id") == e.get("event_id")
-                         and t.get("terminal_status") == "succeeded"), None)
-        if terminal is None:
-            continue
-
-        # ── Check blob existence first (auxiliary path for backward compat) ─
-        prompt_path = active / "evidence" / "invocations" / iid / "prompt.bin"
-        output_path = active / "evidence" / "invocations" / iid / "output.bin"
-        # Also check auxiliary prompt path for backward compatibility
-        if not prompt_path.is_file():
-            aux_prompt = active / "evidence" / "material" / iid / "prompt.bin"
-            if aux_prompt.is_file():
-                prompt_path = aux_prompt
-        if not prompt_path.is_file() or not output_path.is_file():
-            skipped.append(f"{iid[:8]} ({role}): blob missing "
-                           f"(prompt={prompt_path.is_file()}, output={output_path.is_file()})")
-            continue
-        prompt_bytes = prompt_path.read_bytes()
-        output_bytes = output_path.read_bytes()
-        if not prompt_bytes or not output_bytes:
-            skipped.append(f"{iid[:8]} ({role}): empty blob")
-            continue
-
-        # ── Check evidence mode (skip if not exact, after blob check) ───
-        # Note: we check blob existence first because some tests store blobs
-        # at auxiliary paths even when the event says metadata-only.
-        # The evidence_mode check is a secondary indicator.
-        prompt_evidence = e.get("prompt_evidence", {})
-        output_evidence = terminal.get("output_evidence", {})
-        prompt_mode = prompt_evidence.get("evidence_mode", "metadata-only")
-        output_mode = output_evidence.get("evidence_mode", "metadata-only")
-        # Only skip if BOTH modes are not exact (legacy metadata-only terminals)
-        # If at least one mode is exact, the candidate may qualify
-        if prompt_mode != "exact" and output_mode != "exact":
-            skipped.append(f"{iid[:8]} ({role}): evidence_mode "
-                           f"prompt={prompt_mode}, output={output_mode}")
-            continue
-
-        # ── CRLF check ───────────────────────────────────────────────────
-        prompt_text = prompt_bytes.decode("utf-8")
-        output_text = output_bytes.decode("utf-8")
-        if "\r" in prompt_text or "\r" in output_text:
-            skipped.append(f"{iid[:8]} ({role}): CRLF detected")
-            continue
-
-        # ── Extract review-target blocks ─────────────────────────────────
-        prompt_blocks = _extract_fenced_json_blocks(prompt_text, "converge.review-target/v1")
-        output_blocks = _extract_fenced_json_blocks(output_text, "converge.review-target/v1")
-        if len(prompt_blocks) != 1 or len(output_blocks) != 1:
-            skipped.append(
-                f"{iid[:8]} ({role}): expected 1 review-target block; "
-                f"got prompt={len(prompt_blocks)} output={len(output_blocks)}")
-            continue
-        prompt_payload = _canonical_json_bytes(prompt_blocks[0])
-        output_payload = _canonical_json_bytes(output_blocks[0])
-        if prompt_payload != output_payload:
-            skipped.append(f"{iid[:8]} ({role}): prompt/output payload mismatch")
-            continue
-
-        # ── Qualify against current material block and on-disk plan ──────
-        # Payload must match the RESOLVED (latest) material block and the
-        # current on-disk plan.md.  Candidates referencing superseded blocks
-        # or stale plan hashes are non-qualifying (skipped, not errors).
-        payload_obj = prompt_blocks[0]
-        artifact = payload_obj.get("artifact", {})
-        if artifact.get("sha256") != plan_sha256 or artifact.get("size") != plan_size:
-            skipped.append(
-                f"{iid[:8]} ({role}): stale plan hash "
-                f"(payload={str(artifact.get('sha256'))[:16]}, "
-                f"disk={plan_sha256[:16]})")
-            continue
-        mr = payload_obj.get("material_revision", {})
-        if mr.get("sha256") != current_block_hash:
-            skipped.append(
-                f"{iid[:8]} ({role}): stale material hash "
-                f"(payload={str(mr.get('sha256'))[:16]}, "
-                f"resolved={current_block_hash[:16]})")
-            continue
-        # Also verify the locator names the same material block id
-        locator = mr.get("locator", "")
-        _id_marker = "id="
-        _id_start = locator.find(_id_marker)
-        locator_id = None
-        if _id_start != -1:
-            _id_end = locator.find("]", _id_start)
-            if _id_end != -1:
-                locator_id = locator[_id_start + len(_id_marker):_id_end]
-        if locator_id and locator_id != current_block.get("id"):
-            skipped.append(
-                f"{iid[:8]} ({role}): locator names {locator_id!r}, "
-                f"expected {current_block.get('id')!r}")
-            continue
-
-        # ── Candidate qualifies ──────────────────────────────────────────
-        entry = {"started": e, "terminal": terminal, "invocation_id": iid,
-                 "payload": prompt_payload}
-        if role in fresh_roles:
-            fresh_candidates.append(entry)
-        if role in blank_roles:
-            blank_candidates.append(entry)
-
-    # ── Require at least one qualifying pair (step 3) ──────────────────────
-    if not fresh_candidates or not blank_candidates:
-        skip_summary = "; ".join(skipped) if skipped else "(none)"
-        raise budget_gate.FailClosed(
-            "material-gate: no qualifying pair found (need at least one fresh "
-            "and one blank-slate with exact evidence matching current material "
-            "block and on-disk plan); "
-            f"skipped candidates: {skip_summary}")
-
-    # Select the first qualifying pair with different invocation_id and instance_id
-    fresh_inv: dict | None = None
-    blank_inv: dict | None = None
-    for fc in fresh_candidates:
-        for bc in blank_candidates:
-            if fc["invocation_id"] == bc["invocation_id"]:
+    def _collect_entries() -> list[dict]:
+        """一次扫描：收集通过通用门（blob/exact/CRLF/单块/回显 byte-equal）的候选。"""
+        entries: list[dict] = []
+        for e in events:
+            if (e.get("event_type") != "invocation-started"
+                    or e.get("invocation_kind") != "spawn"):
                 continue
-            fi = fc["terminal"].get("instance_id")
-            bi = bc["terminal"].get("instance_id")
-            if fi and bi and fi == bi:
+            role = e.get("role", "")
+            if role not in fresh_roles and role not in blank_roles:
                 continue
-            fresh_inv = fc
-            blank_inv = bc
-            break
-        if fresh_inv is not None:
-            break
+            iid = e.get("invocation_id", "")
+            terminal = next((t for t in events
+                             if t.get("event_type") == "invocation-terminal"
+                             and t.get("started_event_id") == e.get("event_id")
+                             and t.get("terminal_status") == "succeeded"), None)
+            if terminal is None:
+                continue
 
-    if fresh_inv is None or blank_inv is None:
-        raise budget_gate.FailClosed(
-            "material-gate: qualifying candidates exist but no valid pair "
-            "(different invocation_id and instance_id required)")
+            # blob 存在性（辅助路径向后兼容）
+            prompt_path = active / "evidence" / "invocations" / iid / "prompt.bin"
+            output_path = active / "evidence" / "invocations" / iid / "output.bin"
+            if not prompt_path.is_file():
+                aux_prompt = active / "evidence" / "material" / iid / "prompt.bin"
+                if aux_prompt.is_file():
+                    prompt_path = aux_prompt
+            if not prompt_path.is_file() or not output_path.is_file():
+                skipped_generic.append(
+                    f"{iid[:8]} ({role}): blob missing "
+                    f"(prompt={prompt_path.is_file()}, output={output_path.is_file()})")
+                continue
+            prompt_bytes = prompt_path.read_bytes()
+            output_bytes = output_path.read_bytes()
+            if not prompt_bytes or not output_bytes:
+                skipped_generic.append(f"{iid[:8]} ({role}): empty blob")
+                continue
 
-    # ── Validate payloads are byte-identical ────────────────────────────────
-    if fresh_inv["payload"] != blank_inv["payload"]:
-        raise budget_gate.FailClosed(
-            "material-gate: review-target payloads differ between the two invocations")
+            # evidence mode：两者皆非 exact 才 skip（保留既有 legacy 跳过语义）
+            prompt_evidence = e.get("prompt_evidence", {})
+            output_evidence = terminal.get("output_evidence", {})
+            prompt_mode = prompt_evidence.get("evidence_mode", "metadata-only")
+            output_mode = output_evidence.get("evidence_mode", "metadata-only")
+            if prompt_mode != "exact" and output_mode != "exact":
+                skipped_generic.append(
+                    f"{iid[:8]} ({role}): evidence_mode "
+                    f"prompt={prompt_mode}, output={output_mode}")
+                continue
 
-    # Verify verdicts: both products must be 可执行 with zero blocking issues
-    for inv in (fresh_inv, blank_inv):
-        iid = inv["invocation_id"]
-        output_path = active / "evidence" / "invocations" / iid / "output.bin"
-        output_text = output_path.read_bytes().decode("utf-8")
-        vm = re.search(r"verdict:\s*(\S+)", output_text)
-        if vm and vm.group(1) == "阻断需修复":
-            raise budget_gate.FailClosed(
-                f"material-gate: invocation {iid[:8]} has blocking verdict in output")
-        started = inv["started"]
+            prompt_text = prompt_bytes.decode("utf-8")
+            output_text = output_bytes.decode("utf-8")
+            if "\r" in prompt_text or "\r" in output_text:
+                skipped_generic.append(f"{iid[:8]} ({role}): CRLF detected")
+                continue
+
+            prompt_blocks = _extract_fenced_json_blocks(prompt_text, "converge.review-target/v1")
+            output_blocks = _extract_fenced_json_blocks(output_text, "converge.review-target/v1")
+            if len(prompt_blocks) != 1 or len(output_blocks) != 1:
+                skipped_generic.append(
+                    f"{iid[:8]} ({role}): expected 1 review-target block; "
+                    f"got prompt={len(prompt_blocks)} output={len(output_blocks)}")
+                continue
+            prompt_payload = _canonical_json_bytes(prompt_blocks[0])
+            output_payload = _canonical_json_bytes(output_blocks[0])
+            if prompt_payload != output_payload:
+                skipped_generic.append(f"{iid[:8]} ({role}): prompt/output payload mismatch")
+                continue
+
+            entries.append({
+                "started": e, "terminal": terminal, "invocation_id": iid,
+                "role": role, "payload_obj": prompt_blocks[0],
+                "payload": prompt_payload, "output_path": output_path,
+            })
+        return entries
+
+    all_entries = _collect_entries()
+
+    def _anchored(T: dict) -> list[dict]:
+        """块锚定统一（T = 目标块）：artifact == cur(T) ∧ material_revision.sha256
+        == canon(T) ∧ locator id == T.id（T 有 id 时）。不匹配者记 skip 原因。"""
+        T_hash = hashlib.sha256(_canonical_json_bytes(T)).hexdigest()
+        ca_t = _material_cur(T)
+        matched: list[dict] = []
+        for entry in all_entries:
+            p = entry["payload_obj"]
+            artifact = p.get("artifact", {})
+            if (artifact.get("sha256") != ca_t.get("sha256")
+                    or artifact.get("size") != ca_t.get("size")):
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): stale plan hash "
+                    f"(payload={str(artifact.get('sha256'))[:16]}, "
+                    f"target={str(ca_t.get('sha256'))[:16]})")
+                continue
+            mr = p.get("material_revision", {})
+            if mr.get("sha256") != T_hash:
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): stale material hash "
+                    f"(payload={str(mr.get('sha256'))[:16]}, resolved={T_hash[:16]})")
+                continue
+            locator_id = _locator_id(mr.get("locator", ""))
+            if locator_id and locator_id != T.get("id"):
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): locator names "
+                    f"{locator_id!r}, expected {T.get('id')!r}")
+                continue
+            matched.append(entry)
+        return matched
+
+    def _verdict_carrier(output_text: str) -> str:
+        """定位 reviewer 输出的规范 verdict 载体（D3 选 A：校验前锚定）。
+
+        优先取输出起始的 YAML frontmatter（``---`` 围栏内）；否则取首个
+        ```` ```yaml ```` fence 的内容；二者皆无时回退整段文本（保留恰一次契约）。
+        区域外出现的 ``verdict:`` 字面量不参与计数，避免真实 reviewer 输出
+        「frontmatter + 正文」双 verdict 形态被误挡（HEAD 行为 = 新门行为）。
+        """
+        fm = re.match(r"^\ufeff?---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)",
+                      output_text, re.DOTALL)
+        if fm:
+            return fm.group(1)
+        fence = re.search(r"```ya?ml[ \t]*\r?\n(.*?)\r?\n```", output_text,
+                          re.DOTALL | re.IGNORECASE)
+        if fence:
+            return fence.group(1)
+        return output_text
+
+    def _require_executable(output_text: str, iid: str) -> None:
+        """正向 verdict 门（D3 选 A + 校验前锚定）：先在规范 verdict 载体
+        （首块 YAML frontmatter / 首个 yaml fence）内要求 ``verdict:`` 字面量
+        恰一次，且取值必须为 ``可执行``；载体 0 次 / ≥2 次 / 其他取值一律
+        fail closed。载体区域外的 ``verdict:`` 不参与计数。"""
+        carrier = _verdict_carrier(output_text)
+        matches = re.findall(r"verdict:\s*(\S+)", carrier)
+        if len(matches) != 1:
+            raise _material_error(
+                "verdict-parse",
+                f"invocation {iid[:8]} verdict carrier must contain exactly one "
+                f"'verdict:' literal (found {len(matches)})")
+        if matches[0] != "可执行":
+            raise _material_error(
+                "verdict-not-executable",
+                f"invocation {iid[:8]} verdict {matches[0]!r} is not 可执行")
+
+    def _check_product_blocking(entry: dict) -> None:
+        """既有行为保留：authority 轮对应的 round-N.md 产物 verdict 若为
+        ``阻断需修复`` 则 fail（不因材料门泛化而弱化）。"""
+        started = entry["started"]
         role = started.get("role", "")
         round_no = started.get("round")
-        if round_no is not None:
-            consumes = budget_gate.ROLE_CONSUMES.get(role)
-            product_tmpl = budget_gate.SCOPE_PRODUCT.get(consumes) if consumes else None
-            if product_tmpl:
-                product_path = active / product_tmpl.format(n=round_no)
-                if product_path.is_file():
-                    fm, _ = _fm_split(product_path.read_text(encoding="utf-8"))
-                    pv = _fm_get(fm, "verdict")
-                    if pv == "阻断需修复":
-                        raise budget_gate.FailClosed(
-                            f"material-gate: product {product_path.name} has blocking verdict")
+        if round_no is None:
+            return
+        consumes = budget_gate.ROLE_CONSUMES.get(role)
+        product_tmpl = budget_gate.SCOPE_PRODUCT.get(consumes) if consumes else None
+        if not product_tmpl:
+            return
+        product_path = active / product_tmpl.format(n=round_no)
+        if product_path.is_file():
+            fm, _ = _fm_split(product_path.read_text(encoding="utf-8"))
+            if _fm_get(fm, "verdict") == "阻断需修复":
+                raise _material_error(
+                    "product-blocking",
+                    f"product {product_path.name} has blocking verdict")
+
+    def _fail(reason_kind: str, code: str) -> None:
+        reasons = skipped_generic + skipped_anchor
+        summary = "; ".join(reasons) if reasons else "(none)"
+        raise _material_error(code, f"{reason_kind}; skipped candidates: {summary}")
+
+    def _require_full_pair(T: dict) -> None:
+        """对目标块 T 要求 fresh + blank-slate 同字节全量对（payload 禁含 delta）。"""
+        anchored = _anchored(T)
+        fresh_entries: list[dict] = []
+        blank_entries: list[dict] = []
+        for entry in anchored:
+            if "delta" in entry["payload_obj"]:
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): "
+                    f"delta present in full-pair candidate")
+                continue
+            if entry["role"] in fresh_roles:
+                fresh_entries.append(entry)
+            if entry["role"] in blank_roles:
+                blank_entries.append(entry)
+
+        if not fresh_entries or not blank_entries:
+            _fail(
+                "no qualifying pair found (need at least one fresh and one "
+                "blank-slate with exact evidence matching target material block "
+                "and on-disk plan)",
+                "no-qualifying-pair")
+
+        fresh_inv: dict | None = None
+        blank_inv: dict | None = None
+        for fc in fresh_entries:
+            for bc in blank_entries:
+                if fc["invocation_id"] == bc["invocation_id"]:
+                    continue
+                fi = fc["terminal"].get("instance_id")
+                bi = bc["terminal"].get("instance_id")
+                if fi and bi and fi == bi:
+                    continue
+                fresh_inv, blank_inv = fc, bc
+                break
+            if fresh_inv is not None:
+                break
+
+        if fresh_inv is None or blank_inv is None:
+            raise _material_error(
+                "no-qualifying-pair",
+                "qualifying candidates exist but no valid pair "
+                "(different invocation_id and instance_id required)")
+
+        if fresh_inv["payload"] != blank_inv["payload"]:
+            raise _material_error(
+                "payload-mismatch",
+                "review-target payloads differ between the two invocations")
+
+        for inv in (fresh_inv, blank_inv):
+            iid = inv["invocation_id"]
+            output_text = inv["output_path"].read_bytes().decode("utf-8")
+            _require_executable(output_text, iid)
+            _check_product_blocking(inv)
+
+    def _require_delta(T: dict, base: dict) -> None:
+        """对 non-decisional 目标块 T 要求单 fresh delta 候选（§3.4）。
+
+        D4 最小输入契约（文档化，机械不可验证）：delta prompt 必须内嵌链上前一
+        有效块全文与当前 ``plan.md`` 全文（或等价 byte 级引用）。本门只绑定
+        ``delta.base/current_plan_sha256`` 与块链 hash，**不校验** prompt 内嵌
+        文本与其 hash 的绑定（无 base 快照仓；残余见 refs/orchestrator-guide.md
+        §Material revision item 7 / §10 R-2）。
+        """
+        anchored = _anchored(T)
+        base_sha = _material_cur(base).get("sha256")
+        current_sha = _material_cur(T).get("sha256")
+        candidate: dict | None = None
+        for entry in anchored:
+            p = entry["payload_obj"]
+            delta = p.get("delta")
+            if not isinstance(delta, dict):
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): "
+                    f"missing delta payload")
+                continue
+            if delta.get("change_class") != T.get("change_class"):
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): "
+                    f"delta change_class {delta.get('change_class')!r} != block "
+                    f"{T.get('change_class')!r}")
+                continue
+            if delta.get("base_plan_sha256") != base_sha:
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): delta base hash "
+                    f"mismatch (payload={str(delta.get('base_plan_sha256'))[:16]}, "
+                    f"expected={str(base_sha)[:16]})")
+                continue
+            if delta.get("current_plan_sha256") != current_sha:
+                skipped_anchor.append(
+                    f"{entry['invocation_id'][:8]} ({entry['role']}): delta current hash "
+                    f"mismatch (payload={str(delta.get('current_plan_sha256'))[:16]}, "
+                    f"expected={str(current_sha)[:16]})")
+                continue
+            if entry["role"] not in fresh_roles:
+                continue
+            candidate = entry
+            break
+
+        if candidate is None:
+            _fail(
+                "no qualifying delta candidate found (need one fresh delta reviewer "
+                "with exact evidence anchored to the non-decisional block)",
+                "delta-candidate-missing")
+            return  # unreachable（_fail 恒抛）；供类型收窄
+
+        _require_executable(
+            candidate["output_path"].read_bytes().decode("utf-8"),
+            candidate["invocation_id"])
+
+    # ── D1（选 A，Occam）：当前段含 legacy → 仅末块全量对（等价现状）────────
+    if legacy is not None:
+        _require_full_pair(blocks[-1])
+        return
+
+    D = [i for i, cc in enumerate(cc_of) if cc == "decisional"]
+    i_last = D[-1]  # 段首必 decisional → D 恒非空
+    _require_full_pair(blocks[i_last])          # 最近 decisional 块全量对
+
+    union_anchors: set[str] = set()
+    for k in D:
+        union_anchors |= set(blocks[k].get("decisional_anchors") or [])
+
+    for j in range(i_last + 1, len(blocks)):
+        T = blocks[j]
+        _require_delta(T, blocks[j - 1])
+        sections = set(T.get("changed_sections") or [])
+        if sections & union_anchors:
+            raise _material_error(
+                "non-decisional-touches-decisional-anchor",
+                f"block {T.get('id')!r} changed_sections {sorted(sections)} intersect "
+                f"prior decisional anchors {sorted(union_anchors)}")
+
 
 
 def _validate_calibration_sample(active: Path, events: list[dict]) -> None:

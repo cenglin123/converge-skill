@@ -98,10 +98,11 @@ manifest 承诺 canonical records、events、invocation/artifact blobs、revisio
 - 窄数值经验门：仅对 `kind ∈ default|threshold|stopping_condition` 且 `comparison ∈ {outer,blind}` 的条目；存在该 axis `productive=true` 的 eligible 样本时，`proposed < max(已观测推进用量)` 且 `counterevidence_refs` 为空且无 `tradeoff_decision` → `BLOCK:empirical_conflict`。`mechanism` 与 `comparison=null`（含角色权限/一般机制）不被数值门裁决。
 - bootstrap 例外（一次性）：编译器落地前唯一自举形态是计划内嵌 calibration-report 块（locator 指向 plan 自身）；后续治理变更必须由 `--calibration` 生成的报告提供。
 
-**`converge.review-target/v1`**（material revision 后两次同字节审查的 payload）：
+**`converge.review-target/v1`**（material revision 复核 payload：decisional 走两次同字节审查，non-decisional 走单 fresh delta 复核）：
 
-- 字段：`schema`、`target_id`、`revision_id`、`artifact{path,sha256,size}`、`material_revision{locator,sha256}`（locator 指向 `attempts.md` 内唯一 `converge.material-revision/v1` 块）、`quality_goal_event_id`（UUID）。
-- payload 是一行 canonical JSON（sorted keys、compact、UTF-8、恰好一个 LF）。两份 authority prompt 的抽取 canonical payload 字节必须相同，两份 Reviewer 输出回显的 payload 也必须逐字节相同；`plan.md` 事后任何字节变化使两份审查同时失效。
+- 字段：`schema`、`target_id`、`revision_id`、`artifact{path,sha256,size}`、`material_revision{locator,sha256}`（locator 以 `id=` 唯一寻址 `attempts.md` 内 `converge.material-revision/v1` 块；可多枚，链读全部块）、`quality_goal_event_id`（UUID）。`delta` 仅在 non-decisional 增量路径出现，恰含 `{base_plan_sha256,current_plan_sha256,change_class}`；`change_class ∈ decisional|non-decisional`，两个 sha256 均为 64 位小写 hex。
+- `converge.material-revision/v1` 块字段 `change_class`/`changed_sections`/`decisional_anchors` 的语义与判定标准见 `refs/orchestrator-guide.md` §Material revision（本表 §12.4）；`decisional_anchors` 缺失按 legacy 自其起 full-pair；**无 `["*"]` 哨兵**。
+- payload 是一行 canonical JSON（sorted keys、compact、UTF-8、恰好一个 LF）。decisional 修订：两份 authority prompt 抽取的 canonical payload 字节必须相同、两份 Reviewer 输出回显也逐字节相同；`plan.md` 事后任何字节变化使两份失效。non-decisional 修订：单 fresh delta reviewer 的 prompt/output 回显同一 payload，且 `delta.base_plan_sha256` = 链上前一有效字节哈希、`delta.current_plan_sha256` = 本块候选字节哈希；最近 decisional 块之后的增量链任何一环缺失即 fail closed，不得降级。
 
 ---
 
