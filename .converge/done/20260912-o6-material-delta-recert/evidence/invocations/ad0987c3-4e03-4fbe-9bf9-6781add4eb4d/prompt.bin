@@ -1,0 +1,45 @@
+# Task: 实施 O6 material 增量复核机制
+
+你是本收敛对象的 Implementation Executor（fresh、独立上下文）。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows，bash）。UTF-8。**禁止 git 写操作**（只读 `git diff`/`git status` 允许）。
+
+## 规格（唯一权威）
+
+`.converge\active\20260912-o6-material-delta-recert\plan.md`（candidate-4，冻结字节，双权威已认证）。
+
+**外加绑定实施约束（设计复审 D1-D6，同等效力，逐条按其单选修法落地）**：
+- **D1（选 A，Occam）**：legacy 分支简化为——当前段存在任一 legacy 块（或缺 anchors 的旧 decisional 块）时，**仅对当前段末块 require_full_pair**（等价现状）；丢弃"自 legacy 起逐块 full-pair"；§13.4/§8.4 相应表述以"行为等价现状"口径落到代码注释/文档。
+- **D2**：fail-closed 错误码单源化——按其单选修法统一错误码定义/出口（对照 `orchest.py:1883-1885`、`budget_gate.py:152-155` 既有约定）。
+- **D3**：verdict 正向门（`== 可执行`）的解析契约按其单选修法补齐。
+- **D4**：delta reviewer 输入契约按其单选修法定义。
+- **D5**：`triggers` 与 decisional 定义的一致性按其单选修法修正。
+- **D6**：A-11 计数与 §11 表体一致化。
+（以上以 `design-review.md` 原文的单选修法为准，你实读后落地。）
+
+## 实施范围与顺序
+
+- **Exact File Matrix 唯一授权**（plan §5；预计含 `orchest.py`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`tests/test_loop_a_coverage.py`、`tests/test_process_controller_contract.py`、`scripts/README.md`，以 plan 为准）。
+- TDD：先红后绿；§11 对抗清单逐条成测试；既有 17 条 TestMaterial* 行为不回退（含 10 条负例 rc!=0 不反转——R2-BLK-1 验收）。
+- 第三部 refs 按 §12 **逐字对照表**修改，一字不差。
+- D1-D6 约束与 plan 冲突时：以更保守/fail-closed 者为准并在报告记偏差。
+
+## 硬性约束
+
+- 不改预算裁决/计数语义；不改既有 ledger 事件字段；不改 `archive_contract/*`。
+- 只追加 `.converge\active\20260912-o6-material-delta-recert\attempts.md`。
+- 扩范围即停并报告。
+
+## 关键环境
+
+- `TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`
+- 基线：**523 passed / 5 skipped**。实施后全绿（新增测试另计）。
+- 在飞无其它派发；顺序实施即可。
+
+## 产物
+
+1. 矩阵内源码/测试/refs 改动。
+2. 追加 `attempts.md` 实施记录。
+3. 报告：`.converge\active\20260912-o6-material-delta-recert\impl-report.md`（改动清单、测试数字、py_compile、git diff --check、Acceptance 逐条对照、D1-D6 落地说明、偏差与未决——不得虚报）。
+
+## 回执
+
+改动文件列表；全量测试数字；Acceptance 逐条 pass/fail；D1-D6 逐条落地一句话；第三部是否严格逐字（是/否）；未决项。

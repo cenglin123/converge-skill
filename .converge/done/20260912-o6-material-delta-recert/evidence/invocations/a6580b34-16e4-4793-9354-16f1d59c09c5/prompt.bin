@@ -1,0 +1,21 @@
+# Task: O6 审计后修复 · 聚焦复审（只验 B1/B2 闭合 + 零回归）
+
+你是 fresh 独立复审者。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（指定输出除外）。UTF-8。
+
+## 任务（窄范围）
+
+1. 读 `.converge\active\20260912-o6-material-delta-recert\audit-report.md` §B 的 B1/B2 单选修法，与 `fix-report-b12.md`、当前工作树 diff（相对 `da81e70`）对照，逐条判定是否**真正闭合**（不是"改了"，而是"审计指出的问题不再存在"）：
+   - B1：该用例现在是否真实到达材料门并具判别力（自己推演其失败路径）；
+   - B2：D3-A"校验前锚定"是否落地；以真实历史 reviewer 输出形态构造输入，验证 HEAD 行为 == 新门行为。
+2. 零回归抽查：10 条既有 material 负例断言仍 rc != 0（可引用 `attempts.md` Phase 6b 记录 + 自己抽 3 条实跑）。
+3. 实跑全量（长路径 TEMP）：`TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`（自述 554 passed/5 skipped）。
+
+## 输出
+
+追加 `.converge\active\20260912-o6-material-delta-recert\attempts.md` 一节 `## Phase 6c · 聚焦复审`：
+- 首行 verdict：`闭合` / `未闭合`
+- B1/B2 逐条 yes/no + 证据；零回归抽查结果；复跑数字；若未闭合给出单选修法。
+
+## 回执
+
+verdict；复跑数字。

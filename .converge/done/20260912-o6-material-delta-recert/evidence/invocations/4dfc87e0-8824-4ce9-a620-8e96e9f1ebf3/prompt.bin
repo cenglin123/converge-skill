@@ -1,0 +1,27 @@
+# 编排层修订指令 · candidate-2 → candidate-3（outer R1 处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260912-o6-material-delta-recert`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-2）
+2. `round-1.md`（R1：BLK-1..4 阻断 + NB-1..6 非阻断；第八节给出逐条修法）
+3. `uv-init-1/2/3.md`、`attempts.md`
+
+## 必须落地（严格按 R1 第八节，逐条）
+
+1. **BLK-1**：统一 §3.2/§3.5/A-10/A-11-4 的章节域语义——采用建议 A：门禁接受 12 项词表、UNION 交集机械拦截；删除错误括注。
+2. **BLK-2**：完全旧块（缺 `change_class`）绕过 changed_sections 域门，按 legacy→full-pair 处理；保证既有 17 条 TestMaterial* 与 reopened 对象通过。
+3. **BLK-3**：legacy full-pair 范围含 legacy 当前块（或显式要求最后 decisional 块有对）；单块旧对象不得 fail-open。
+4. **BLK-4**：伪代码统一 `candidate_plan or candidate_artifact`。
+5. **NB-1..NB-6**：A-13 三态、死分支/§12.4 措辞、reopen 分段、伪代码补 full-pair verdict/delta 检查、常量命名、README:17。
+6. 修订后**实跑** `python scripts/budget_gate.py preflight --plan <plan路径>` 与（如改动波及代码则）全量 pytest——本阶段只改计划，pytest 仅在计划要求时跑；输出贴 attempts.md。
+
+## 硬约束
+
+- frontmatter `status: candidate-3`；修订历史追加一行；最小手术；全文 ≤ 45KB。
+- attempts.md 追加 R1 处置表（BLK-1..4 + NB-1..6 → 处置 → 落点）。
+
+## 回执
+
+plan.md 字节数/SHA-256；BLK/NB 逐条一句话；preflight 结论。

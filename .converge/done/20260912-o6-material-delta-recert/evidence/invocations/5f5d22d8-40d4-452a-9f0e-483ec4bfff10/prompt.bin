@@ -1,0 +1,37 @@
+# Task: O6 material 增量复核 · 完整收敛 outer 评议 R1（candidate-2）
+
+你是 fresh 独立 Reviewer（独立上下文，与 plan 作者及 UV 初审无共享）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（本任务书指定输出除外）。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260912-o6-material-delta-recert\plan.md`（candidate-2：O6 material 修订分级 + 增量复核机制；UV 三票合并修复后。材料对权威 = outer（你）+ blind（另一 fresh））
+
+## 必读
+
+1. 上述 plan.md
+2. 同目录 `uv-init-1.md`、`uv-init-2.md`、`uv-init-3.md`、`attempts.md`（三票处置表 + preflight 实跑输出）
+3. `CONSTITUTION.md`（:63-96）、`SKILL.md`（:157-186）、`refs/design-review-prompt.md`、`refs/orchestrator-guide.md:17-32`、`refs/state-schema.md:96-118`
+4. 代码事实：`scripts/orchest.py`（:1089-1361 材料门）、`scripts/archive_contract/model.py`（REVIEWER_AUTHORITIES）、`scripts/budget_gate.py`（preflight/calibration）、`tests/test_loop_a_coverage.py`（TestMaterial* 17 条）
+
+## 评审重点（UV 处置验证 + 独立复审）
+
+0. **UV 三票处置完整性**：处置表是否逐条对应三票全部 issue；抽查 ≥10 条回 plan 原文（特别：12 项统一词表、`["*"]` 废除与 legacy fail-closed、块锚定统一、verdict 正向校验、§12 补全、record-only 分支、17 条测试锚定）。
+1. 前置自检 5 问 + DR 7 维。
+2. **D1 分级机制可判定性**：12 项词表是否全篇一致；"归类争议=decisional" fail-safe；delta reviewer 职责闭环。
+3. **材料门链式不变量**：块链回溯 + base/current hash 链与既有三处锚点共存；legacy 回退；全 non-decisional 保守回退。
+4. **对抗面**：谎报分级、伪造 base hash、删块、verdict 造假——§11 是否封死（含 `需重新设计` 对抗）。
+5. **§12 逐字对照**完整性（含两处标题与 README:151）。
+6. **机器块**：preflight 实跑输出真实性（可自行复跑）；跨对象 user_message_events 引用是否被现行校验接受、后补路径是否明确。
+7. **D2 record-only 分支**可判定性。
+8. 事实核验：行号/符号实开核对；Acceptance 条条机械可判定。
+
+## 输出
+
+文件：`.converge\active\20260912-o6-material-delta-recert\round-1.md`
+
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`
+- 前置自检 + UV 处置抽查表（≥10 条）+ 逐条 issue（编号 + severity + 文件:行 + 单选修法）
+- 若 `可执行`：实施前必须满足的前置条件清单（可为空）
+- 结尾：D1 方向是否成立；无法核实的断言清单
+
+判定纪律：事实失真即阻断；穷举缺一即阻断；不为凑数升级。

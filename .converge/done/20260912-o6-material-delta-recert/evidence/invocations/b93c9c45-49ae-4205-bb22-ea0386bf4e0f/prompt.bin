@@ -1,0 +1,34 @@
+# Task: O6 material 增量复核 · ultraverge 初审（独立 Reviewer）
+
+你是本对象 ultraverge 初审 Reviewer（fresh、独立上下文，互不共享）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（本任务书指定输出除外）。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260912-o6-material-delta-recert\plan.md`（candidate-1，≤45KB：O6 material 修订分级 + 增量复核机制；触及第三部 refs → ultraverge）
+
+## 必读
+
+1. 上述 plan.md
+2. `CONSTITUTION.md`（:63-96）、`SKILL.md`（:157-186）、`refs/design-review-prompt.md`、`refs/orchestrator-guide.md:17-32`、`refs/state-schema.md:96-118`
+3. 代码事实：`scripts/orchest.py`（`_find_material_block`/`_validate_material_gate`，约 :1095-1361）、`scripts/archive_contract/model.py`（REVIEWER_AUTHORITIES :91-94）、`scripts/budget_gate.py`（preflight/calibration）、`tests/test_loop_a_coverage.py`（TestMaterial* 全部）、r2/B 归档对象（成本证据）
+
+## 评审重点
+
+1. 前置自检 5 问 + DR 7 维（按 refs/design-review-prompt.md）。
+2. **D1 分级机制的可判定性**：`change_class` 判定标准是否足够机械（"归类争议=decisional" fail-safe 是否真的可执行）；`changed_sections` 如何与 diff 实核对应；delta reviewer 的职责是否闭环（谁验证"未触及 decisional"——语义判断如何不被架空）。
+3. **材料门改造的链式不变量**：块链回溯 + base/current hash 链是否唯一确定权威集；与既有三处哈希锚点（orchest.py:1171-1175/:1267-1272/:1335-1337）如何共存；全 non-decisional 链保守回退是否正确。
+4. **对抗面**：谎报分级、伪造 base hash、删块、verdict 造假——§11 清单是否封死。
+5. **规范句修改**：§12 逐字对照是否完整、是否改变原句的 fail-closed 强度。
+6. **机器块与治理要件**：preflight 实跑输出（attempts.md）是否真实；user_message_events 的跨对象引用是否被现行校验接受（如不接受，计划的后补路径是否明确）。
+7. **O6 决议协议（D2）**：否定路径（record-only）是否同样可判定。
+8. 事实核验：行号/符号实开核对；Acceptance 条条机械可判定。
+
+## 输出
+
+文件：`.converge\active\20260912-o6-material-delta-recert\uv-init-3.md`
+
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`
+- 前置自检 + DR 7 维逐维结论；逐条 issue（编号 + severity + 文件:行 + 单选修法）
+- 结尾：D1 方向是否成立（是/否+理由）；无法核实的断言清单
+
+判定纪律：事实失真即阻断；穷举缺一即阻断；不为凑数升级。

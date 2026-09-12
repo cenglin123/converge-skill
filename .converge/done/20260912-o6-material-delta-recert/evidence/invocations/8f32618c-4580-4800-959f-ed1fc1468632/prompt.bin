@@ -1,0 +1,18 @@
+# Task: O6 审计后修复（B1 + B2，最小手术）
+
+你是 fresh 修复 Executor。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作。只修以下两条（审计报告：`.converge\active\20260912-o6-material-delta-recert\audit-report.md`，§B 单选修法为准）：
+
+1. **B1**：被声明为 A-11-3 的测试实际在 finish 步骤 2 即失败、零判别力。按审计单选修法修复：让该用例真正到达材料门（修正夹具使其通过步骤 0-2 的前置），并断言材料门的拒绝语义；若审计建议是替换用例，则按其建议替换。
+2. **B2**：D3-A「校验前锚定」子句未落地——真实历史 reviewer 输出在新门 `verdict-parse` 处回归（HEAD 通过、新门失败）。按审计单选修法实现"校验前锚定"（解析/校验顺序调整），并以真实历史输出形态补一条回归用例（HEAD 行为 = 新门行为）。
+
+验证（必须执行并报告数字）：
+```
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests/test_loop_a_coverage.py -q
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q
+python -m py_compile scripts/orchest.py
+git diff --check
+```
+
+产物：最小文件改动 + 追加 `.converge\active\20260912-o6-material-delta-recert\attempts.md` 一节 `## Phase 6b · 审计后修复 B1/B2`；报告 `.converge\active\20260912-o6-material-delta-recert\fix-report-b12.md`。
+
+回执：B1/B2 修法一句话；全量测试数字；确认无其它改动。

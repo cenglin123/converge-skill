@@ -1,0 +1,32 @@
+{
+  "defaults_version": 2,
+  "config": {
+    "task_tier": "critical"
+  },
+  "extensions": [],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {
+      "1": [
+        "conceptual",
+        "architectural",
+        "structural",
+        "implementation",
+        "evidence"
+      ],
+      "2": [
+        "implementation",
+        "structural",
+        "wording",
+        "evidence"
+      ],
+      "3": [
+        "conceptual",
+        "architectural",
+        "structural",
+        "implementation",
+        "evidence"
+      ]
+    }
+  }
+}

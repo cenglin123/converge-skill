@@ -1,0 +1,536 @@
+---
+status: candidate-4
+review_mode: ultraverge
+object_slug: 20260912-o6-material-delta-recert
+---
+
+# O6 · material 修订增量复核机制（candidate-4）
+
+> 本计划是操作包络层 O6（`docs/plans/active/20260911-converge-operational-envelope.md:25`）的重评 +（评议支持时）机制实现。
+> **触及第三部**：`refs/state-schema.md`、`refs/orchestrator-guide.md`、`SKILL.md`（`CONSTITUTION.md:65-78`，`:71-72`）→ 授权源 ultraverge；内嵌 `converge.governance-change/v1` 机器块（§14）并 preflight 自验。
+> 全部行号/符号均实开文件核对；证据见 §2。全文 ≤ 46080 B 由 §7 A-1 机械验收。
+> candidate-4 依据 `round-2.md`（outer R2：R2-BLK-1 + R2-NB-1..3）**逐条**修订（各条单选修法）；R2-BLK-1 删 `_detect_revision_id` 过滤依赖（当前段 = 末块所属段）并新增 A-19（10 条既有负例不反转）。处置表见 `attempts.md`。
+
+## §0 目录
+
+| 节 | 内容 |
+|---|---|
+| §1 | Goal |
+| §2 | 证据（B 成本 + 材料门实核） |
+| §3 | D1：material 修订分级 + 增量复核路径 |
+| §4 | D2：O6 决议协议（implement / record-only 分流） |
+| §5 | 变更落点 Exact File Matrix |
+| §6 | Bounded Sequence |
+| §7 | Acceptance（机械可判定，按分支命中） |
+| §8 | Non-Goals |
+| §9 | 预算与止损 |
+| §10 | 风险与残留 |
+| §11 | 对抗回归清单 |
+| §12 | 规范句逐字对照表 |
+| §13 | 回滚 |
+| §14 | 附录 A：`converge.governance-change/v1` 机器块 |
+| §15 | 修订历史 |
+
+---
+
+## §1 Goal
+
+1. **重评 O6**：以 B 对象的实测成本为 calibration 样本，重新判断"material revision 增量复核"是否值得作为机制固化（此前 B §14 为 record-only）。
+2. **机制实现（评议支持时）**：在**不放宽 decisional 修订全量双权威同字节重认证**的前提下，为纯 `non-decisional` material 修订引入**单 fresh delta reviewer** 增量路径，消除"任何字节变化都触发全量双认证"的成本爆炸。
+3. **可机械验证**：材料门 fail-closed、反向对抗用例、逐字规范改写均可由测试/脚本判定；判断类事项（归类是否正确）保留在 agent 手中。
+
+**成功判据**：材料门在 `decisional` 链段仍强制全量对；在 `non-decisional` 链段以 **块链 hash 绑定 + payload 回显（机械）+ delta reviewer 正向 verdict 门控（判断）** 替代第二权威。机械层只封"如实声明"下的违规；"分类是否正确"由 fresh delta reviewer 承担（**不声称机械闭环**）。任何一环缺失一律 `FAIL_CLOSED`，不降级。
+
+---
+
+## §2 证据（实核，逐条可核）
+
+### 2.1 成本数据（B 对象）
+
+| 事实 | 出处（实核） | 值 |
+|---|---|---|
+| 计划多轮修订触发全量双认证 | `.converge/done/20260911-op-envelope-b-contract-correction/retrospective.md:75` | "计划字节 41KB→133KB；每轮字节变更触发全量双认证" |
+| 重认证成本占比 | 同上 `:80`（§8 经验教训） | "7 次重认证 ≈ 全部评议成本的一半" |
+| 重认证轮序 | 同上 `:53`（outer R1-R5 轮序表）+ `:62`（终局材料对 = R5+blind） | 材料对表述实核于 `:62`/`:80` |
+| 计划体积 | 同上 `:42`（§3）、`:75` | candidate-1→8：41KB→133KB |
+| O6 议题来源 | `docs/plans/active/20260911-converge-operational-envelope.md:25` | "material revision 无 delta 复核语义；D8 每次字节变更重跑双 fresh 同字节复核" |
+
+### 2.2 材料门实现（`scripts/orchest.py`，实核）
+
+| 符号/锚点 | 行号 | 说明 |
+|---|---|---|
+| `_find_material_block` | `:1095-1118` | 读 `attempts.md` 的 `converge.material-revision/v1` fence；无 id 取**最后一块**；带 id 取 `id == {revision_id}-material`；返回块 + canonical sha256（`:1116-1117`） |
+| `_validate_material_gate` | `:1133-1361` | finish 步骤 3.5 调用 |
+| finish 调用点 | `:1579-1581` | `_validate_material_gate(active, events)` + `_validate_calibration_sample`（non-dry-run） |
+| 锚点(a) 当前块 vs 盘上 plan | `:1171-1175` | `candidate_plan`/`candidate_artifact` 的 `sha256`/`size` 必须等于盘上 `plan.md` |
+| 候选集合 | `:1185-1186` | fresh = `REVIEWER_AUTHORITIES["fresh"]`；blank = `["blank-slate"]` |
+| exact 证据 + 块抽取 | `:1207-1259` | blob 存在、非空、非 CRLF、prompt/output 各恰一个 `converge.review-target/v1`、两 payload byte-equal |
+| 锚点(b) 候选 payload artifact | `:1267-1272` | `artifact.sha256/size` 必须等于盘上 plan |
+| 锚点(c) 候选 vs material 块 | `:1273-1293` | `material_revision.sha256` == 当前块 canonical hash；locator `id=` 一致 |
+| 全量对要求 | `:1303-1310` | 至少一个 fresh + 一个 blank-slate 合格候选，否则 `FAIL_CLOSED` |
+| 两 payload byte-equal | `:1335-1337` | fresh vs blank payload 必须逐字节相同 |
+| verdict 检查 | `:1340-1361` | 现只拒 `verdict: 阻断需修复`；本计划改为正向 `== 可执行` |
+| legacy 跳过语义 | docstring `:1144-1149`；实际跳过点 `:1215-1218`（blob 缺失）、`:1235-1238`（evidence_mode 非 exact）；另 `:1204-1205` 为 terminal 缺失跳过 | 非合格候选跳过（不 fail），但**所要求的那一类**缺失即 fail |
+
+### 2.3 规范句（第三部，实核）
+
+| 位置 | 内容 |
+|---|---|
+| `refs/state-schema.md:101` | 标题"material revision 后**两次**同字节审查的 payload"（引入单 delta 路径后失真，§12 改写） |
+| `refs/state-schema.md:103-104` | `converge.review-target/v1` payload 规范；`:104` 即"任何字节变化使两份审查同时失效"句 |
+| `refs/orchestrator-guide.md:17` | 标题"Material revision 与**同字节两-authority** 审查"（§12 改写） |
+| `refs/orchestrator-guide.md:23-32` | §Material revision：`:23` triggers、`:27-31` 同字节两-Spawn 流程、`:32` 失效句 |
+| `SKILL.md:462` | "Material revision 两-authority 同字节规则"指针句（需一并改写） |
+| `scripts/README.md:151` | "--evidence-mode exact … 两-authority 同字节审查"句（需一并改写） |
+| `CONSTITUTION.md:71-72` | 第三部清单（state-schema / orchestrator-guide） |
+
+### 2.4 calibration（实核）
+
+本对象 `evidence/calibration-report.json` 已由生成器产出（`converge.calibration-report/v1`）：
+`canonical sha256=16ec2455acb9cdb143145e8f28c52b4db1d96f9cd90b44ab4b8af897df3303c8`；
+`corpus_digest=3627eb4d72cfbf07a3c1a6655026c9ce51063506e613c3a7df5b3519b10224ea`；
+`freshness={repository_head=da81e70cee7931d49680866f9cd0b2cdb6fadc5a, source_archive_revision=unavailable, source_event_high_watermark=0}`；
+`scope=done-corpus`、corpus 20 entries 全 `unavailable/no_sample`、`eligible_samples=0`。
+→ O6 是 **mechanism-kind** 变更，不经数值经验门（校验逻辑 `scripts/budget_gate.py:1682-1699`；窄门 `:1710-1742` 仅裁决 `default/threshold/stopping_condition` 且 `comparison∈{outer,blind}`）。
+calibration 的 locator 载体：`attempts.md::json-fence[schema=converge.calibration-report/v1,id=calibration]`（canonical 字节与 `evidence/calibration-report.json` 一致）；独立文件仅留痕，不被 preflight 校验（locator `root-file` 限不含路径分隔符的 allowlist 普通文件名——`refs/state-schema.md:76`、`scripts/budget_gate.py:1452-1459`，故 `evidence/` 不可寻址）。
+
+### 2.5 现有 material 测试事实（实核，供 §3.7/A-12）
+
+`tests/test_loop_a_coverage.py` 含 **4 个 `TestMaterial*` 类、17 个 test 方法**（直接定义，AST 计数）：
+`TestMaterialClosureGate`:351（6 条：`:443/:452/:464/:483/:531/:572`）、`TestMaterialLocatorResolution`:848（4 条：`:908/:918/:956/:975`）、`TestMaterialGateLegacySkip`:989（3 条：`:1075/:1087/:1117`）、`TestMaterialGateQualifyByCurrentBlock`:1184（4 条：`:1292/:1304/:1372/:1421`）。既有断言零删除/零修改由 A-12 按 diff hunks 判定。
+
+---
+
+## §3 D1：material 修订分级（change_class）+ 增量复核路径
+
+### 3.1 机器块新字段
+
+`converge.material-revision/v1` 块新增：
+
+| 字段 | 类型 | 必填 | 语义 |
+|---|---|---|---|
+| `change_class` | `"decisional" \| "non-decisional"` | 新块必填 | 修订分级；域外值 = schema 违规 → `FAIL_CLOSED` |
+| `changed_sections` | string 列表（非空、⊆ 12 项词表） | 新块必填 | 本次修订触及的章节标识（同一受控词表，见 3.2） |
+| `decisional_anchors` | string 列表（非空、⊆ 12 项词表） | `decisional` 新块应填 | 该 revision **全量判定承载章节快照**；供后续 non-decisional 块对并集做交集 fail-safe；**缺失按 legacy 兼容（自其起全量对）**，空/词表外才 `FAIL_CLOSED:anchors-vocab` |
+
+**前向兼容与 legacy**：无 `change_class` 的旧块视为 `decisional`；**无 `["*"]` 哨兵**——遇完全旧块或缺失 `decisional_anchors` 的旧 decisional 块，**自该块起（含）全部强制 full-pair**（失败 `rc≠0`，无专用码，R2-NB-1(b)）。完全旧块**绕过**域门（仅新块生效）。链段按**末块 `revision_id`** 界定、**不用 `_detect_revision_id`**（3.5，R2-BLK-1）。`_find_material_block` 语义**不变**。
+
+### 3.2 判定标准与 12 项受控词表（单一权威源；§12.4 逐字落入 `refs/orchestrator-guide.md`）
+
+**`decisional`** = 触及判定正确性，至少包含：数值默认/阈值/停止条件、角色与权限（含 `REVIEWER_AUTHORITIES`、consumes 归属）、verdict 语义与三档字面量、fail-closed 行为/错误码/退出码/失败分类、File Matrix、Acceptance、D 决策本体。
+
+**`non-decisional`** = 不影响上列判定：行号/符号引用更新、非规范性措辞、附录、与判定无关的文档同步、测试内非断言语义调整。**凡触及 `CONSTITUTION.md` 第三部清单文件的规范性句子一律 `decisional`**（UV3-16）；`wording/appendix/doc-refs` 仅限非规范散文。
+
+**12 项受控章节词表**（`changed_sections` 与 `decisional_anchors` **共用同一词表**，全篇一致）：
+`D-decisions`、`file-matrix`、`acceptance`、`triggers`、`verdict-semantics`、`roles-permissions`、`fail-closed`、`numeric-defaults`、`doc-refs`、`wording`、`appendix`、`tests-non-assertive`。
+其中前 8 项为判定承载章节。**门禁唯一域门 = `changed_sections` 非空且 ⊆ 12 项词表**；误归类由 `changed_sections` ∩ ∪(先前 decisional 块 `decisional_anchors`) ≠ ∅ 的**并集交集**拦截（A-10/A-11-4；已删"前 8/后 4"互斥子集约束）。
+
+**归类权责**：作者**声明**、复核者**挑战**（判断留在 agent）；**争议 = decisional**（fail-safe）——reviewer 指出误归类 → 该块按 decisional 重做全量对。
+
+### 3.3 `decisional` 路径（不变，不放宽）
+
+沿用现行全量双权威同字节重认证：两个不同 fresh Spawn（`outer-reviewer` + `blank-slate`，exact 证据），review-target payload **不含 `delta`**（含则 `FAIL_CLOSED`），两 payload byte-equal，verdict 必须为 `可执行`。实现上即现 `_validate_material_gate` 的 full-pair 分支，**不回退、不放宽**。
+
+### 3.4 `non-decisional` 路径：单 fresh delta reviewer
+
+- 用**一个** fresh Spawn（复用 `outer-reviewer` 角色，exact 证据）替代双权威。
+- review-target payload 增加 `delta{base_plan_sha256, current_plan_sha256, change_class}`（**统一命名 `change_class`**，废除 `declared_class`）：
+  - `base_plan_sha256` = 链上**前一有效字节**（前一块 `cur(前块).sha256`）的哈希；
+  - `current_plan_sha256` = 本块 `cur(本块).sha256`（末块须等于盘上 `plan.md`）；
+  - `change_class` = 本块 `change_class`（恒 `"non-decisional"`）。
+- 职责：**实核前块 bytes → 本块 bytes 的增量**，确认未触及 decisional 内容且上一轮 blocking 项已闭合；verdict 必须为 `可执行`。
+- **数据供给与残余（诚实声明，UV3-04）**：材料门绑定 `base_plan_sha256`/`current_plan_sha256` 与块链，但**不校验 prompt 内嵌前块文本与其 hash 的绑定**（无 base 快照仓）；"diff 是否实核"交 fresh reviewer 上下文 + 正向 verdict，计入 R-2。不声称机械闭环。
+- 该 reviewer 的 prompt/output 仍各恰含一个 `converge.review-target/v1` 块，两者 canonical payload byte-equal。
+
+### 3.5 材料门改造（`_validate_material_gate`）：链回溯 + 块锚定
+
+链 = **当前 revision 段**的全部 `converge.material-revision/v1` 块（文档顺序）。**分段规则（R2-BLK-1，写死）**：`rev_cur = all_blocks[-1].get("revision_id")`，`blocks = [b for b in all_blocks if b.get("revision_id", rev_cur) == rev_cur]`（`rev_cur is None` 时全部归当前段）；**当前段 = 末块所属段，不用 `_detect_revision_id`**；`revision_id` 不同者属历史段，仅校验段首 decisional。**边界规则**：当前段段首必须 decisional，否则 `FAIL_CLOSED:material-gate:first-block-must-be-decisional`。常量三单源于 `scripts/orchest.py`（F6）。伪代码：
+
+```text
+MATERIAL_CHANGE_CLASSES = {"decisional","non-decisional"}       # orchest.py 单源
+MATERIAL_SECTION_VOCAB = {12 项受控章节}                          # orchest.py 单源
+def cur(b):  return b.get("candidate_plan") or b.get("candidate_artifact") or {}
+def canon(b): return canonical sha256 of b
+
+all_blocks = 全部 material 块（文档顺序）
+if not all_blocks: return                                       # 无块 → 兼容
+rev_cur = all_blocks[-1].get("revision_id")                     # 当前段 = 末块所属段 (R2-BLK-1)
+blocks = ([b for b in all_blocks if b.get("revision_id", rev_cur) == rev_cur]
+          if rev_cur is not None else list(all_blocks))         # rev_cur None → 全部归当前段
+hist = ([b for b in all_blocks if b.get("revision_id", rev_cur) != rev_cur]
+        if rev_cur is not None else [])                         # 历史段不入当前链
+for seg in 按 revision_id 分段的 hist:
+    if (seg[0].get("change_class", "decisional")) != "decisional":
+        FAIL_CLOSED:first-block-must-be-decisional              # 每历史段段首
+
+current = blocks[-1]
+if cur(current).get("sha256") != disk_plan.sha256 or cur(current).get("size") != disk_plan.size:
+    FAIL_CLOSED:current-block-plan-mismatch                     # 原 :1171-1175；二名兼容 (BLK-4)
+
+legacy = None
+for i, b in enumerate(blocks):
+    if "change_class" not in b:                                 # 完全旧块 (BLK-2)
+        b.cc = "decisional"
+        if legacy is None: legacy = i
+        continue                                                # 绕过 changed_sections/anchors 域门
+    b.cc = b["change_class"]
+    if b.cc not in MATERIAL_CHANGE_CLASSES: FAIL_CLOSED:change-class-enum
+    if not b.get("changed_sections") or not set(b["changed_sections"]) <= MATERIAL_SECTION_VOCAB:
+        FAIL_CLOSED:sections-vocab                              # 12 项唯一域门
+    if b.cc == "decisional":
+        a = b.get("decisional_anchors")
+        if a is None:
+            if legacy is None: legacy = i                        # 缺失 anchors → legacy 兼容 (R2-NB-2)
+        elif not a or not set(a) <= MATERIAL_SECTION_VOCAB:
+            FAIL_CLOSED:anchors-vocab
+
+if blocks[0].cc != "decisional":
+    FAIL_CLOSED:first-block-must-be-decisional                  # 当前段段首 (R2-BLK-1)
+
+def require_full_pair(T):                                       # (NB-4)
+    qualify T-anchored candidates:
+        payload.artifact == cur(T) (sha256/size)
+        payload.material_revision.sha256 == canon(T)
+        locator id == T.id (T 有 id 时)
+        "delta" not in payload                                  # 禁含 delta
+        exact evidence, prompt/output byte-equal
+    require >=1 fresh(outer) 且 >=1 blank-slate；invocation/instance 互异
+    require 两 payload byte-equal，且两 verdict == "可执行"        # 正向校验
+    missing -> FAIL_CLOSED
+
+if legacy is not None:
+    for j in (legacy .. len(blocks)-1):                         # 含自身
+        require_full_pair(T=blocks[j])
+    return
+
+D = [i for i, b in enumerate(blocks) if b.cc == "decisional"]
+assert D                                                        # 段首必 decisional → D 恒非空 (NB-2)
+i = D[-1]                                                       # 最近 decisional 块
+require_full_pair(T=blocks[i])                                  # decisional 段全量对
+union_anchors = UNION(blocks[k].decisional_anchors for k in D)
+for j in (i+1 .. len(blocks)-1):                                # j 必为 non-decisional
+    require delta candidate anchored to T=blocks[j]:
+        payload.artifact == cur(T) (sha256/size)
+        payload.material_revision.sha256 == canon(T); locator id == T.id (T 有 id 时)
+        payload.delta.change_class == T.cc == "non-decisional"
+        payload.delta.base_plan_sha256 == cur(blocks[j-1]).sha256
+        payload.delta.current_plan_sha256 == cur(T).sha256
+          (末块 T == current 时 == 盘上 plan sha256)
+        role ∈ REVIEWER_AUTHORITIES["fresh"], exact evidence, prompt/output byte-equal
+        require verdict == "可执行"
+    if set(blocks[j].changed_sections) ∩ union_anchors != ∅:
+        FAIL_CLOSED:material-gate:non-decisional-touches-decisional-anchor
+any missing link -> FAIL_CLOSED (no downgrade)
+```
+
+**块锚定统一（T = 目标块）**：候选 qualify 当且仅当 `payload.artifact == cur(T)`（二名兼容）∧ `payload.material_revision.sha256 == canon(T)` ∧ locator id == `T.id`（T 有 id 时），且 `"delta" not in payload`，并有正向 `verdict == 可执行`。delta 候选对 `T=blocks[j]` 用同一三重锚定 + §3.4 `delta.*` 三字段 + 正向 verdict。修正"full-pair 只对盘上 plan / delta 不绑块"。
+
+**交集 fail-safe**：`change_class=non-decisional` 且 `changed_sections ∩ UNION(所有先前 decisional 块的 decisional_anchors) ≠ ∅` → `FAIL_CLOSED:material-gate:non-decisional-touches-decisional-anchor`（A-11-4 的机械拦截点；用**并集**而非仅最近一块，消除覆盖衰减）。
+
+**实现要点**：full-pair 校验泛化为 `require_full_pair(T)` 对指定 target 块（新增内部 helper）；`MATERIAL_CHANGE_CLASSES`/`MATERIAL_SECTION_VOCAB`/`cur()` 单源（F6）。legacy 跳过语义保留——非合格候选跳过，但**所要求的那一类**缺失即 fail。
+
+### 3.6 fail-closed 与争议
+
+- 任何"链断、`change_class` 域外、`changed_sections` 空或域外、`decisional_anchors` 非空但域外、hash 不匹配、payload 不一致、verdict 非 `可执行`、交集非空、当前段段首非 decisional、归类争议、缺 previous 块" → `FAIL_CLOSED`；**缺失 `decisional_anchors` 不 fail**，按 legacy 自其起全量对（R2-NB-2）。
+- **不降级**：不得因"没找到 delta 候选"而回退放行；不得因"delta reviewer 未抓到"而放行后续 full 要求。
+
+### 3.7 前向兼容
+
+- 完全旧块（缺全部三字段）→ `decisional`（保守），**绕过** `changed_sections`/`decisional_anchors` 域门，自其起（含）全部块走 full-pair；有 `change_class` 无 `decisional_anchors` 的旧 decisional 块同样自其起 full-pair。
+- 链段以**末块 `revision_id`** 界定（R2-BLK-1，不依赖 `_detect_revision_id`）：`revision_id` 缺省或等于末块 `revision_id` 者入当前段；与末块不同的更早块按**历史段**处理（仅校验段首 decisional），不影响 `current`/delta 链。段首门对当前段（含 reopen 后新段）生效。
+- 旧 `review-target` payload 无 `delta` → 仅可用于 full-pair；delta 候选必须含合法 `delta`。
+- 现有 4 个 `TestMaterial*` 类（17 条）行为不变；新增测试**仅追加文件末尾**，不删除/修改既有测试体（A-12）。
+
+---
+
+## §4 D2：O6 决议协议（implement / record-only 机械分流）
+
+本对象是"重评 + 条件实现"，机制**是否实现**由评议结论机械分流（判定写在票面 verdict 字面量上，不由 orchestrator 语义解释）：
+
+1. **record-only 触发（一致否定）**：三名 ultraverge 初审 **3/3 `verdict == 需重新设计`**（逐字，无 `可执行`/`阻断需修复`）→ 只沉淀"O6 重评结论 + 分级标准 + 不实现理由"，**不修改** `orchest.py`/`state-schema`/`guide`。冻结产物 = 计划 + retrospective + 伞形计划 O6 状态行（F8）；`decisional` 规则原状。适用 A-R1..A-R3。
+2. **升级完整收敛**：非一致且少数派阻断 severity ∈ {`conceptual`,`architectural`} → 按 `SKILL.md:170` 并行裁决规则**升级完整收敛**，不得以多数决跳过深层阻断。
+3. **标准修复循环**：一致 `阻断需修复`，或非一致但少数派**非** conceptual/architectural → 标准修复循环修订后重分流（本 candidate-4 即此分支：candidate-2 三票 3/3、outer R1/R2 `阻断需修复`，均指向可实现修复而非方向否定）。
+4. **进入执行**：verdict `可执行`（或收敛后达成）→ 进入 §6 implement 序列。
+5. **多数方向**：2:1 且少数派非深层阻断 → 按 `SKILL.md:169-171` 多数方向推进。
+6. 收敛判定依 2026-09-12 用户裁决（宿主外部权威源 `~/.config/opencode/memories.md`，非本仓库可验证；等价语义：趋势收敛 + 达限即通过，小问题转实施约束清单）。该裁决**不放宽** §7 机械 Acceptance。
+
+---
+
+## §5 变更落点 Exact File Matrix
+
+| # | 文件 | 动作 | 锚点（实核行号） | 说明 |
+|---|---|---|---|---|
+| F1 | `scripts/orchest.py` | 改造 | `_validate_material_gate` `:1133-1361`；`_find_material_block` `:1095-1118` 语义不变；finish 调用 `:1579-1581` 不变 | 链回溯（当前段 = 末块 `revision_id` 段，**不用 `_detect_revision_id`**；段首门）+ 新块域校验（完全旧块绕过）+ delta 候选 + `require_full_pair(T)` 泛化；legacy 含自身 full-pair；常量三单源；fail-closed 码；verdict 正向 `==可执行` |
+| F2 | `refs/state-schema.md`（第三部） | 改写 | `:101` 标题、`:103-104` | review-target payload 增 `delta`；material 块增 `change_class/changed_sections/decisional_anchors`；`:103` 增"多块 + locator id 寻址"；重写 `:104` 失效句（§12 逐字） |
+| F3 | `refs/orchestrator-guide.md`（第三部） | 改写 | `:17` 标题、`:23`（triggers+词表）、`:32`（item 7） | 增分级判定标准 + **完整 12 项受控词表** + delta 流程；改写标题/失效句（§12 逐字） |
+| F4 | `SKILL.md`（第三部） | 改写 | `:462` | 指针句改"分级复核规则"（§12 逐字） |
+| F5 | `tests/test_loop_a_coverage.py` | 追加测试（末尾） | 4 个 `TestMaterial*` 类 `:351/:848/:989/:1184` | 新增 `TestMaterialDeltaPath`（delta 通过/失败/链断/交集/verdict 正向/块锚定）+ §11 对抗用例；**既有 17 条测试体零删改** |
+| F6 | `tests/test_process_controller_contract.py` | 调整 + 追加 | `test_orchest_negative_read_side_default_untouched` `:214-218`；写点契约 `:199-212` | 确保改造后 `_validate_material_gate` 仍含 `metadata-only` 负例；新增常量/`cur()` 单源在 `orchest.py` 的静态断言 |
+| F7 | `scripts/README.md` | 文档 | `:17`、`:144-151`（evidence mode 段，实核） | 记录 delta 路径需 exact 证据；命令流与两-authority 并列；改 `:151` 句（§12.7 逐字）与 `:17` 注释（§12.8 逐字：material-revision 任一级别审查均须 exact） |
+| F8 | `docs/plans/active/20260911-converge-operational-envelope.md` | 文档 | `:25`（O6 行）、`:36`（终态段） | 按 implement 或 record-only 收口更新 O6 状态行与终态描述 |
+
+> F4/F6 实核增补；F8 为 uv1-N3 增补（任一收口都需更新 O6 状态）。
+
+---
+
+## §6 Bounded Sequence
+
+**implement 分支（§4.3/§4.4）**：
+
+| 阶段 | 步骤 | 机械验收 |
+|---|---|---|
+| P0 准备 | 配置/确认对象 active 目录 task-envelope（已具备：`_budget-state.json` `task_tier=critical`） | `python scripts/budget_gate.py preflight --plan <plan>` → `PREFLIGHT_OK:governance-change` |
+| P1 代码 | F1：改造 `_validate_material_gate`；`py_compile scripts/orchest.py` | 退出码 0 |
+| P2 规范 | F2/F3/F4/F7：逐字应用 §12 对照 | `git diff` 与 §12 新句完全一致（§12 三态） |
+| P3 测试 | F5/F6：追加 delta + 对抗用例 | `python -m pytest tests/test_loop_a_coverage.py tests/test_process_controller_contract.py -q` 全绿 |
+| P4 全量 | 全量回归 | `python -m pytest -q` 全绿；`git diff --check` 通过 |
+| P5 文档 | F8：更新伞形计划 O6 行 | O6 行含"重评结论 + 机制实现" |
+| P6 收口 | 写 retrospective + `orchest.py finish` | finish 步骤 3.5 对**本对象**材料门通过；全 settle 无孤儿 |
+
+**record-only 最小序列（§4.1）**：
+
+| 阶段 | 步骤 | 机械验收 |
+|---|---|---|
+| R0 准备 | 同 P0 | `PREFLIGHT_OK:governance-change` |
+| R1 收口 | F8：更新伞形计划 O6 状态行（record-only + 不实现理由） | O6 行含"record-only + 理由指针" |
+| R2 记录 | 写 retrospective：O6 重评结论 + 不实现理由 + 残余 | retrospective 含该三要素 |
+| R3 归档 | `orchest.py finish` | 材料门对修订后计划通过；全 settle 无孤儿；`git status --porcelain` 不含 F1-F7 |
+
+> P0 preflight 是 candidate-4 自验；P1-P5 由落地 executor 完成（宪法 #7）。
+
+---
+
+## §7 Acceptance（机械可判定）
+
+> **适用分支声明**：A-1..A-19 仅在 §4.3/§4.4 **implement 分支**适用；§4.1 **record-only 分支**适用 A-R1..A-R3。任何分支不得混用他分支条目。
+
+| ID | 断言 | 判定方式 |
+|---|---|---|
+| A-1 | candidate-4 `plan.md` ≤ 45KB | 文件字节数 ≤ **46080** |
+| A-2 | frontmatter 含 `status: candidate-4`、`review_mode: ultraverge`、`object_slug: 20260912-o6-material-delta-recert` | 头 6 行逐字包含 |
+| A-3 | 治理机器块 preflight 通过 | `budget_gate.py preflight --plan <plan>` 含 `PREFLIGHT_OK:governance-change`（实跑输出见 `attempts.md`） |
+| A-4 | plan.md 恰含一个 `converge.governance-change/v1` **fenced-json 块** | 以 fenced-json 解析器计含该 schema 的块数 == 1（**非**字符串 grep——该字符串在 prose/§2/§14 多次出现） |
+| A-5 | `change_class` 缺省 = decisional；链段 = 末块 `revision_id` 段（**不用 `_detect_revision_id`**） | 新测试：完全旧块（缺三字段）走 full-pair；**无 `.reopen-state.json` + 块 `revision_id=r2` → 门仍生效（负例 `rc≠0`、正例 `rc=0`）**；`grep change_class` 命中缺省；常量单源在 `orchest.py` |
+| A-6 | decisional 链段仍要求 fresh+blank 全量对，artifact 可等于**历史** candidate（二名兼容） | 新测试：缺 blank-slate → `FAIL_CLOSED`；`payload.artifact == 历史 cur(T)`（含 `candidate_plan`）通过；full-pair 带 `delta` 或 verdict 非 `可执行` → `FAIL_CLOSED` |
+| A-7 | δ 路径缺候选 → `FAIL_CLOSED` | 新测试：non-decisional 块无 delta reviewer → fail |
+| A-8 | δ base hash 不匹配 → `FAIL_CLOSED` | 新测试（A-11-2） |
+| A-9 | δ verdict 非 `可执行`（含 `需重新设计`、缺失、变体）→ `FAIL_CLOSED` | 新测试；覆盖正向校验 |
+| A-10 | 交集 fail-safe：`changed_sections ∩ UNION(prior decisional anchors) ≠ ∅` 的 non-decisional 块 → `FAIL_CLOSED` | 新测试（A-11-4 机械拦截） |
+| A-11 | §11 对抗用例 A-11-1..A-11-13 全部被拦 | 各用例断言 `rc != 0` / 指定错误码 |
+| A-12 | 现有 4 个 `TestMaterial*` 类（17 条）测试体无删除/修改 | `git diff` hunks 不含既有 `def test_*`/断言行改动；新测试仅追加文件末尾；pytest 全绿 |
+| A-13 | §12 逐字对照按项三态落实 | 12.0/12.1(replace 部分)/12.2/12.3/12.6/12.7/12.8 = **replace 型**（旧子串消失 ∧ 新子串存在）；12.4/12.5 = **append 型**（原子串仍在 ∧ 新增子串存在）；12.1 bullet = **新增型**（新子串存在） |
+| A-14 | §5 全部文件被触达 | `git status --porcelain` 覆盖 F1-F8 |
+| A-15 | 无新增硬编码 read-side 默认 | `test_process_controller_contract.py` 静态断言通过 |
+| A-16 | 全量测试绿 | `python -m pytest -q` 退出码 0 |
+| A-17 | 不改任何数值默认/阈值/停止条件 | `git diff` 中 `budget_gate.py` 无改动；机器块 `numeric_changes` 全 `kind: mechanism` |
+| A-18 | 回滚可执行 | §13 回滚步骤对当前 HEAD 有效（`git checkout -- <F1-F4>` 无冲突） |
+| A-19 | **10 条既有 material 负例不反转** | **candidate-4 语义下逐条仍 `rc != 0`**：`test_changed_plan_byte_after_review_invalidates:452`、`test_metadata_only_prompt_evidence_rejected_when_material:464`、`test_post_hoc_hash_injection_rejected:483`、`test_crlf_pollution_fails_closed:531`、`test_duplicate_review_target_block_rejected:572`、`test_payload_referencing_missing_material_id_fails_closed:918`、`test_only_metadata_only_terminals_gate_fails_closed:1087`、`test_qualifying_candidate_with_mismatched_payload_hash_fails:1117`、`test_only_stale_pair_fails_closed:1304`、`test_qualifying_pair_with_non_executable_verdict:1372` |
+| A-R1 | record-only：实现文件零触达 | `git status --porcelain` 不含 F1-F7（仅可含 F8 + retrospective） |
+| A-R2 | record-only：伞形计划 O6 行更新 + retrospective 记录重评结论/不实现理由 | 文件 grep 命中 |
+| A-R3 | record-only：现有 material 测试全绿 | `python -m pytest tests/test_loop_a_coverage.py -q` 退出码 0 |
+
+---
+
+## §8 Non-Goals
+
+1. **不放宽 `decisional` 全量规则**：任何 decisional 修订仍须两 fresh 同字节对 + 正向 verdict。
+2. **不改预算限额 / `budget_gate.py`**：8/3/3、task-envelope 档位、总量公式均不动。
+3. **不新增 O6 否定路径的机制**：若评议否定，仅 record-only，不实现降级/半成品。
+4. **不改 `_find_material_block` 的 last-supersedes-all 语义**。
+5. **不引入跨厂商多样性要求**：delta reviewer 仍是 fresh 独立上下文。
+6. **不动 `converge.review-target/v1` 既有字段语义**，只**增** `delta`。
+7. **不引入 base 快照仓 / diff artifact**：UV3-04 的"prompt 内前块文本绑定"作为残余如实声明，不扩机制。
+
+---
+
+## §9 预算与止损
+
+- ultraverge 初审固定 3 名（`ultraverge_min_reviewers=3`）；本对象 `fsm.mode=ultraverge`、`task_envelope=critical(20/30)`（实核 `_budget-state.json`）。
+- 收敛止损依宿主记忆约定（`~/.config/opencode/memories.md`，外部权威源）：趋势收敛（阻断数与严重度单调不增、无新增 conceptual/architectural、余项精度级）时达限即通过，小问题转实施约束清单。
+- 未决小问题在 retrospective 落账，由实施后独立 fresh 审计兜底。
+
+---
+
+## §10 风险与残留
+
+| # | 风险 | 缓解 |
+|---|---|---|
+| R-1 | 作者谎报：(a) `changed_sections` 漏报 decisional 章节；(b) decisional 块**低报** `decisional_anchors` | 机械交集只拦"如实声明下的违规"；两方向均由 fresh delta reviewer diff 实核 + "归类争议=decisional" + 下一 decisional 修订全量对兜底。**不声称机械闭环** |
+| R-2 | delta reviewer 被锚定 / 未见前块文本而放行 | fresh 独立上下文；hash 链绑定 base/current；正向 verdict；§3.4 声明"prompt 内 base 文本绑定"无机械校验 |
+| R-3 | 链回溯实现错误致误放行 | A-6/A-7/A-11 对抗用例；fail-closed 缺省 |
+| R-4 | 规范句未同步致漂移 | A-13 逐项三态 grep；F2/F3/F4/F7 |
+| R-5 | 计划膨胀（B 的 133KB） | A-1 ≤46080 B；论证从简 |
+| R-6 | 词表/anchors 由作者声明，机械层只校验声明间一致性 | 同 R-1；机械层限于"声明域合法 + 块链绑定 + 并集交集" |
+
+---
+
+## §11 对抗回归清单
+
+| ID | 攻击 | 预期机械拦截 |
+|---|---|---|
+| A-11-1 | 谎报 `non-decisional` 但 diff 触及 decisional，delta reviewer 判阻断 | reviewer verdict 非 `可执行` → 正向校验 fail；升级全量 |
+| A-11-2 | delta payload 伪造 `base_plan_sha256` | `delta.base_plan_sha256 != cur(blocks[j-1]).sha256` → fail |
+| A-11-3 | 链中删除一个 non-decisional 块 | 链回溯缺环（后块 base 无对应前块）→ fail |
+| A-11-4 | decisional 误标 non-decisional，且 `changed_sections` 含 decisional 章节 | 交集 fail-safe（A-10，并集判定）→ fail |
+| A-11-5 | delta payload `change_class` ≠ 块 `change_class` | payload 一致性校验 → fail |
+| A-11-6 | delta payload 与 reviewer 输出回显不一致 | byte-equal 校验 → fail |
+| A-11-7 | decisional 段缺 blank-slate 权威 | full-pair 校验 → fail |
+| A-11-8 | 旧块无 `change_class` 被当作 non-decisional 放行 | 缺省 decisional → 要求 full-pair；无对 → fail |
+| A-11-9 | delta verdict = `需重新设计`（或缺失/变体） | 正向 `verdict == 可执行` → fail |
+| A-11-10 | `change_class` 非法枚举 / 大小写变体（`Decisional`/`foo`） | 域门 `∈ {decisional,non-decisional}` → fail |
+| A-11-11 | `changed_sections = []` 或含词表外值 | 非空 + ⊆VOCAB 门 → fail |
+| A-11-12 | 旧 decisional 块缺 `decisional_anchors`，其后块声明 non-decisional | legacy 自其起 full-pair；缺对 → `rc≠0`（不硬断言专用错误码，R2-NB-1(b)） |
+| A-11-13 | delta payload `artifact`/`material_revision`/locator 不绑定 target 块 | 三重块锚定 → fail |
+| A-11-14 | decisional 块**低报** `decisional_anchors`（攻击在 anchor 声明） | **机械不可判** → 落入 R-1(b) 语义兜底（如实声明不机械闭环） |
+
+> A-11-4/A-11-13 为机械拦截；A-11-14 为语义残余（机械层只封"如实声明下的违规"）。A-11-1 的"diff 触及"仍由 reviewer 判断，verdict 正向门把"误放行"降为必须显式 `可执行`。
+
+---
+
+## §12 规范句逐字对照表
+
+> 左 = 实核原文（含行号）；右 = 替换/追加文本。A-13 按项三态验收（replace / append / 新增）。
+
+### 12.0 `refs/state-schema.md:101`（replace 型）
+
+- 原文：`**`converge.review-target/v1`**（material revision 后两次同字节审查的 payload）：`
+- 替换为：`**`converge.review-target/v1`**（material revision 复核 payload：decisional 走两次同字节审查，non-decisional 走单 fresh delta 复核）：`
+
+### 12.1 `refs/state-schema.md:103`（replace + 新增 bullet 型）
+
+- 原文（`:103`）：
+  `- 字段：`schema`、`target_id`、`revision_id`、`artifact{path,sha256,size}`、`material_revision{locator,sha256}`（locator 指向 `attempts.md` 内唯一 `converge.material-revision/v1` 块）、`quality_goal_event_id`（UUID）。`
+- 替换为：
+  `- 字段：`schema`、`target_id`、`revision_id`、`artifact{path,sha256,size}`、`material_revision{locator,sha256}`（locator 以 `id=` 唯一寻址 `attempts.md` 内 `converge.material-revision/v1` 块；可多枚，链读全部块）、`quality_goal_event_id`（UUID）。`delta` 仅在 non-decisional 增量路径出现，恰含 `{base_plan_sha256,current_plan_sha256,change_class}`；`change_class ∈ decisional|non-decisional`，两个 sha256 均为 64 位小写 hex。`
+- 新增独立 bullet（紧随 `:103`，**仅指针，语义单一权威在 §3.2/§12.4**）：
+  `- `converge.material-revision/v1` 块字段 `change_class`/`changed_sections`/`decisional_anchors` 的语义与判定标准见 `refs/orchestrator-guide.md` §Material revision（本表 §12.4）；`decisional_anchors` 缺失按 legacy 自其起 full-pair；**无 `["*"]` 哨兵**。`
+
+### 12.2 `refs/state-schema.md:104`（replace 型）
+
+- 原文（`:104`）：
+  `- payload 是一行 canonical JSON（sorted keys、compact、UTF-8、恰好一个 LF）。两份 authority prompt 的抽取 canonical payload 字节必须相同，两份 Reviewer 输出回显的 payload 也必须逐字节相同；`plan.md` 事后任何字节变化使两份审查同时失效。`
+- 替换为：
+  `- payload 是一行 canonical JSON（sorted keys、compact、UTF-8、恰好一个 LF）。decisional 修订：两份 authority prompt 抽取的 canonical payload 字节必须相同、两份 Reviewer 输出回显也逐字节相同；`plan.md` 事后任何字节变化使两份失效。non-decisional 修订：单 fresh delta reviewer 的 prompt/output 回显同一 payload，且 `delta.base_plan_sha256` = 链上前一有效字节哈希、`delta.current_plan_sha256` = 本块候选字节哈希；最近 decisional 块之后的增量链任何一环缺失即 fail closed，不得降级。`
+
+### 12.3 `refs/orchestrator-guide.md:17`（replace 型）
+
+- 原文（`:17`）：`## Material revision 与同字节两-authority 审查`
+- 替换为：`## Material revision 与分级复核审查`
+
+### 12.4 `refs/orchestrator-guide.md:23`（append 型）
+
+- 原文（`:23`）：
+  `Material triggers 仅限：概念/架构阻断导致的修订、empirical conflict、或核心 numeric default/threshold/stopping condition 变更。纯结构性/实现修复非 material（除非同时变更上述控制项）。模糊时 fail closed。`
+- 替换为（原句保留 + 追加段）：
+  `Material triggers 仅限：概念/架构阻断导致的修订、empirical conflict、或核心 numeric default/threshold/stopping condition 变更。纯结构性/实现修复非 material（除非同时变更上述控制项）。模糊时 fail closed。`
+  `每次 material 修订在块内声明 `change_class` 与 `changed_sections`：`decisional` = 触及数值默认/阈值/停止条件、角色与权限、verdict 语义、fail-closed 行为、File Matrix、Acceptance 或 D 决策本体；`non-decisional` = 行号/符号引用、非规范性措辞、附录、与判定无关的文档同步。凡触及第三部清单文件的规范性句子一律 decisional。归类由作者声明、复核者挑战；争议 = decisional。`
+  `**12 项受控章节词表**（`changed_sections`/`decisional_anchors` 共用）：`D-decisions`、`file-matrix`、`acceptance`、`triggers`、`verdict-semantics`、`roles-permissions`、`fail-closed`、`numeric-defaults`、`doc-refs`、`wording`、`appendix`、`tests-non-assertive`。`decisional_anchors` = revision 全量判定承载章节快照；门对 non-decisional 块 `changed_sections` 与所有先前 decisional 块 anchors 的**并集**求交，非空即 fail closed；缺省 anchors 的旧 decisional 块（及完全旧块）**自其起（含该块）维持 full-pair**。`
+
+### 12.5 `refs/orchestrator-guide.md:32`（append 型）
+
+- 原文（`:32`）：
+  `6. 任何后续 `plan.md` 字节变化使两份审查同时失效。若任一 Reviewer 阻断且 plan 变更，两角色重新审查新 hash。`
+- 替换为（原句保留 + 追加 item 7）：
+  `6. 任何后续 `plan.md` 字节变化使两份审查同时失效。若任一 Reviewer 阻断且 plan 变更，两角色重新审查新 hash。`
+  `7. **non-decisional 增量例外**：`change_class=non-decisional` 不重跑双权威，改由单个 fresh `outer-reviewer`（exact 证据）作 delta 复核：payload 增 `delta{base_plan_sha256,current_plan_sha256,change_class}`，实核 diff 未触及 decisional 内容且前轮 blocking 已闭合，verdict 必须 `可执行`。材料门回溯至最近 `decisional` 块要求全量对，其后每块要求 delta 候选，且 `changed_sections` 与所有先前 decisional 块 anchors 并集无交集；任何一环缺失 fail closed。链段首块非 decisional 直接 fail closed；缺省 anchors 的旧 decisional 块（及完全旧块）**自其起（含该块）维持全量对**。`
+
+### 12.6 `SKILL.md:462`（replace 型）
+
+- 原文（`:462`）：
+  `> **Material revision 两-authority 同字节规则**：material revision 后须两个不同 fresh Spawn（outer + blank-slate）审查相同最终 plan 字节；任何字节变化使两份审查同时失效。详见 `refs/orchestrator-guide.md` §Material revision。`
+- 替换为：
+  `> **Material revision 分级复核规则**：`decisional` 修订须两个不同 fresh Spawn（outer + blank-slate）审查相同最终 plan 字节；任何字节变化使两份失效。`non-decisional` 修订走单 fresh delta reviewer 增量复核（delta payload + 块链 hash + 并集交集 fail-safe），任何一环缺失 fail closed。详见 `refs/orchestrator-guide.md` §Material revision。`
+
+### 12.7 `scripts/README.md:151`（replace 型）
+
+- 原文（`:151`）：
+  `` `--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision 两-authority 同字节审查。material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集。``
+- 替换为：
+  `` `--evidence-mode exact` 将 prompt/output 的完整快照（hash+size）绑定到 invocation 事件，用于 material-revision **分级复核**。decisional material-revision 场景下两份 authority prompt 和两份 Reviewer 输出均须 `exact` 模式采集；non-decisional 场景下单 fresh delta reviewer 的 prompt/output 亦须 `exact` 模式采集。``
+
+### 12.8 `scripts/README.md:17`（replace 型）
+
+- 原文（`:17`）：`    [--evidence-mode exact]   # material-revision 两-authority 审查时必传 exact`
+- 替换为：`    [--evidence-mode exact]   # material-revision（任一级别：decisional 双权威 / non-decisional delta）审查时必传 exact`
+
+---
+
+## §13 回滚
+
+1. 代码回滚：`git checkout -- scripts/orchest.py tests/test_loop_a_coverage.py tests/test_process_controller_contract.py`。
+2. 规范回滚：`git checkout -- refs/state-schema.md refs/orchestrator-guide.md SKILL.md scripts/README.md`。
+3. 伞形计划回滚：`git checkout -- docs/plans/active/20260911-converge-operational-envelope.md`。
+4. 语义回滚：新字段为**纯增量**，旧块缺省 decisional，回滚后旧数据无需迁移；删除 delta 相关代码即恢复现状。
+5. 若已归档且需重开：按 `SKILL.md` §收敛后修订 的 `archive_convergence.py reopen` 流程，禁止手工移动。
+
+---
+
+## §14 附录 A：本计划的 `converge.governance-change/v1` 机器块
+
+> 本块是治理机器输入。`numeric_changes` 全 `kind: mechanism`、`comparison: null`（机制条目不参与数值门裁决——`scripts/budget_gate.py:1594`、`:1720-1724`）。
+> `user_message_events`：`execution_authorization=989e5ebd…`（B 对象 seq 49）、`quality_goal=06754e6f…`（B 对象 seq 10），两项均为 **B 对象**事件，本对象流内暂无；preflight 仅校验 UUID 格式（`scripts/budget_gate.py:1668-1679`），若升级为"本对象流内存在"则走编排层后补清单，不伪造。
+> `calibration.path` 指向 `attempts.md` 的报告 fence；canonical 字节与 `evidence/calibration-report.json` 一致（sha256 `16ec2455…`、`corpus_digest=3627eb4d…`）；独立文件不被 preflight 校验（`_ROOT_ALLOWLIST` 排除 `evidence/`——`refs/state-schema.md:76`）。
+
+```json
+{
+  "schema": "converge.governance-change/v1",
+  "change_id": "o6-material-delta",
+  "numeric_changes": [
+    {
+      "control": "material-revision-change-class",
+      "kind": "mechanism",
+      "released": null,
+      "old": null,
+      "proposed": null,
+      "comparison": null,
+      "basis": "classify_material_revision_decisional_or_non_decisional"
+    },
+    {
+      "control": "material-delta-recertification",
+      "kind": "mechanism",
+      "released": null,
+      "old": null,
+      "proposed": null,
+      "comparison": null,
+      "basis": "single_fresh_delta_reviewer_replaces_dual_authority_for_non_decisional"
+    },
+    {
+      "control": "material-gate-chain-backtrack",
+      "kind": "mechanism",
+      "released": null,
+      "old": null,
+      "proposed": null,
+      "comparison": null,
+      "basis": "backtrack_to_last_decisional_block_then_require_delta_per_non_decisional_link"
+    }
+  ],
+  "archaeology_refs": [
+    "git:da81e70cee7931d49680866f9cd0b2cdb6fadc5a",
+    "archive:done/20260911-op-envelope-b-contract-correction"
+  ],
+  "calibration": {
+    "path": "attempts.md::json-fence[schema=converge.calibration-report/v1,id=calibration]",
+    "sha256": "16ec2455acb9cdb143145e8f28c52b4db1d96f9cd90b44ab4b8af897df3303c8",
+    "corpus_digest": "3627eb4d72cfbf07a3c1a6655026c9ce51063506e613c3a7df5b3519b10224ea",
+    "freshness": {
+      "repository_head": "da81e70cee7931d49680866f9cd0b2cdb6fadc5a",
+      "source_archive_revision": "unavailable",
+      "source_event_high_watermark": 0
+    }
+  },
+  "counterevidence_refs": [],
+  "user_message_events": {
+    "quality_goal": "06754e6f-94fc-4a8a-9d80-65f89ae68e3a",
+    "execution_authorization": "989e5ebd-2406-4dcf-bf77-283bcb4e6e17"
+  }
+}
+```
+
+## §15 修订历史
+
+| 版本 | 触发 | 摘要 |
+|---|---|---|
+| candidate-1 | 初稿（fresh Plan Author） | 基于 B 成本样本重评 O6；D1 分级 + delta 路径 + 链回溯材料门；D2 决议协议；治理机器块 + calibration 实核 |
+| candidate-2 | UV 三票初审（uv-init-1/2/3）逐条处置 | 统一 12 项词表 + **并集**交集；废除 `["*"]` 哨兵（legacy→其后 full-pair）；anchors=revision 全量快照；full-pair/delta 统一 **T 块三重锚定**；delta verdict 正向 `==可执行`；§12 补标题/词表/README；D2 增 record-only 分流；§7 适用分支 + A-R1..A-R3；4 类 17 条（末尾追加） |
+| candidate-3 | outer R1（`round-1.md`：BLK-1..4 + NB-1..6）逐条处置 | BLK-1 建议 A（12 项唯一域门 + 并集交集）；BLK-2 完全旧块绕过域门；BLK-3 legacy 含自身；BLK-4 统一 `candidate_plan or candidate_artifact`；NB-1 A-13 三态；NB-2 删死分支；NB-3 revision 段过滤 + 段首门；NB-4 补 full-pair verdict/禁 delta；NB-5 常量单源；NB-6 §12.8 |
+| candidate-4 | outer R2（`round-2.md`：R2-BLK-1 + R2-NB-1..3） | R2-BLK-1 删 `_detect_revision_id` 过滤 → 当前段 = 末块 `revision_id` 段（`rev_cur=None` 全归当前段；历史段仅段首校验），新增 A-19（10 条负例仍 `rc≠0`）；R2-NB-1 采 (b)（A-11-12 判 `rc≠0`）；R2-NB-2 anchors 缺失=legacy、空/域外才 fail；R2-NB-3 §12.1 仅指针 |

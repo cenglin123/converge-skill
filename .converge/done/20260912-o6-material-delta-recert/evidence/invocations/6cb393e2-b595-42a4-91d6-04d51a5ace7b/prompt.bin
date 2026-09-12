@@ -1,0 +1,35 @@
+# Task: O6 实施 · 独立 fresh 审计（对抗式）
+
+你是 fresh 独立审计者（独立上下文，未参与计划与实施）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows/bash）。**只读**：不得修改任何仓库文件（可运行测试/命令）。UTF-8。
+
+## 受审对象
+
+- 规格：`.converge\active\20260912-o6-material-delta-recert\plan.md`（candidate-4，冻结字节，双权威认证）+ **绑定实施约束**：同目录 `design-review.md` 的 D1-D6（各带单选修法，编排层裁决带入执行）
+- 实施：当前工作树相对 HEAD `da81e70` 的未提交改动
+- 实施者自述：`.converge\active\20260912-o6-material-delta-recert\impl-report.md`（仅参考，不可信其结论）
+
+## 必须核实（逐条结论 + 证据）
+
+1. **范围纪律**：改动是否只落在 plan §5 File Matrix；`refs/*`（第三部）是否与 §12 逐字对照一致（逐处 diff）。
+2. **语义守恒**：预算计数函数、既有 ledger 事件字段、`archive_contract/*` 零改动。
+3. **O1 分级机制正确性（对抗重点）**：
+   - 链构造 = `rev_cur = all_blocks[-1].get("revision_id")` 过滤 + `rev_cur is None` 全归当前段（R2-BLK-1 修法）——逐行核；
+   - **10 条既有负例不反转**：按你自己的推演 + 实跑 `tests/test_loop_a_coverage.py` 逐条确认 rc != 0 仍成立；
+   - legacy 回退 = D1 Option A（仅当前段末块 require_full_pair，行为等价现状）——构造/引用"同段多 legacy 块"场景验证不误伤；
+   - delta 候选块锚定三件套（payload.artifact == T.candidate_artifact；material_revision.sha256 == canon(T)；locator id）+ `delta.base/current/change_class` 三角 + verdict **正向** `== 可执行`；
+   - `changed_sections`/`decisional_anchors` 12 项词表：空/越表值 → FAIL_CLOSED；UNION 交集机械拦截；
+   - D2 错误码单源、D3 解析契约、D4 输入契约、D5 triggers 一致性、D6 计数一致化——逐条对照 design-review.md 单选修法。
+4. **测试判别力（对抗）**：新增 ~29 条测试抽查 ≥6 条，确认"无实现时必红"；
+5. **Acceptance 逐条**：映射测试/命令，pass/fail。
+6. **独立复跑**：`TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`（自述 552 passed/5 skipped）。
+7. **遗留风险**：真实运行中可能爆发的点。
+
+## 输出
+
+- 报告：`.converge\active\20260912-o6-material-delta-recert\audit-report.md`
+  - 首行 verdict：`通过` / `不通过`；1-7 逐条结论 + 证据；blocking 列表（单选修法）；非阻断观察
+- 追加 `attempts.md` 一节 `## Phase 6 · 独立审计结论`
+
+## 回执
+
+verdict；blocking 数；复跑数字；最担心的 1-2 点。

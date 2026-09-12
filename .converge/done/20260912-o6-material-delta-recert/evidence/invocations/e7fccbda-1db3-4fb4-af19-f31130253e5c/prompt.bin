@@ -1,0 +1,49 @@
+# 撰写简报 · O6 material 增量复核机制（candidate-1）
+
+你是 Plan Author（fresh Executor）。把下述设计意图写成可送 ultraverge 三名初审的收敛计划 candidate-1，写到
+`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260912-o6-material-delta-recert\plan.md`。
+只写这一个文件；UTF-8；不做 git 操作。所有行号/符号必须实开文件核对后标注。
+
+## 背景与授权
+
+- O6 出自操作包络层（`docs/plans/active/20260911-converge-operational-envelope.md`）：material revision 现行规则 = "任何字节变化使两份审查同时失效 → 全量双权威重认证"。B 对象实测：7 次材料重认证 ≈ 全部评议成本的一半（复盘 §2/§7，`.converge/done/20260911-op-envelope-b-contract-correction/retrospective.md`）。
+- 用户已两次定调：O6 先评议再定是否实现（B §14 曾 record-only）；2026-09-12 用户裁决"评审趋势收敛 + 达限即通过、小问题执行中解决"。
+- 本对象 = O6 重评 + （若评议支持）机制实现。**触及第三部**（`refs/orchestrator-guide.md:17-32`、`refs/state-schema.md:101-104`，清单 `CONSTITUTION.md:71-72`）→ ultraverge。
+
+## 机制事实（已核，你须复核后引用）
+
+- 材料门：`orchest.py:1095` `_find_material_block`（读 attempts.md 的 `converge.material-revision/v1` fence；无 id 取最后一块；canonical sha256）；`:1133` `_validate_material_gate`（finish 步骤 3.5）：候选 = fresh `{reviewer,outer-reviewer,ultraverge-initial}` + blank-slate `{blank-slate-reviewer,blind-reviewer}` 且 succeeded 且 exact 证据；三处哈希锚点：(a) 当前块 `candidate_artifact` vs 盘上 plan `:1171-1175`；(b) 候选 payload `artifact.sha256/size` vs 盘上 plan `:1267-1272`；(c) 两 payload byte-equal `:1335-1337`；verdict 非阻断检查 `:1340-1361`。
+- review-target payload 规范：`refs/state-schema.md:101-104`（`schema,target_id,revision_id,artifact{...},material_revision{locator,sha256},quality_goal_event_id`；`:104` 即"任何字节变化使两份审查同时失效"句）。
+- 规范句：`refs/orchestrator-guide.md:17-32` 全节（:23 triggers、:27-31 流程、:32 失效句）。
+- calibration：对象 `evidence/calibration-report.json` 已生成（`converge.calibration-report/v1`，corpus_digest `3627eb4d72cf…`，20 entries 全 `unavailable/no_sample`，eligible_samples=0）——O6 为 mechanism-kind 变更，不经数值经验门；报告以 locator+canonical hash 引用（校验逻辑 `budget_gate.py:1682-1699`）。
+
+## 设计意图（candidate-1 的 D1；你可以优化细节但不得改变方向）
+
+**D1 material 修订分级（change_class）+ 增量复核路径**：
+
+1. `converge.material-revision/v1` 块新增必填字段 `change_class: decisional | non-decisional` 与 `changed_sections`（字符串列表）。判定标准（写入计划并被 §12 规范化）：
+   - `decisional` = 触及判定正确性：数值默认/阈值/停止条件/角色与权限/verdict 语义/fail-closed 行为/File Matrix/Acceptance/D 决策本体；
+   - `non-decisional` = 行号/符号引用更新、措辞、附录、与判定无关的文档同步。
+   - 归类由 plan 作者声明、由复核者挑战（判断留在 agent）；**归类争议 = decisional**（fail-safe）。
+2. `decisional` 修订 → 现行全量双权威同字节重认证（不变）。
+3. `non-decisional` 修订 → **单个 fresh delta reviewer**（复用 outer-reviewer 角色，evidence exact）替代双权威：其 review-target payload 增 `delta{base_plan_sha256, current_plan_sha256, declared_class}`，职责 = 实核 diff 确未触及 decisional 内容且 blocking 项已闭合；verdict 必须 `可执行`。
+4. 材料门改造（`_validate_material_gate`）：沿块链（append-only，last-supersedes-all）回溯到最近一个 `decisional` 块：该块须有全量对；其后的每个 `non-decisional` 块须有一个 delta 候选（payload 的 `delta.base_plan_sha256` == 前一有效字节的哈希、`current_plan_sha256` == 盘上 plan）；任何一环缺失 → FailClosed（fail-closed 不降级）。全 non-decisional 链（无任何 decisional 块）→ 维持现状全量对（保守）。
+5. 对抗回归：谎报 non-decisional 但 diff 触及 decisional（delta reviewer 抓住 → 阻断升级全量）；delta payload 伪造 base hash；链中删块；decisional 误标 non-decisional 且 delta reviewer 放行（用例须证明会被 verdict/hash 校验拦住）。
+6. 前向兼容：无 `change_class` 的旧块 = `decisional`（保守缺省）；`refs/state-schema.md:101-104` 与 `refs/orchestrator-guide.md:17-32` 规范句按新语义改写（§12 给逐字对照）。
+
+## 计划结构要求
+
+- frontmatter：`status: candidate-1`、`review_mode: ultraverge`、`object_slug: 20260912-o6-material-delta-recert`。
+- Goal / 证据（B 成本数据 + 材料门行号）/ D1（上述）+ D2（O6 决议协议：若评议否定增量路径 → record-only 收口，机制不实现）。
+- **治理机器块**（附录，`converge.governance-change/v1`）：`change_id: o6-material-delta`；`numeric_changes` 全 `kind: mechanism`（comparison null）；`archaeology_refs`：`git:da81e70` 全 SHA（`git log --format=%H -1` 取）、以及 `.converge/done/20260911-op-envelope-b-contract-correction`（archive: 引用格式见 state-schema）；`calibration` 引用本对象 `evidence/calibration-report.json`（path/sha256/corpus_digest=3627eb4d72cf 开头的完整值/freshness 三键，逐字段照抄实核）；`counterevidence_refs: []`；`user_message_events`：`execution_authorization=989e5ebd-2406-4dcf-bf77-283bcb4e6e17`（B 收口裁决事件，在 B 对象——如需本对象内事件，可由编排层后补，先引用并注明）、`quality_goal=06754e6f-94fc-4a8a-9d80-65f89ae68e3a`。写完后**实跑** `python scripts/budget_gate.py preflight --plan <plan路径>` 验证机器块，输出贴 attempts.md；若 user_message_events 校验要求事件在本对象事件流内而失败，在报告中说明并把该两项改为"编排层后补清单"，不要伪造。
+- Exact File Matrix（预计：`orchest.py`、`refs/orchestrator-guide.md`、`refs/state-schema.md`、`tests/test_loop_a_coverage.py`、`tests/test_process_controller_contract.py`、`scripts/README.md`；按你实核增删）+ §12 逐字对照表 + §11 对抗清单 + Bounded Sequence + Acceptance（条条机械可判定）+ Non-Goals（不动 decisional 全量规则、不改预算限额、O6 否定路径=record-only）。
+- 简洁性硬约束：**candidate-1 全文 ≤ 45KB**（B 的 133KB 教训；超出即删减论证性文字，只保留机制与验收）。
+
+## 产物
+
+- `plan.md`（candidate-1）+ `attempts.md`（撰写记录 + preflight 实跑输出）。
+- 报告：`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260912-o6-material-delta-recert\author-report.md`。
+
+## 回执
+
+plan.md 字节数/SHA-256；preflight 结论；机器块三字段实核值；你实核修正过的行号。

@@ -1,0 +1,31 @@
+# 编排层修订指令 · candidate-1 → candidate-2（UV 三票合并处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260912-o6-material-delta-recert`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-1）
+2. `uv-init-1.md`、`uv-init-2.md`、`uv-init-3.md`（三票初审，逐条 issue 均须处置）
+3. 代码事实实核：`scripts/orchest.py:1089-1361`、`tests/test_loop_a_coverage.py`（TestMaterial* 全部 17 条）
+
+## 三票共识核心修复（逐条按单选修法落地）
+
+1. **统一受控词表**（uv1-B1 / uv2-I-2/I-5 / uv3）：`changed_sections` 与 `decisional_anchors` 统一到**同一 12 项词表**（你在计划中定义并全篇一致）；门禁硬检查：`non-decisional ⇒ changed_sections ∩ UNION(链上所有 prior decisional 块的 decisional_anchors) == ∅`，且 `changed_sections` 为空或含词表外值 → `FAIL_CLOSED`（uv2-I-5①）。
+2. **废除 `["*"]` 哨兵**（uv1-B2 / uv2-I-1）：链回溯见到缺省/缺失 `decisional_anchors` 的旧 decisional 块 → 直接要求其后全部块 full-pair（`FAIL_CLOSED:material-gate:legacy-anchor-requires-full-pair`），不做集合交集。
+3. **anchors 作用域**（uv2-I-2）：选定单选——`decisional_anchors` = 该 revision 全量判定承载章节集合（最近 decisional 块即全局快照），写死并说明理由。
+4. **块锚定统一**（uv1-B3/B4 / uv2-I-4）：full-pair 与 delta 候选统一按"目标块 T"锚定：`payload.artifact == T.candidate_artifact` ∧ `payload.material_revision.sha256 == canon(T)` ∧ locator id == `T.id`；delta 额外要求 `delta.base_plan_sha256 == T.candidate_artifact.sha256` ∧ `delta.current_plan_sha256 == 盘上 plan` ∧ `delta.change_class == non-decisional`。
+5. **delta verdict 正向校验**（uv2-I-3，选 A）：`verdict == 可执行` 才放行；补 `需重新设计` 对抗用例。
+6. **§12 对照表补全**（uv1-B5）：state-schema:101 标题、guide:17 标题、guide 替换文本含完整 12 项词表、`scripts/README.md:151` 替换句，全部逐字列出。
+7. **record-only 分支**（uv1-B6）：§7 抬头声明适用条件；补 record-only 验收集（伞形计划 O6 行更新 + retrospective 记录）与最小序列；"一致否定"机械判据 = 3/3 verdict=需重新设计（或按票面语义写死）。
+8. **测试锚定**（uv1-B7 / uv1-N5）：改为"现有 4 个 TestMaterial* 类（17 条）测试体无删除/修改"按 diff hunks 判定；新测试仅追加文件末尾。
+9. **非阻断全收**：N1 `declared_class`→`change_class` 统一命名；N2 删除死 continue/改前提断言；N3 伞形计划 O6 状态行入 File Matrix（新 F8）；N4 reopen 链边界（按 revision 过滤或"首块 base=null 且必须 decisional"写死其一）；R-1 双向漏报覆盖。
+
+## 硬约束
+
+- frontmatter `status: candidate-2`；修订历史追加；最小手术；**全文仍 ≤ 45KB**。
+- 修完实跑 `python scripts/budget_gate.py preflight --plan <plan路径>`，输出贴 attempts.md；机器块失效则修正至通过。
+- attempts.md 追加三票逐条处置表（issue → 处置 → 落点）。
+
+## 回执
+
+plan.md 字节数/SHA-256；三票 issue 总数与处置数；preflight 结论；词表 12 项清单。

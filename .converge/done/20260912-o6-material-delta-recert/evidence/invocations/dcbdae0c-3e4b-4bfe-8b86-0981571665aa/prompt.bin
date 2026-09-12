@@ -1,0 +1,25 @@
+# 编排层修订指令 · candidate-3 → candidate-4（outer R2 处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260912-o6-material-delta-recert`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-3）
+2. `round-2.md`（R2：R2-BLK-1..n 阻断 + 非阻断；每条带单选修法——**逐条严格采纳**）
+3. `round-1.md`、`uv-init-1/2/3.md`、`attempts.md`
+
+## 必须落地
+
+- **R2-BLK-1（最高优先，fail-open 缺陷）**：采纳其单选修法——**删除对 `_detect_revision_id` 的过滤依赖**；链构造改为：取全部 `converge.material-revision/v1` 块（文档顺序），`rev_cur = all_blocks[-1].get("revision_id")`，`blocks = [b for b in all_blocks if b.get("revision_id", rev_cur) == rev_cur]`，`rev_cur is None` 时全部块归当前段；当前段 = 末块所属段；历史段（revision_id 不同的更早块）仅做段首 decisional 校验、不参与 delta 链；`current = blocks[-1]` 与盘上 plan 的校验保持不变。同步 §3.5/§3.7/F1/A-5。
+- **新增验收（硬要求）**："10 条既有 material 负例不反转"——逐条列出（`test_changed_plan_byte_after_review_invalidates:452`、`test_metadata_only_prompt_evidence_rejected_when_material:464`、`test_post_hoc_hash_injection_rejected:483`、`test_crlf_pollution_fails_closed:531`、`test_duplicate_review_target_block_rejected:572`、`test_payload_referencing_missing_material_id_fails_closed:918`、`test_only_metadata_only_terminals_gate_fails_closed:1087`、`test_qualifying_candidate_with_mismatched_payload_hash_fails:1117`、`test_only_stale_pair_fails_closed:1304`、`test_qualifying_pair_with_non_executable_verdict:1372`），Acceptance 写明"candidate-4 语义下逐条仍 rc != 0"。
+- **R2 其余 BLK/NB**：逐条按 round-2.md 单选修法落地（不遗漏任何一条）。
+- 硬约束：frontmatter `status: candidate-4`；修订历史追加；最小手术；全文 ≤ 45KB；伪代码与 §3.2/§3.5/§3.7/§11/§12 全文联动一致。
+- 修完实跑 `python scripts/budget_gate.py preflight --plan <plan路径>`，输出贴 attempts.md；机器块失效则修正至通过。
+
+## 产物
+
+更新 `plan.md`；追加 `attempts.md` R2 处置表（issue → 处置 → 落点）；报告写入 `.converge\active\20260912-o6-material-delta-recert\repair-report-c4.md`。
+
+## 回执
+
+plan.md 字节数/SHA-256；R2 全部 issue 逐条一句话；preflight 结论；10 条负例验收条目确认。
