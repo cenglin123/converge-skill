@@ -38,6 +38,7 @@ def main() -> int:
     d.add_argument("--harness", default="fake")
     d.add_argument("--meta", action="append", default=[])
     d.add_argument("--stagger", type=int, default=0)
+    d.add_argument("--allow-overwrite", action="append", default=None)
     d.add_argument("--work-dir")
     args = parser.parse_args()
 
@@ -157,6 +158,13 @@ def main() -> int:
                     "overwritten": ["inplace-a.md"],
                     "unexpected_new": ["inplace-b.md"],
                 }, ensure_ascii=False) + "\n")
+        declared = set(getattr(args, "allow_overwrite", None) or [])
+        anomalies = {"inplace-a.md", "inplace-b.md"}
+        if anomalies <= declared and os.environ.get("FAKE_OCSR_LEGACY") != "1":
+            # upstream a5eaf0a semantics: ALL anomalies declared -> batch succeeds
+            # (FAKE_OCSR_LEGACY=1 模拟 a5eaf0a 之前的旧版：即便全声明也 exit 3，
+            #  用于覆盖 adapter 的事后和解路径)
+            return 0
         return 3
 
     print(f"[fake] unknown FAKE_OCSR_MODE: {mode}", file=sys.stderr)

@@ -1034,10 +1034,12 @@ class TestInPlaceEditAcceptance(AdapterBase):
     """Item 2b: path-class non-zero is success iff every mark is declared (and product landed)."""
 
     def test_all_marked_paths_declared_is_success(self):
+        # 旧版 ocsr（a5eaf0a 之前）：即便全声明也 exit 3，走 adapter 事后和解
         declared = [str(self.output_dir / "inplace-a.md"),
                     str(self.output_dir / "inplace-b.md")]
         rc, out, err = run_adapter(
-            self.active, {"FAKE_OCSR_MODE": "path-anomaly-landed"},
+            self.active, {"FAKE_OCSR_MODE": "path-anomaly-landed",
+                          "FAKE_OCSR_LEGACY": "1"},
             *self._adapter_args(in_place_edit=declared))
         self.assertEqual(rc, 0, f"rc={rc} stdout={out} stderr={err}")
         self.assertIn("WARN:in-place-edit-accepted:", out)
@@ -1072,3 +1074,21 @@ class TestInPlaceEditAcceptance(AdapterBase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestAllowOverwritePassthrough(AdapterBase):
+    """ocsr 上游 a5eaf0a：--in-place-edit 以 --allow-overwrite 前送；
+    新版 ocsr 对声明覆盖直接 exit 0，adapter 走正常成功路径（无事后和解 WARN）。"""
+
+    def test_new_ocsr_declared_overwrite_exit0_success(self):
+        declared = [str(self.output_dir / "inplace-a.md"),
+                    str(self.output_dir / "inplace-b.md")]
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "path-anomaly-landed"},
+            *self._adapter_args(in_place_edit=declared))
+        self.assertEqual(rc, 0, f"rc={rc} stdout={out} stderr={err}")
+        self.assertNotIn("in-place-edit-accepted", out)
+        events = _read_events(self.active)
+        self.assertEqual(events[1]["terminal_status"], "succeeded")
+        gate = _read_gate_ledger(self.active)
+        self.assertTrue(any(e.get("event") == "spawn_succeeded" for e in gate))

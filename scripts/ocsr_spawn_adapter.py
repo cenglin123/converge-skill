@@ -716,6 +716,7 @@ def cmd_dispatch(args) -> int:
         return EXIT_ARCHIVE_CLI
 
     # Step 3: ocsr_dispatch.py dispatch (blocking --watch)
+    in_place_edit_declared = list(getattr(args, "in_place_edit", None) or [])
     worker_arg = f"{prompt_path}|{args.model}|{args.label}"
     ocsr_args = [
         "dispatch",
@@ -732,6 +733,11 @@ def cmd_dispatch(args) -> int:
     ]
     if args.watch:
         ocsr_args += ["--watch", "--timeout", str(args.timeout), "--progress"]
+    # 声明式覆盖前送（ocsr 上游 a5eaf0a）：--in-place-edit 的文件名以 --allow-overwrite
+    # 传给 ocsr，使声明路径的覆盖记 declared_overwrite（WARN + 账本）而非批次失败；
+    # 旧版 ocsr 不识别该旗标时，rc=3 的事后和解路径（下方）仍兜底。
+    for _declared in in_place_edit_declared:
+        ocsr_args += ["--allow-overwrite", Path(_declared).name]
     ocsr_proc = subprocess.run(
         [sys.executable, str(ocsr_script), *ocsr_args],
         capture_output=False, text=True, encoding="utf-8",
