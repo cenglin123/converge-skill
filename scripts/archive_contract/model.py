@@ -21,6 +21,7 @@ ARCHIVE_TOTAL_LIMIT = 64 * 1024 * 1024
 EVENT_TYPES = frozenset({
     "invocation-started", "invocation-terminal", "artifact-captured",
     "terminal-decision", "design-review-completion", "user-message",
+    "event-correction",
 })
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "timeout"})
 FAILURE_REASONS = frozenset({"backend-error", "cancelled-by-host", "timeout", "process-interrupted"})
@@ -202,7 +203,58 @@ EVENT_FIELDS = {
         "invocation_event_id", "completion_status", "highlights_ref", "completed_at",
     }),
     "user-message": COMMON_EVENT_FIELDS | frozenset({"host_message_id", "user_quote", "recorded_at"}),
+    "event-correction": COMMON_EVENT_FIELDS | frozenset({
+        "corrected_event_id", "field", "original_value", "corrected_value",
+        "authorized_by_user_message_event_id", "reason", "corrected_at",
+    }),
 }
+
+# ── 更正语义（O1 / D1）──────────────────────────────────────────────────────
+# 闭合身份/顺序字段：任何事件都不可更正（更正只改载荷，不改身份/顺序）。
+CORRECTION_CLOSED_FIELDS = frozenset({
+    "event_id", "sequence", "event_type", "schema_id", "schema_version",
+})
+# 结构引用 + 实例身份/拓扑邻接字段（M2 出边结构引用 + blind-4 Issue-4 + MF-1）：
+# 更正这些字段会在有效视图里改写图拓扑或实例身份，一律不可更正。
+CORRECTION_STRUCTURAL_REF_FIELDS = frozenset({
+    ("invocation-terminal", "started_event_id"),
+    ("invocation-started", "parent_event_id"),
+    ("design-review-completion", "invocation_event_id"),
+    ("invocation-started", "invocation_id"),
+    ("invocation-terminal", "invocation_id"),
+    ("invocation-started", "invocation_kind"),
+    ("invocation-started", "parent_instance_id"),
+    ("invocation-terminal", "instance_id"),
+})
+# 证据/定位载体字段（blind-2 I-2 + blind-3 Issue-1）：已冻结证据字节的身份/定位载体，
+# 允许更正等于让 sha/size/mode/定位在有效视图里漂移，违反 append-only 证据身份不变量。
+CORRECTION_EVIDENCE_FIELDS = frozenset({
+    "prompt_evidence",   # invocation-started
+    "output_evidence",   # invocation-terminal
+    "source_locator",    # artifact-captured
+    "snapshot",          # artifact-captured
+    "sha256",            # artifact-captured
+    "size",              # artifact-captured
+})
+
+
+def correction_field_allowed(target: dict[str, Any], field: str) -> bool:
+    """动态正向白名单（单源 = `EVENT_FIELDS[target.event_type]`）。
+
+    `terminal-decision` 与 `event-correction` 整类不可更正；其余事件仅其 `EVENT_FIELDS`
+    中真实存在、且不在闭合身份字段 / 结构引用与身份邻接字段 / 证据载体字段三者之内的
+    字段可更正。未知字段一并拒绝（`correction-field-not-allowed`）。
+    """
+    if target.get("event_type") in ("terminal-decision", "event-correction"):
+        return False
+    fields = EVENT_FIELDS.get(target.get("event_type"))
+    if fields is None or field not in fields:
+        return False
+    if field in CORRECTION_CLOSED_FIELDS:
+        return False
+    if field in CORRECTION_EVIDENCE_FIELDS:
+        return False
+    return (target["event_type"], field) not in CORRECTION_STRUCTURAL_REF_FIELDS
 
 
 @dataclass(frozen=True)
@@ -573,6 +625,14 @@ def validate_event(event: Any, filename: str | None = None) -> None:
     elif kind == "user-message":
         _timestamp(event["recorded_at"], "recorded_at")
         _text(event["host_message_id"], "host_message_id"); _text(event["user_quote"], "user_quote")
+    elif kind == "event-correction":
+        # 单事件单字段闭集：equal-set 校验已保证 key 集合恰为 EVENT_FIELDS["event-correction"]；
+        # 值形态（单 UUID / 单字符串）在此钉死，批量（数组形态）由这些谓词拒绝。
+        _uuid(event["corrected_event_id"], "corrected_event_id")
+        _uuid(event["authorized_by_user_message_event_id"], "authorized_by_user_message_event_id")
+        _text(event["field"], "field")
+        _text(event["reason"], "reason")
+        _timestamp(event["corrected_at"], "corrected_at")
 
 
 def validate_locator(locator: Any) -> None:
@@ -591,13 +651,145 @@ def validate_locator(locator: Any) -> None:
             raise ArchiveError("locator-secret", "External display locator must be redacted and non-resolvable.")
 
 
+# ── 更正闭包与有效视图（O1 / D1）────────────────────────────────────────────
+def _decision_referenced_ids(events: list[dict[str, Any]]) -> set[str]:
+    """被 4 个 decision 字段**直接**引用（入边）的事件 id 集合。
+
+    仅取 `reviewer_event_id` / `verdict_output_ref` / `supersedes_decision_event_id`
+    / `source_ref`（`model.validate_event_graph`/`validate_reviewer_verdict_authority`
+    实际解析的四条边）。明确排除经 `invocation-terminal.started_event_id` 间接关联的
+    started（R2-8）——它属于可更正载荷面，由 `CORRECTION_STRUCTURAL_REF_FIELDS` 独立闭合
+    其引用字段本身。
+    """
+    referenced: set[str] = set()
+    for event in events:
+        if event.get("event_type") != "terminal-decision":
+            continue
+        for field in ("reviewer_event_id", "verdict_output_ref",
+                      "supersedes_decision_event_id", "source_ref"):
+            value = event.get(field)
+            if isinstance(value, str) and value:
+                referenced.add(value)
+    return referenced
+
+
+def _correction_authorization_binds(correction: dict[str, Any], message: dict[str, Any]) -> bool:
+    """M5 内容绑定：`user_quote` 必须同时含（a）`corrected_event_id` 逐字子串与
+    （b）被更正 `field` 名或逐字 `corrected_value`。删除 `reason` 分支（blind-4 Issue-1）。"""
+    quote = message.get("user_quote")
+    if not isinstance(quote, str):
+        return False
+    if correction["corrected_event_id"] not in quote:
+        return False
+    if correction["field"] in quote:
+        return True
+    corrected = correction.get("corrected_value")
+    if isinstance(corrected, str):
+        return corrected in quote
+    if corrected is not None:
+        return json.dumps(corrected, ensure_ascii=False, sort_keys=True) in quote
+    return "null" in quote
+
+
+def validate_corrections(events: list[dict[str, Any]]) -> None:
+    """更正闭包校验（在应用任何更正**之前**对 raw 事件列表调用，任一违反 fail-closed）。
+
+    规则 1-10 见 `refs/state-schema.md`（archive 段）/当前对象 §3 D1：
+    1 target 缺失；2 sequence 严格小于；3/5 判定闭合；4 字段白名单；
+    6 `original_value` 等于当前 effective 值；7（M3）取代链允许；
+    8/9 授权类型/内容绑定/时序；10 候选有效事件跑完整 `validate_event`。
+    """
+    by_id = {e["event_id"]: e for e in events}
+    decision_referenced = _decision_referenced_ids(events)
+    corrections = sorted(
+        (e for e in events if e.get("event_type") == "event-correction"),
+        key=lambda e: e["sequence"],
+    )
+    # (target_event_id, field) -> 当前 effective 值（按 sequence 升序增量施加）
+    effective: dict[tuple[str, str], Any] = {}
+    corrected_targets: set[str] = set()
+    for correction in corrections:
+        target_id = correction["corrected_event_id"]
+        target = by_id.get(target_id)
+        if target is None:
+            raise ArchiveError("correction-target-missing",
+                               "Correction target event does not exist.", "evidence/events")
+        if not target["sequence"] < correction["sequence"]:
+            raise ArchiveError("correction-sequence",
+                               "Correction must reference an earlier event.", "evidence/events")
+        if target.get("event_type") in ("terminal-decision", "event-correction"):
+            raise ArchiveError("correction-closure-violation",
+                               "Terminal decisions and corrections are closed to correction.", "evidence/events")
+        if not correction_field_allowed(target, correction["field"]):
+            raise ArchiveError("correction-field-not-allowed",
+                               "Field is not eligible for correction.", "evidence/events")
+        if target_id in decision_referenced:
+            raise ArchiveError("correction-closure-violation",
+                               "Event is directly referenced by a terminal decision.", "evidence/events")
+        message = by_id.get(correction["authorized_by_user_message_event_id"])
+        if message is None or message.get("event_type") != "user-message":
+            raise ArchiveError("correction-unauthorized",
+                               "Authorization must resolve to a prior user-message event.", "evidence/events")
+        if not _correction_authorization_binds(correction, message):
+            raise ArchiveError("correction-unauthorized",
+                               "Authorizing user-message quote must bind the corrected event id and field/value.", "evidence/events")
+        if not (correction["sequence"] > message["sequence"] > target["sequence"]):
+            raise ArchiveError("correction-authorization-order",
+                               "Order must be: correction > authorization > corrected event.", "evidence/events")
+        key = (target_id, correction["field"])
+        current = effective[key] if key in effective else target.get(correction["field"])
+        if correction.get("original_value") != current:
+            raise ArchiveError("correction-original-mismatch",
+                               "original_value must equal the current effective value.", "evidence/events")
+        effective[key] = correction.get("corrected_value")
+        corrected_targets.add(target_id)
+    for target_id in corrected_targets:
+        candidate = _apply_corrections_to_event(by_id[target_id], corrections)
+        try:
+            validate_event(candidate)
+        except ArchiveError as exc:
+            raise ArchiveError("correction-value-type",
+                               f"Corrected candidate event fails validation: {exc.code}.", "evidence/events") from exc
+
+
+def _apply_corrections_to_event(event: dict[str, Any], corrections: list[dict[str, Any]]) -> dict[str, Any]:
+    """对单个 target 事件按 sequence 升序施加其全部更正，返回候选有效事件。"""
+    candidate = dict(event)
+    for correction in sorted(corrections, key=lambda e: e["sequence"]):
+        if correction["corrected_event_id"] == event["event_id"]:
+            candidate[correction["field"]] = correction["corrected_value"]
+    return candidate
+
+
+def resolve_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """有效视图：先校验更正闭包，再按 sequence 升序把 `corrected_value` 写入被更正事件的
+    浅拷贝对应字段。输入前置条件是 **raw** 事件列表；返回值不再被任何校验器二次 resolve。
+
+    无 `event-correction` 事件时返回逐个浅拷贝的等价列表（零语义变化）。
+    """
+    validate_corrections(events)
+    corrections = [e for e in events if e.get("event_type") == "event-correction"]
+    if not corrections:
+        return [dict(e) for e in events]
+    overrides: dict[str, dict[str, Any]] = {}
+    for correction in sorted(corrections, key=lambda e: e["sequence"]):
+        overrides.setdefault(correction["corrected_event_id"], {})[correction["field"]] = correction["corrected_value"]
+    resolved: list[dict[str, Any]] = []
+    for event in events:
+        copy = dict(event)
+        copy.update(overrides.get(event["event_id"], {}))
+        resolved.append(copy)
+    return resolved
+
+
 def validate_ledger(root: Path, events: list[dict[str, Any]], *,
                      acknowledged_orphan_reservations: frozenset[str] = frozenset()) -> list[str]:
     """Returns a sorted list of degradation strings for explicitly acknowledged orphan
     reservations (see the `ledger-invocation-orphan` handling below); empty when nothing
     was acknowledged. Every other integrity failure still raises `ArchiveError` — this
-    function's default (`acknowledged_orphan_reservations=frozenset()`) reproduces the
+     function's default (`acknowledged_orphan_reservations=frozenset()`) reproduces the
     prior unconditional fail-closed behavior exactly."""
+    events = resolve_events(events)
     path = root / "gate-ledger.jsonl"
     spawns = [e for e in events if e["event_type"] == "invocation-started" and e["invocation_kind"] == "spawn"]
     if not path.exists():
@@ -724,7 +916,7 @@ def find_orphan_reservations(root: Path) -> list[str]:
             settles[rid] = item
     started_rids: set[str] = set()
     try:
-        for event in load_events(root):
+        for event in resolve_events(load_events(root)):
             if event.get("event_type") == "invocation-started" and event.get("invocation_kind") == "spawn" and event.get("reservation_id"):
                 started_rids.add(event["reservation_id"])
     except ArchiveError:
@@ -743,6 +935,11 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
     if any(not isinstance(rid, str) or not rid for rid in ack):
         raise ArchiveError("orphan-acknowledgement-invalid", "Acknowledged orphan reservation ids must be non-empty strings.", "gate-ledger.jsonl")
     events = load_events(root)
+    effective_events = resolve_events(events)
+    raw_corrections = sorted(
+        (e for e in events if e.get("event_type") == "event-correction"),
+        key=lambda e: e["sequence"],
+    )
     graph_degradations = validate_event_graph(events)
     ledger_degradations = validate_ledger(root, events, acknowledged_orphan_reservations=ack)
     records = []
@@ -755,7 +952,7 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
             records.append({"path": path.name, "sha256": digest, "size": size})
     event_refs = []
     invocations, artifacts, decisions, advisories = [], [], [], []
-    for event in events:
+    for event in effective_events:
         rel = f"evidence/events/{event['sequence']:08d}-{event['event_id']}.json"
         data = (root / rel).read_bytes()
         digest, size = sha256_size(data)
@@ -780,7 +977,7 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
         elif event["event_type"] == "design-review-completion":
             advisories.append(event["event_id"])
     final_ref = decisions[-1] if decisions else None
-    final_event = next((e for e in events if e["event_id"] == final_ref), None)
+    final_event = next((e for e in effective_events if e["event_id"] == final_ref), None)
     final_decision = None
     if final_event:
         final_decision = {
@@ -789,7 +986,7 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
             "value": final_event.get("verdict", final_event.get("accepted_state")),
         }
     allowed_blobs: set[str] = set()
-    for event in events:
+    for event in effective_events:
         for field in ("prompt_evidence", "output_evidence", "snapshot"):
             ref = event.get(field)
             if isinstance(ref, dict) and ref.get("path"):
@@ -853,13 +1050,16 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
             data = path.read_bytes()
             digest, size = sha256_size(data)
             auxiliary_evidence.append({"path": rel, "sha256": digest, "size": size})
+    correction_degradations = {
+        f"correction:{c['corrected_event_id']}:{c['field']}" for c in raw_corrections
+    }
     degradations = sorted({
-        f"model-provenance:{e['evidence_level']}" for e in events
+        f"model-provenance:{e['evidence_level']}" for e in effective_events
         if e["event_type"] == "invocation-terminal" and e["evidence_level"] != "observed"
     } | {
-        f"artifact:{e['artifact_id']}:{e['reproduction_capability']}" for e in events
+        f"artifact:{e['artifact_id']}:{e['reproduction_capability']}" for e in effective_events
         if e["event_type"] == "artifact-captured" and e["reproduction_capability"] != "snapshot"
-    } | set(graph_degradations) | set(ledger_degradations))
+    } | set(graph_degradations) | set(ledger_degradations) | correction_degradations)
     if os.name == "nt":
         degradations.append("permissions:acl-confidentiality-not-verified")
         degradations.sort()
@@ -881,6 +1081,37 @@ def project_manifest(root: Path, revision_id: str = "r1", parent: dict[str, Any]
         "risks": ["same-writer-rewrite-undetectable"],
         "source_resolution": "disabled",
     }
+    if raw_corrections:
+        # omit-when-empty（沿用 acknowledged_orphan_reservations/auxiliary_evidence 惯例）：
+        # 无更正的既有归档 manifest 形状逐字节不变。披露**全部**更正（含被后续取代者）与
+        # 取代链、最终 effective 归属（M3）。
+        supersedes_by_key: dict[tuple[str, str], str] = {}
+        built: list[tuple[int, dict[str, Any]]] = []
+        for correction in raw_corrections:
+            key = (correction["corrected_event_id"], correction["field"])
+            item = {
+                "corrected_event_id": correction["corrected_event_id"],
+                "field": correction["field"],
+                "original_value": correction["original_value"],
+                "corrected_value": correction["corrected_value"],
+                "authorized_by_user_message_event_id": correction["authorized_by_user_message_event_id"],
+                "correction_event_id": correction["event_id"],
+                "supersedes_correction_event_id": supersedes_by_key.get(key),
+                "effective": False,
+            }
+            supersedes_by_key[key] = correction["event_id"]
+            built.append((correction["sequence"], item))
+        effective_correction_id: dict[tuple[str, str], str] = {}
+        for sequence, item in built:
+            effective_correction_id[(item["corrected_event_id"], item["field"])] = item["correction_event_id"]
+        for _, item in built:
+            item["effective"] = effective_correction_id[(item["corrected_event_id"], item["field"])] == item["correction_event_id"]
+        result["corrections"] = [
+            item for _, item in sorted(
+                built,
+                key=lambda pair: (pair[1]["corrected_event_id"], pair[1]["field"], pair[0]),
+            )
+        ]
     if ack:
         # Only present when at least one orphan reservation was explicitly acknowledged —
         # omitted (rather than an empty list) in the overwhelmingly common default case so
@@ -956,6 +1187,7 @@ def final_decision_summary(events: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 
 def validate_event_graph(events: list[dict[str, Any]]) -> list[str]:
+    events = resolve_events(events)
     by_id = {e["event_id"]: e for e in events}
     started_by_invocation: dict[str, dict[str, Any]] = {}
     terminals: set[str] = set()
@@ -1199,6 +1431,22 @@ def render_index_bytes(manifest: dict[str, Any]) -> bytes:
         decision_line = "- none (archive is not eligible until a terminal decision exists)"
     degradations = manifest.get("degradations") or []
     deg_lines = "\n".join(f"- {item}" for item in degradations) if degradations else "- none"
+    corrections = manifest.get("corrections") or []
+    corrections_section = ""
+    if corrections:
+        corr_lines = "\n".join(
+            "- `{target}` field `{field}`: {original} -> {corrected} "
+            "(correction={cid}, supersedes={sup}, effective={eff})".format(
+                target=item["corrected_event_id"], field=item["field"],
+                original=json.dumps(item["original_value"], ensure_ascii=False),
+                corrected=json.dumps(item["corrected_value"], ensure_ascii=False),
+                cid=item["correction_event_id"],
+                sup=item["supersedes_correction_event_id"],
+                eff="true" if item["effective"] else "false",
+            )
+            for item in corrections
+        )
+        corrections_section = f"## Corrections\n\n{corr_lines}\n\n"
     parent = manifest.get("parent_revision")
     revisions = f"- current: {manifest['revision_id']}"
     for prior in manifest.get("revision_chain", []):
@@ -1257,7 +1505,7 @@ def render_index_bytes(manifest: dict[str, Any]) -> bytes:
 
 {deg_lines}
 
-## Revision Timeline
+{corrections_section}## Revision Timeline
 
 {revisions}
 

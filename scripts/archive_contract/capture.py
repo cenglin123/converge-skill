@@ -23,6 +23,10 @@ from .model import (
     validate_reviewer_verdict_authority,
     canonical_round,
     owner_process_liveness,
+    resolve_events,
+    validate_corrections,
+    validate_event_graph,
+    validate_ledger,
 )
 
 DEFAULT_FILE_LIMIT = 16 * 1024 * 1024
@@ -330,7 +334,9 @@ def begin_invocation(root: Path, *, invocation_kind: str, role: str, phase: str,
         prompt_ref["path"] = rel
     parent_instance_id = None
     if invocation_kind == "continue":
-        events = _read_existing(root)
+        # M1：写入期与归档期共用同一有效视图——continue-parent 的实例身份按 effective
+        # 值判定，避免写入期读 raw / 归档期读 effective 的两个真相。
+        events = resolve_events(_read_existing(root))
         parent = next((e for e in events if e.get("event_id") == parent_event_id), None)
         if not parent or parent.get("event_type") != "invocation-started" or parent.get("invocation_kind") != "spawn":
             raise ArchiveError("invocation-parent", "Continue parent must be a Spawn start event.", "evidence/events")
@@ -539,6 +545,9 @@ def _prepare_terminal_decision(fields: dict[str, Any], existing: list[dict[str, 
     stated there as "this fact should not be written to the ledger in the first place".
     An event certain to fail-closed at archive time should not reach the disk.
     """
+    # M1：先 resolve，再派生/判定——写入期与归档期（validate_event_graph 入口同样 resolve）
+    # 共用同一有效视图，消除 raw/effective 分叉触发的永久 fail-closed。
+    existing = resolve_events(existing)
     values = dict(fields)
     derived = derive_decision_fields(existing, values.get("decision_type"))
     for key, expected in derived.items():
@@ -579,6 +588,87 @@ def record_terminal_decision(root: Path, fields: dict[str, Any]) -> dict[str, An
     root = Path(root)
     values = {"event_type": "terminal-decision", "generated_at": _now(), **fields}
     return _commit_event(root, values, prepare=_prepare_terminal_decision)
+
+
+# ── 更正事件（O1 / D1）───────────────────────────────────────────────────────
+def _correction_stream_closed(root: Path, existing: list[dict[str, Any]]) -> None:
+    """MF-4 前置条件：仅事件流已闭合（无未闭合 invocation、无未结清 reservation）时可更正。
+
+    未满足时抛专用码 `correction-precondition-unclosed`（CLI 映射 `FAIL_CLOSED:...`/exit 30），
+    不退化为 `invocation-open`/`ledger-*` 或任何 `correction-*` 码。
+    """
+    started_ids = {e["event_id"] for e in existing if e.get("event_type") == "invocation-started"}
+    terminal_started = {e["started_event_id"] for e in existing if e.get("event_type") == "invocation-terminal"}
+    if started_ids - terminal_started:
+        raise ArchiveError("correction-precondition-unclosed",
+                           "Event stream has unclosed invocations; corrections require a closed stream.",
+                           "evidence/events")
+    ledger_path = root / "gate-ledger.jsonl"
+    if not ledger_path.exists():
+        return
+    reserved: set[str] = set()
+    settled: set[str] = set()
+    for line in ledger_path.read_bytes().splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = strict_json_bytes(line)
+        except Exception:
+            continue
+        if not isinstance(item, dict):
+            continue
+        rid = item.get("reservation_id")
+        if not rid:
+            continue
+        if item.get("event") == "reserved":
+            reserved.add(rid)
+        elif item.get("event") in ("spawn_succeeded", "spawn_failed", "cancelled"):
+            settled.add(rid)
+    if reserved - settled:
+        raise ArchiveError("correction-precondition-unclosed",
+                           "Ledger has unsettled reservations; corrections require a closed stream.",
+                           "gate-ledger.jsonl")
+
+
+def _prepare_correction(root: Path, fields: dict[str, Any], existing: list[dict[str, Any]]) -> dict[str, Any]:
+    """落盘前对 `raw + [pending]` 跑完整有效视图校验（blind-2 I-3）。
+
+    先 `validate_corrections`（更正闭包），再对 `raw + [pending]` **直接调用**
+    `validate_event_graph`（含 reviewer-verdict authority）与 `validate_ledger`——二者各自
+    入口 `resolve_events` 一次；**不得**先 resolve 再把结果传入（二次施加会误报
+    `correction-original-mismatch`）。这就是归档期 `validate_archive` 的同源完整检查链，
+    而非仅 `validate_corrections`。`original_value` 比较基准取当前 effective 值（M3）。
+    """
+    _correction_stream_closed(root, existing)
+    pending = {"schema_id": SCHEMA_ID, "schema_version": SCHEMA_VERSION, **fields,
+               "sequence": len(existing) + 1, "event_id": str(uuid.uuid4())}
+    trial = list(existing) + [pending]
+    validate_corrections(trial)
+    validate_event_graph(trial)
+    validate_ledger(root, trial)
+    return fields
+
+
+def record_correction(root: Path, *, corrected_event_id: str, field: str,
+                      original_value: Any, corrected_value: Any,
+                      authorized_by_user_message_event_id: str, reason: str) -> dict[str, Any]:
+    """追加一条 `event-correction`（单事件单字段），落盘前跑完整有效视图校验。
+
+    仅可在事件流已闭合的 **active** 根调用；已归档对象须 `reopen`→record→`archive`
+    重投影（MF-3）。`original_value` 必须等于目标字段当前 effective 值。
+    """
+    root = Path(root)
+    values = {
+        "event_type": "event-correction",
+        "corrected_event_id": corrected_event_id,
+        "field": field,
+        "original_value": original_value,
+        "corrected_value": corrected_value,
+        "authorized_by_user_message_event_id": authorized_by_user_message_event_id,
+        "reason": reason,
+        "corrected_at": _now(),
+    }
+    return _commit_event(root, values, prepare=lambda f, ex: _prepare_correction(root, f, ex))
 
 
 def record_design_review_completion(root: Path, *, invocation_event_id: str,

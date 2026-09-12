@@ -1093,6 +1093,7 @@ def _init_budget_config(drv: Driver) -> None:
         print(f"[init] local ceilings: {ceilings}")
         print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
         print("[init] quality_path_guaranteed: false")
+        print("[init] envelope-may-block-before-local-ceiling: true")
 
 
 # ─── CLI ──────────────────────────────────────────────────────────────────────

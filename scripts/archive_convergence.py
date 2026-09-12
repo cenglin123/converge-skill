@@ -16,6 +16,8 @@ from pathlib import Path
 from archive_contract import ArchiveError
 from archive_contract import capture, model, presentation, transaction
 
+EXIT_FAIL_CLOSED = 30
+
 
 def _json_object(value: str):
     try:
@@ -286,6 +288,20 @@ def build_parser() -> argparse.ArgumentParser:
     message = sub.add_parser("record-user-message")
     message.add_argument("root", type=Path); message.add_argument("--host-message-id", required=True); message.add_argument("--user-quote", required=True)
 
+    correction = sub.add_parser("record-correction",
+        help="Append one in-band event-correction (single event, single field). Runs the full "
+             "effective-view validation before writing; requires a closed event stream. "
+             "Use --data to pass non-string original/corrected values.")
+    correction.add_argument("root", type=Path)
+    correction.add_argument("--data", type=_json_object,
+        help="Raw event fields as a JSON object (optional; typed flags win on conflict).")
+    correction.add_argument("--corrected-event-id")
+    correction.add_argument("--field")
+    correction.add_argument("--original-value")
+    correction.add_argument("--corrected-value")
+    correction.add_argument("--authorized-by-user-message-event-id")
+    correction.add_argument("--reason")
+
     archive_p = sub.add_parser("archive")
     archive_p.add_argument("active_root", type=Path); archive_p.add_argument("done_root", type=Path); archive_p.add_argument("slug")
     archive_p.add_argument("--declare-orphan-reservation", action="append", default=[], metavar="RESERVATION_ID",
@@ -360,6 +376,36 @@ def main(argv=None) -> int:
         elif args.command == "record-user-message":
             _output(capture.record_user_message(args.root, host_message_id=args.host_message_id,
                 user_quote=args.user_quote), "json")
+        elif args.command == "record-correction":
+            fields = dict(args.data or {})
+            for name in ("corrected_event_id", "field", "original_value", "corrected_value",
+                         "authorized_by_user_message_event_id", "reason"):
+                value = getattr(args, name, None)
+                if value is not None:
+                    fields[name] = value
+            missing = [name for name in ("corrected_event_id", "field", "corrected_value",
+                                         "authorized_by_user_message_event_id", "reason")
+                       if not fields.get(name)]
+            if missing:
+                raise ArchiveError("correction-input-empty",
+                                   f"record-correction missing fields: {', '.join(missing)}.",
+                                   "evidence/events")
+            try:
+                result = capture.record_correction(
+                    args.root,
+                    corrected_event_id=fields["corrected_event_id"],
+                    field=fields["field"],
+                    original_value=fields.get("original_value"),
+                    corrected_value=fields["corrected_value"],
+                    authorized_by_user_message_event_id=fields["authorized_by_user_message_event_id"],
+                    reason=fields["reason"],
+                )
+            except ArchiveError as exc:
+                if exc.code == "correction-precondition-unclosed":
+                    print(f"FAIL_CLOSED:{exc.code}")
+                    return EXIT_FAIL_CLOSED
+                raise
+            _output(result, "json")
         elif args.command == "archive":
             prepare = functools.partial(_prepare,
                 acknowledged_orphan_reservations=frozenset(args.declare_orphan_reservation))

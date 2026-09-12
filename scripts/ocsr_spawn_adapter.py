@@ -384,6 +384,10 @@ def cmd_config_init(args) -> int:
         config["ultraverge_min_reviewers"] = args.ultraverge_min_reviewers
     if args.max_inner_loops is not None:
         config["max_inner_loops"] = args.max_inner_loops
+    for attr in ("task_tier", "task_envelope_initial", "task_envelope_cap"):
+        val = getattr(args, attr, None)
+        if val is not None:
+            config[attr] = val
 
     try:
         state = budget_gate.initialize_state(
@@ -400,6 +404,7 @@ def cmd_config_init(args) -> int:
         print(f"[init] local ceilings: {ceilings}")
         print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
         print("[init] quality_path_guaranteed: false")
+        print("[init] envelope-may-block-before-local-ceiling: true")
     print(f"[config-init] OK (mode={args.mode}, config={config})")
     return EXIT_PROCEED
 
@@ -766,6 +771,11 @@ def build_parser() -> argparse.ArgumentParser:
     ci.add_argument("--max-blind-rechecks", type=int, default=None)
     ci.add_argument("--ultraverge-min-reviewers", type=int, default=None)
     ci.add_argument("--max-inner-loops", type=int, default=None)
+    ci.add_argument("--task-tier", choices=list(budget_gate.TASK_TIERS.keys()), default=None,
+                    help="Task-envelope tier (small/medium/feature/critical); makes the "
+                         "governance-plan envelope gate satisfiable.")
+    ci.add_argument("--task-envelope-initial", type=int, default=None)
+    ci.add_argument("--task-envelope-cap", type=int, default=None)
     ci.add_argument("--force", action="store_true",
                     help="Overwrite an existing _budget-state.json.")
     ci.set_defaults(func=cmd_config_init)

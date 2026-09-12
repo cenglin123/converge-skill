@@ -450,7 +450,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 | `impl_severity_streak_threshold` | 见 budget_gate.py DEFAULTS（单源） | 连续 N 轮 blocking 中 `implementation` 占比 ≥50% → `MODE_SWITCH_REQUIRED` |
 | `preflight_code_block_threshold` | 见 budget_gate.py DEFAULTS（单源） | 收敛前置自检：plan 内 fenced code block 数达此值即 `WARN:code_heavy`（建议剥离或标 `非规范`） |
 | `relay_oscillation_interval` | 3 | 传话编排下振荡裁判的触发间隔（轮）。每 N 轮 spawn 一次性裁判 agent，输入仅 relay-ledger |
-| `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容）。初始化时显示 `quality_path_guaranteed: false`——选档是质量-成本权衡，非到达保证 |
+| `task_tier` | 未配置 | 任务级总信封档位：`small`(4/8) / `medium`(8/16) / `feature`(16/24) / `critical`(20/30)（初始额度/一次性授权上限，见下）。未配置时 `task-envelope` scope 不可用（`reserve --role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`），对其它角色的 reserve/settle 无任何影响（A8 向后兼容）。初始化时显示 `quality_path_guaranteed: false`——选档是质量-成本权衡，非到达保证。**治理计划（含 `converge.governance-change/v1` 机器块）默认要求配置 task-envelope**（preflight 未配置 → `FAIL_CLOSED:governance_requires_task_envelope`）；推荐 `critical`，依据见 `refs/state-schema.md`。非治理计划行为不变。 |
 | `task_envelope_initial` / `task_envelope_cap` | 由 `task_tier` 派生 | 直接覆盖任务档的初始额度/一次性授权上限，无需通过 `task_tier` 四档之一；`cap` 须 `>= initial` |
 
 > **预算执行**：预算由 `scripts/budget_gate.py` 在每次 spawn 前裁决；trust boundary 三级，逐级能力见 framework-adapters 分册（`refs/framework-adapters/claude-code.md` §A.1 / `refs/framework-adapters/kimi-code.md` §A.6 / `refs/framework-adapters/dsh.md` §A.7）；行为禁令「不得靠记忆计数」规范落在 `refs/orchestrator-guide.md` §六，此处仅指针。
@@ -463,7 +463,7 @@ C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 esc
 >
 > **Calibration sample/report**：`converge.calibration-sample/v1`（retrospective 唯一样本）和 `converge.calibration-report/v1`（`distill_antipatterns.py --calibration` 输出）的定位器语法与验证规则见 `refs/state-schema.md`。
 >
-> **Task-envelope 诚实声明**：task-envelope 是用户选定的更严格质量-成本叠加层，可能在本地 8/3/3 上限到达前阻断 instrumented run；它不保证8/3/3 最坏路径可达；在 auditable-only 宿主上无法证明宿主级全量记账。
+> **Task-envelope 诚实声明**：**治理计划默认必须选定**（不再纯 opt-in）；task-envelope 是用户选定的更严格质量-成本叠加层，可能在本地 8/3/3 上限到达前阻断 instrumented run；它不保证8/3/3 最坏路径可达；在 auditable-only 宿主上无法证明宿主级全量记账。
 >
 > **任务级总信封**（`task_tier`/`task_envelope_initial`/`task_envelope_cap`，consumes=`task-envelope`）是与本表其余参数**不同维度、并行叠加**的粗粒度计量，按一次任务的 OCSR/模型调用总量计量（可跨越多次收敛、多个角色、以及 release executor 等 converge 循环外的调用），不消费、也不受 `max_total_reserved_spawns` 约束。agent 需读的角色摘要见 `refs/state-schema.md` §预算 gate「任务档预算 / task-envelope scope」；机制细节（BLOCK 语义、与 total 的正交性、`summary` 命令等）单一权威源 = `scripts/budget_gate.py`（task-envelope 单一权威源）。
 

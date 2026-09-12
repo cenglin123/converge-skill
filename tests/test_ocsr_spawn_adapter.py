@@ -385,6 +385,23 @@ class TestConfigInit(unittest.TestCase):
         raw = (self.active / "_budget-state.json").read_bytes()
         self.assertNotIn(b"\r\n", raw, "_budget-state.json must use LF (eol=lf per .gitattributes)")
 
+    def test_task_tier_passthrough_and_fourth_disclosure_line(self):
+        rc, out, err = self._run_config_init("--task-tier", "critical")
+        self.assertEqual(rc, 0, f"rc={rc} stderr={err}")
+        state = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["config"]["task_tier"], "critical")
+        self.assertIn("[init] local ceilings:", out)
+        self.assertIn("[init] quality_path_guaranteed: false", out)
+        self.assertIn("[init] envelope-may-block-before-local-ceiling: true", out)
+
+    def test_task_envelope_initial_and_cap_passthrough(self):
+        rc, out, err = self._run_config_init(
+            "--task-envelope-initial", "10", "--task-envelope-cap", "12")
+        self.assertEqual(rc, 0, f"rc={rc} stderr={err}")
+        state = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["config"]["task_envelope_initial"], 10)
+        self.assertEqual(state["config"]["task_envelope_cap"], 12)
+
 
 class TestBudgetAccounting(AdapterBase):
     """Phase 2: verify reserve/settle through adapter updates budget_gate ledger correctly."""

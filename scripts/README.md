@@ -165,6 +165,8 @@ ledger/budget 双计数风险；同一 active 目录同一时刻只允许一条�
 
 `budget_gate.py` 支持读取 `converge.governance-change/v1` 唯一 fenced JSON 块作为治理变更的机器输入。prose/Markdown 表格不进入机器解析。窄数值经验门仅对 `kind ∈ default|threshold|stopping_condition` 且 `comparison ∈ {outer,blind}` 的条目生效，返回 `BLOCK:empirical_conflict`。
 
+含该唯一机器块的治理计划在 preflight 时默认要求**被检 plan 的父目录**（`plan.parent`，即对象 active 目录；门禁无任何目录参数）的 `_budget-state.json` 中 task-envelope initial/cap 均可解析；否则 `FAIL_CLOSED:governance_requires_task_envelope`（`read_state` 读取异常含 `state_corrupt:*` 亦统一映射为该码，`state_corrupt:*` 仅作内部 detail）。显式 `--allow-unconfigured-envelope <reason>` 可放行（reason 缺失/空串仍 fail-closed），打印 `WARN:unconfigured-envelope:<reason>` 并把 `{reason,plan,recorded_at}` 持久追加到 `plan.parent/_budget-state.json` 顶层 `envelope_opt_outs`（直接经 `read_state`→`write_state`，绕过 `initialize_state` 的 `needs_write`；写盘前缺 `defaults_version` 则置 2）。未使用 opt-out 的运行不写该键、不改 state 字节；无该机器块且无 `--governance` 的 legacy 路径行为与改造前逐字节一致。
+
 ### task-envelope companion / call_id
 
 `budget_gate.py` 对已配置任务档的非 task-envelope 角色自动创建原子 companion reservation（`call_id` + 互相指向的 `companion_reservation_id`）。Continue 使用显式单 reservation 链接（无 companion）。`accounting_coverage` 取值 `instrumented_complete` / `partial` / `unavailable`，始终声明 `accounting_scope=instrumented_dispatch_only`。

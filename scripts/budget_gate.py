@@ -242,6 +242,17 @@ def _validate_state_shape(st: dict) -> None:
         if k == "total_safety":
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise FailClosed(f"config_type:{k}")
+    # envelope_opt_outs：治理门禁 opt-out 的持久披露载体（M6）。omit-when-empty：
+    # 缺键合法；存在时必须是 list[dict{reason,plan,recorded_at}]（blind-2 I-6）。
+    opt_outs = st.get("envelope_opt_outs")
+    if opt_outs is not None:
+        if not isinstance(opt_outs, list):
+            raise FailClosed("state_corrupt:envelope_opt_outs_not_list")
+        for item in opt_outs:
+            if (not isinstance(item, dict)
+                    or not all(k in item for k in ("reason", "plan", "recorded_at"))
+                    or not all(isinstance(item[k], str) and item[k] for k in ("reason", "plan", "recorded_at"))):
+                raise FailClosed("state_corrupt:envelope_opt_outs_item")
 
 
 def read_state(active: Path) -> dict:
@@ -250,7 +261,7 @@ def read_state(active: Path) -> dict:
         return {"config": {}, "extensions": [], "fsm": {"mode": "standard", "severities": {}}}
     try:
         st = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         raise FailClosed(f"state_corrupt:{e}")
     if not isinstance(st, dict):
         raise FailClosed("state_corrupt:not_object")
@@ -716,6 +727,20 @@ def _task_envelope_hard_cap(state: dict) -> int:
     if tier not in TASK_TIERS:
         raise FailClosed("task_envelope_not_configured")
     return TASK_TIERS[tier]["cap"]
+
+
+def _task_envelope_usable(state: dict) -> bool:
+    """门禁谓词（UV3-15）：initial 与 cap 均可解析才算「可用」。
+
+    不得直接用 `_task_envelope_configured`——仅配 `task_envelope_cap` 时它为真但
+    initial 不可解析（抛 `task_envelope_not_configured`）。
+    """
+    try:
+        _task_envelope_initial(state)
+        _task_envelope_hard_cap(state)
+        return True
+    except FailClosed:
+        return False
 
 
 # ---- 统一 validator（findings 共同根因）------------------------------------
@@ -1727,6 +1752,54 @@ def cmd_preflight_governance(args, plan: Path, gov: dict) -> int:
     return EXIT_PROCEED
 
 
+def _record_envelope_opt_out(active: Path, reason: str, plan: Path) -> None:
+    """持久披露 opt-out（M6，盲点 I-5）：**直接** `read_state`→改 dict→`write_state`，
+    绕过 `initialize_state` 的 `needs_write`（该判定只比较 config/fsm/extensions，会漏写
+    `envelope_opt_outs`）。写盘前 `setdefault("defaults_version", 2)`（MF-2：缺则置 2，
+    与 `initialize_state` 新 state 同形；不覆盖既有 legacy v1）。
+    """
+    state = read_state(active)
+    state.setdefault("defaults_version", 2)
+    state.setdefault("config", {})
+    state.setdefault("extensions", [])
+    state.setdefault("fsm", {"mode": "standard", "severities": {}})
+    opt_outs = state.get("envelope_opt_outs")
+    if not isinstance(opt_outs, list):
+        opt_outs = []
+    opt_outs.append({"reason": reason, "plan": str(plan), "recorded_at": _now()})
+    state["envelope_opt_outs"] = opt_outs
+    write_state(active, state)
+
+
+def _governance_envelope_gate(args, plan: Path) -> int | None:
+    """含唯一 gov 块的治理 plan 的 task-envelope 门禁（O5 / D3，M6）。
+
+    对象 active 目录固定 = `plan.parent`（无 CLI 参数）。返回 None 表示已放行（继续走
+    `cmd_preflight_governance`），或直接返回退出码（FAIL_CLOSED:30 / WARN+continue 由 None
+    表示但已打印 WARN）。
+    """
+    active = plan.parent
+    try:
+        state = read_state(active)
+    except FailClosed:
+        # 损坏 state（state_corrupt:*）统一映射为治理码（blind-2 I-6）。
+        print("FAIL_CLOSED:governance_requires_task_envelope")
+        return EXIT_FAIL_CLOSED
+    if _task_envelope_usable(state):
+        return None
+    reason = getattr(args, "allow_unconfigured_envelope", None)
+    if reason:
+        try:
+            _record_envelope_opt_out(active, reason, plan)
+        except FailClosed:
+            print("FAIL_CLOSED:governance_requires_task_envelope")
+            return EXIT_FAIL_CLOSED
+        print(f"WARN:unconfigured-envelope:{reason}")
+        return None
+    print("FAIL_CLOSED:governance_requires_task_envelope")
+    return EXIT_FAIL_CLOSED
+
+
 def cmd_preflight(args) -> int:
     plan = Path(args.plan)
     if not plan.is_file():
@@ -1775,6 +1848,10 @@ def cmd_preflight(args) -> int:
         print("FAIL_CLOSED:no_governance_block"); return EXIT_FAIL_CLOSED
     if len(gov_blocks) > 1:
         print("FAIL_CLOSED:duplicate_governance_block"); return EXIT_FAIL_CLOSED
+    # O5/D3：含唯一 gov 块的治理计划默认要求对象 active 目录（plan.parent）配置可用信封。
+    gate = _governance_envelope_gate(args, plan)
+    if gate is not None:
+        return gate
     return cmd_preflight_governance(args, plan, gov_blocks[0])
 
 
@@ -2012,6 +2089,7 @@ def cmd_init(args) -> int:
             print(f"[init] local ceilings: {ceilings}")
             print(f"[init] task-envelope: initial={te_initial}, cap={te_cap}")
             print("[init] quality_path_guaranteed: false")
+            print("[init] envelope-may-block-before-local-ceiling: true")
         print("OK")
         return EXIT_PROCEED
     except FailClosed as e:
@@ -2136,6 +2214,11 @@ def main() -> int:
     pf.add_argument("--governance", action="store_true",
                     help="强制治理计划模式：要求唯一 converge.governance-change/v1 "
                          "机器块（缺块 fail closed）；省略时检测到该块亦自动启用")
+    pf.add_argument("--allow-unconfigured-envelope", metavar="REASON", default=None,
+                    help="显式 opt-out：含治理机器块的 plan 未在 plan.parent 配置可用 "
+                         "task-envelope 时，打印 WARN 并把 {reason,plan,recorded_at} 持久写入 "
+                         "plan.parent/_budget-state.json 顶层 envelope_opt_outs（审计可见）。"
+                         "reason 缺失/空串仍 fail-closed。")
     pf.set_defaults(func=cmd_preflight)
 
     sm = sub.add_parser("summary")     # 可验证预算汇总（attempted_dispatch/model_invocation 双计数）

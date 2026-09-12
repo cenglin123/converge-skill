@@ -1938,5 +1938,493 @@ class DerivedDecisionFieldTests(unittest.TestCase):
         self.assertEqual(before, after, "a diagnostic must not append events")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# O1 / D1：event-correction 更正语义（§11 O1 对抗回归 + §8.1 Acceptance）
+# ═══════════════════════════════════════════════════════════════════════════════
+class EventCorrectionTests(unittest.TestCase):
+    setUp = ArchiveContractTests.setUp
+    _append_ledger_pair = ArchiveContractTests._append_ledger_pair
+
+    # ---- helpers ----------------------------------------------------------
+    @staticmethod
+    def _evidence(data):
+        import hashlib
+        return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "evidence_mode": "metadata-only"}
+
+    @staticmethod
+    def _event(kind, sequence, **fields):
+        return {"schema_id": "converge.archive", "schema_version": "1.0", "event_type": kind,
+                "event_id": f"00000000-0000-4000-8000-{sequence:012d}", "sequence": sequence, **fields}
+
+    def _model_graph(self):
+        start = self._event("invocation-started", 1,
+            invocation_id="00000000-0000-4000-8000-000000000101", invocation_kind="spawn",
+            role="outer-reviewer", phase="final-review", round=1, attempt=1,
+            parent_event_id=None, parent_instance_id=None, reservation_id="r1",
+            started_at="2026-07-12T00:00:00+00:00", requested_provider=None, requested_model=None,
+            prompt_evidence=self._evidence(b""))
+        terminal = self._event("invocation-terminal", 2, invocation_id=start["invocation_id"],
+            started_event_id=start["event_id"], completed_at="2026-07-12T00:00:01+00:00",
+            terminal_status="succeeded", instance_id="instance-1", receipt="receipt-1",
+            settlement_ref="gate-ledger.jsonl:r1", resolved_provider=None, resolved_model=None,
+            resolved_family=None, backend=None, backend_version=None, host_evidence_ref=None,
+            evidence_level="unavailable", resolution_source="none",
+            resolution_reason_code="backend-does-not-expose", output_evidence=self._evidence(b"verdict"),
+            failure_reason_code=None, failure_detail=None, legacy_source_path=None)
+        decision = self._event("terminal-decision", 3, decision_type="reviewer-verdict",
+            generated_at="2026-07-12T00:00:02+00:00", reviewer_event_id=terminal["event_id"],
+            review_kind="fresh", verdict="executable", verdict_output_ref=terminal["event_id"],
+            supersedes_decision_event_id=None)
+        return start, terminal, decision
+
+    @staticmethod
+    def _message(sequence, quote):
+        return EventCorrectionTests._event("user-message", sequence,
+            host_message_id=f"m{sequence}", user_quote=quote, recorded_at="2026-07-12T00:00:03+00:00")
+
+    @staticmethod
+    def _correction(sequence, target_event_id, field, original, corrected, message_event_id):
+        return EventCorrectionTests._event("event-correction", sequence,
+            corrected_event_id=target_event_id, field=field, original_value=original,
+            corrected_value=corrected, authorized_by_user_message_event_id=message_event_id,
+            reason="recording fix", corrected_at="2026-07-12T00:00:04+00:00")
+
+    def _ledger_pair(self, rid, round_number, instance_id, role="outer-reviewer"):
+        path = self.active / "gate-ledger.jsonl"
+        reserve = {
+            "event": "reserved", "reservation_id": rid, "ts": "2026-07-12T00:00:00+00:00",
+            "target_round": round_number, "target_role": role, "consumes": "outer",
+            "counts_before": {"outer": 0, "blind": 0, "ultraverge": 0, "total": 0},
+            "ceilings": {"outer": 5, "blind": 1, "ultraverge": 3, "total": 42},
+            "extension_id": None, "tier": "auditable-only",
+        }
+        settle = {"event": "spawn_succeeded", "reservation_id": rid, "ts": "2026-07-12T00:00:01+00:00"}
+        settle["instance_id"] = instance_id
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(reserve) + "\n" + json.dumps(settle) + "\n")
+
+    def _closed_stream(self, *, role, ledger_role, raw_reservation, ledger_reservation,
+                       evidence_level="unavailable", resolution_source="none",
+                       decision=True):
+        """Build a closed spawn+terminal(+decision) stream; return the event dicts."""
+        from archive_contract.capture import begin_invocation, complete_invocation, record_terminal_decision
+        self._ledger_pair(ledger_reservation, 1, "i1", role=ledger_role)
+        started = begin_invocation(self.active, invocation_kind="spawn", role=role,
+            phase="final-review", round_number=1, attempt=1, reservation_id=raw_reservation)
+        terminal = complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="i1", receipt="p1", settlement_ref=f"gate-ledger.jsonl:{ledger_reservation}",
+            evidence_level=evidence_level, resolution_source=resolution_source,
+            resolution_reason_code="backend-does-not-expose", output_bytes=b"v")
+        out = {"started": started, "terminal": terminal}
+        if decision:
+            out["decision"] = record_terminal_decision(self.active, {
+                "decision_type": "reviewer-verdict", "reviewer_event_id": terminal["event_id"],
+                "review_kind": "fresh", "verdict": "executable", "verdict_output_ref": terminal["event_id"],
+            })
+        return out
+
+    def _write_markers(self, decision):
+        marker = f"terminal_decision_event_id: {decision['event_id']}\nterminal_decision_value: executable\n"
+        (self.active / "round-1.md").write_text(marker, encoding="utf-8", newline="\n")
+        (self.active / "retrospective.md").write_text(marker, encoding="utf-8", newline="\n")
+
+    def _archive_and_check(self, slug="case"):
+        import archive_convergence
+        from archive_contract import transaction
+        from archive_contract.presentation import check_view
+
+        done = self.root / "done"
+        done.mkdir(exist_ok=True)
+        target, status = transaction.archive(self.root / "active", done, slug, archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        return target, check_view(target)
+
+    # ---- A1-2 / A1-9：end-to-end archive with a reservation_id correction --------
+    def test_a1_2_a1_9_archive_with_correction_and_manifest_disclosure(self):
+        from archive_contract.capture import record_user_message, record_correction
+
+        stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="PENDING", ledger_reservation="r1")
+        self._write_markers(stream["decision"])
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(self.active, host_message_id="auth",
+            user_quote=f"更正事件 {target_uuid} 的 reservation_id 为 r1")
+        corr = record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
+            original_value="PENDING", corrected_value="r1",
+            authorized_by_user_message_event_id=message["event_id"], reason="record said PENDING")
+
+        target, view = self._archive_and_check()
+        self.assertTrue(view["valid"], view)
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(manifest["corrections"]), 1)
+        entry = manifest["corrections"][0]
+        self.assertEqual(entry["corrected_event_id"], target_uuid)
+        self.assertEqual(entry["field"], "reservation_id")
+        self.assertEqual(entry["corrected_value"], "r1")
+        self.assertEqual(entry["effective"], True)
+        self.assertIn(f"correction:{target_uuid}:reservation_id", manifest["degradations"])
+        started_projection = next(i for i in manifest["invocations"]
+                                  if i["event_id"] == target_uuid)
+        self.assertEqual(started_projection["reservation_id"], "r1")
+        # raw event bytes hash is unchanged by the correction
+        rel = f"evidence/events/{stream['started']['sequence']:08d}-{target_uuid}.json"
+        raw = (target / rel).read_bytes()
+        import hashlib
+        ref = next(e for e in manifest["events"] if e["event_id"] == target_uuid)
+        self.assertEqual(ref["sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertIn(b"## Corrections", (target / "INDEX.md").read_bytes())
+
+    # ---- A1-3：closure (target is decision / referenced by decision) -------------
+    def test_a1_3_decision_target_and_referenced_target_are_closed(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {decision['event_id']} decision_type")
+        corr = self._correction(5, decision["event_id"], "decision_type", "reviewer-verdict",
+                                "user-decision", msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, corr])
+        self.assertEqual(caught.exception.code, "correction-closure-violation")
+
+        # terminal is directly referenced by the decision's reviewer_event_id / verdict_output_ref
+        msg2 = self._message(4, f"更正 {terminal['event_id']} evidence_level")
+        corr2 = self._correction(5, terminal["event_id"], "evidence_level", "unavailable",
+                                 "observed", msg2["event_id"])
+        with self.assertRaises(ArchiveError) as caught2:
+            validate_corrections([start, terminal, decision, msg2, corr2])
+        self.assertEqual(caught2.exception.code, "correction-closure-violation")
+
+    # ---- A1-4：non-decision reference is not an in-edge closure ------------------
+    def test_a1_4_started_referenced_only_by_terminal_is_correctable(self):
+        from archive_contract.model import validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {start['event_id']} reservation_id")
+        corr = self._correction(5, start["event_id"], "reservation_id", "r1", "r1", msg["event_id"])
+        validate_corrections([start, terminal, decision, msg, corr])  # must not raise
+
+    # ---- A1-5 / A1-16：original_value mismatch ---------------------------------
+    def test_a1_5_original_value_mismatch_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {start['event_id']} reservation_id")
+        corr = self._correction(5, start["event_id"], "reservation_id", "WRONG", "r1", msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, corr])
+        self.assertEqual(caught.exception.code, "correction-original-mismatch")
+
+    def test_a1_16_supersede_chain_second_must_use_effective_not_raw(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {start['event_id']} reservation_id")
+        c1 = self._correction(5, start["event_id"], "reservation_id", "r1", "r2", msg["event_id"])
+        # second correction uses the stale raw value instead of the current effective value
+        c2 = self._correction(6, start["event_id"], "reservation_id", "r1", "r3", msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, c1, c2])
+        self.assertEqual(caught.exception.code, "correction-original-mismatch")
+
+    # ---- A1-6 / A1-15：supersede chain allowed + manifest disclosure ------------
+    def test_a1_6_a1_15_supersede_chain_allowed_and_disclosed(self):
+        from archive_contract.capture import record_user_message, record_correction
+
+        stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="r1", ledger_reservation="r1")
+        self._write_markers(stream["decision"])
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(self.active, host_message_id="auth",
+            user_quote=f"更正事件 {target_uuid} 的 reservation_id 为 r1")
+        c1 = record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
+            original_value="r1", corrected_value="r1", authorized_by_user_message_event_id=message["event_id"],
+            reason="first")
+        c2 = record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
+            original_value="r1", corrected_value="r1", authorized_by_user_message_event_id=message["event_id"],
+            reason="second")
+        target, view = self._archive_and_check()
+        self.assertTrue(view["valid"], view)
+        manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
+        corrs = manifest["corrections"]
+        self.assertEqual(len(corrs), 2)
+        self.assertIsNone(corrs[0]["supersedes_correction_event_id"])
+        self.assertEqual(corrs[1]["supersedes_correction_event_id"], c1["event_id"])
+        self.assertFalse(corrs[0]["effective"])
+        self.assertTrue(corrs[1]["effective"])
+
+    # ---- A1-7：closed / unknown fields -----------------------------------------
+    def test_a1_7_closed_and_unknown_fields_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        for field in ("event_id", "sequence", "event_type", "schema_id", "schema_version", "not_a_field"):
+            msg = self._message(4, f"更正 {start['event_id']} {field}")
+            corr = self._correction(5, start["event_id"], field, "x", "y", msg["event_id"])
+            with self.assertRaises(ArchiveError, msg=field) as caught:
+                validate_corrections([start, terminal, decision, msg, corr])
+            self.assertEqual(caught.exception.code, "correction-field-not-allowed", field)
+
+    # ---- A1-8 / A1-17：authorization binding -----------------------------------
+    def test_a1_8_auth_resolution_type_order_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        # nonexistent authorization event
+        corr = self._correction(5, start["event_id"], "reservation_id", "r1", "r1",
+                                "00000000-0000-4000-8000-999999999999")
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, corr])
+        self.assertEqual(caught.exception.code, "correction-unauthorized")
+        # authorization is not a user-message
+        msg_wrong = self._message(4, "quote")
+        corr_wrong = self._correction(5, start["event_id"], "reservation_id", "r1", "r1", start["event_id"])
+        with self.assertRaises(ArchiveError) as caught2:
+            validate_corrections([start, terminal, decision, msg_wrong, corr_wrong])
+        self.assertEqual(caught2.exception.code, "correction-unauthorized")
+        # authorization order: message after correction
+        msg_late = self._message(6, f"更正 {start['event_id']} reservation_id")
+        corr_early = self._correction(4, start["event_id"], "reservation_id", "r1", "r1", msg_late["event_id"])
+        with self.assertRaises(ArchiveError) as caught3:
+            validate_corrections([start, terminal, decision, msg_late, corr_early])
+        self.assertEqual(caught3.exception.code, "correction-authorization-order")
+
+    def test_a1_17_quote_must_bind_id_and_field_or_value(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        for quote in ("更正 PENDING 为 r1",          # field/value but no target id
+                      f"更正事件 {start['event_id']}",  # id but no field/value
+                      "继续，可以"):                   # unrelated semantics
+            msg = self._message(4, quote)
+            corr = self._correction(5, start["event_id"], "reservation_id", "r1", "r1", msg["event_id"])
+            with self.assertRaises(ArchiveError, msg=quote) as caught:
+                validate_corrections([start, terminal, decision, msg, corr])
+            self.assertEqual(caught.exception.code, "correction-unauthorized", quote)
+
+    # ---- A1-12/13/14/22：structural / identity anchor closure -------------------
+    def test_a1_12_a1_13_a1_14_a1_22_structural_fields_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections, correction_field_allowed
+
+        start, terminal, decision = self._model_graph()
+        checks = [
+            (start, "parent_event_id"),
+            (start, "invocation_id"),
+            (start, "invocation_kind"),
+            (start, "parent_instance_id"),
+            (terminal, "started_event_id"),
+            (terminal, "invocation_id"),
+            (terminal, "instance_id"),
+        ]
+        for target, field in checks:
+            self.assertFalse(correction_field_allowed(target, field), field)
+            msg = self._message(4, f"更正 {target['event_id']} {field}")
+            corr = self._correction(5, target["event_id"], field, target.get(field), target.get(field), msg["event_id"])
+            with self.assertRaises(ArchiveError, msg=field) as caught:
+                validate_corrections([start, terminal, decision, msg, corr])
+            self.assertEqual(caught.exception.code, "correction-field-not-allowed", field)
+
+    # ---- A1-18：evidence/locator carrier fields closed --------------------------
+    def test_a1_18_evidence_fields_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections, correction_field_allowed
+
+        start, terminal, decision = self._model_graph()
+        artifact = self._event("artifact-captured", 4, artifact_id="a1", revision_id="r1",
+            captured_at="2026-07-12T00:00:00+00:00", sha256="ab" * 32, size=1,
+            evidence_mode="metadata-only", reproduction_capability="identity-only",
+            source_locator={"kind": "workspace-relative", "workspace_id": "w", "path": "x"},
+            snapshot=None)
+        base = [start, terminal, decision, artifact]
+        cases = [(start, "prompt_evidence"), (terminal, "output_evidence"),
+                 (artifact, "source_locator"), (artifact, "snapshot"),
+                 (artifact, "sha256"), (artifact, "size")]
+        for target, field in cases:
+            self.assertFalse(correction_field_allowed(target, field), field)
+            msg = self._message(9, f"更正 {target['event_id']} {field}")
+            corr = self._correction(10, target["event_id"], field, target.get(field), target.get(field), msg["event_id"])
+            with self.assertRaises(ArchiveError, msg=field) as caught:
+                validate_corrections(base + [msg, corr])
+            self.assertEqual(caught.exception.code, "correction-field-not-allowed", field)
+
+    # ---- A1-5 (value predicate via full validate_event) ------------------------
+    def test_correction_value_type_uses_full_validate_event(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {start['event_id']} reservation_id")
+        corr = self._correction(5, start["event_id"], "reservation_id", "r1",
+                                123, msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, corr])
+        self.assertEqual(caught.exception.code, "correction-value-type")
+
+    # ---- A1-10：existing r2 archive still checks valid -------------------------
+    def test_a1_10_existing_archive_regression(self):
+        from archive_contract.presentation import check_view
+
+        r2 = ROOT / ".converge" / "done" / "20260910-process-controller-consolidation"
+        if not r2.is_dir():
+            self.skipTest("r2 archive not present")
+        view = check_view(r2)
+        self.assertTrue(view["valid"], view)
+
+    # ---- MF-4：precondition unclosed ------------------------------------------
+    def test_mf4_record_correction_requires_closed_stream(self):
+        from archive_contract.capture import begin_invocation, record_correction
+        from archive_contract.model import ArchiveError
+
+        self._ledger_pair("r1", 1, "i1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="p", round_number=1, attempt=1, reservation_id="r1")  # no terminal yet
+        with self.assertRaises(ArchiveError) as caught:
+            record_correction(self.active, corrected_event_id=started["event_id"],
+                field="reservation_id", original_value="r1", corrected_value="r1",
+                authorized_by_user_message_event_id="00000000-0000-4000-8000-999999999999", reason="x")
+        self.assertEqual(caught.exception.code, "correction-precondition-unclosed")
+
+    def test_mf4_cli_returns_exit_30(self):
+        import archive_convergence
+        from archive_contract.capture import begin_invocation
+
+        self._ledger_pair("r1", 1, "i1")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="p", round_number=1, attempt=1, reservation_id="r1")
+        rc = archive_convergence.main([
+            "record-correction", str(self.active),
+            "--corrected-event-id", started["event_id"], "--field", "reservation_id",
+            "--original-value", "r1", "--corrected-value", "r1",
+            "--authorized-by-user-message-event-id", "00000000-0000-4000-8000-999999999999",
+            "--reason", "x"])
+        self.assertEqual(rc, 30)
+
+    # ---- A1-19：write-time full effective-view validation (role) ----------------
+    def test_a1_19_reviewer_role_correction_not_written(self):
+        from archive_contract.capture import record_user_message, record_correction
+        from archive_contract.model import ArchiveError
+
+        stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="r1", ledger_reservation="r1")
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(self.active, host_message_id="auth",
+            user_quote=f"更正事件 {target_uuid} 的 role 为 l2-gate-reviewer")
+        before = len(list((self.active / "evidence" / "events").glob("*.json")))
+        with self.assertRaises(ArchiveError) as caught:
+            record_correction(self.active, corrected_event_id=target_uuid, field="role",
+                original_value="outer-reviewer", corrected_value="l2-gate-reviewer",
+                authorized_by_user_message_event_id=message["event_id"], reason="bad")
+        self.assertEqual(caught.exception.code, "decision-reviewer-authority")
+        after = len(list((self.active / "evidence" / "events").glob("*.json")))
+        self.assertEqual(before, after, "fail-closed correction must not reach the disk")
+
+    # ---- A1-20：write-time full effective-view validation (degradations) --------
+    def test_a1_20_evidence_level_correction_not_written(self):
+        from archive_contract.capture import (begin_invocation, complete_invocation, record_user_message,
+                                              record_correction, record_terminal_decision)
+        from archive_contract.model import ArchiveError
+
+        # observed provenance = no degradation; correcting it to host-reported changes the
+        # derived degradation set while keeping the candidate event value-valid.
+        self._ledger_pair("r1", 1, "i1", role="outer-reviewer")
+        started = begin_invocation(self.active, invocation_kind="spawn", role="outer-reviewer",
+            phase="final-review", round_number=1, attempt=1, reservation_id="r1")
+        terminal = complete_invocation(self.active, started["invocation_id"], terminal_status="succeeded",
+            instance_id="i1", receipt="p1", settlement_ref="gate-ledger.jsonl:r1",
+            resolved_provider="p", resolved_model="m",
+            host_evidence_ref=f"invocation:{started['invocation_id']}:tool-response",
+            evidence_level="observed", resolution_source="tool_response", output_bytes=b"v")
+        message = record_user_message(self.active, host_message_id="auth", user_quote="够了，就这样")
+        record_terminal_decision(self.active, {
+            "decision_type": "user-decision", "decision_kind": "accept-terminal-c",
+            "user_quote": message["user_quote"], "source_ref": message["event_id"],
+            "accepted_state": "accepted-stop",
+        })
+        target_uuid = terminal["event_id"]
+        auth = record_user_message(self.active, host_message_id="auth2",
+            user_quote=f"更正事件 {target_uuid} 的 evidence_level 为 host-reported")
+        before = len(list((self.active / "evidence" / "events").glob("*.json")))
+        with self.assertRaises(ArchiveError) as caught:
+            record_correction(self.active, corrected_event_id=target_uuid, field="evidence_level",
+                original_value="observed", corrected_value="host-reported",
+                authorized_by_user_message_event_id=auth["event_id"], reason="x")
+        self.assertEqual(caught.exception.code, "user-decision-degradations")
+        after = len(list((self.active / "evidence" / "events").glob("*.json")))
+        self.assertEqual(before, after, "must not brick the existing decision")
+
+    # ---- A1-21：orphan diagnostic uses the effective view ----------------------
+    def test_a1_21_orphan_diagnostic_uses_effective_view(self):
+        from archive_contract.capture import record_user_message, record_correction
+        from archive_contract.model import find_orphan_reservations
+
+        stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="PENDING", ledger_reservation="r1", decision=False)
+        self.assertEqual(find_orphan_reservations(self.active), ["r1"])
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(self.active, host_message_id="auth",
+            user_quote=f"更正事件 {target_uuid} 的 reservation_id 为 r1")
+        record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
+            original_value="PENDING", corrected_value="r1",
+            authorized_by_user_message_event_id=message["event_id"], reason="x")
+        self.assertEqual(find_orphan_reservations(self.active), [])
+
+    # ---- A1-11：M1 write-time / archive-time single truth ----------------------
+    def test_a1_11_capture_and_archive_agree_on_effective_view(self):
+        from archive_contract.capture import record_user_message, record_correction, record_terminal_decision
+
+        # raw role l2-gate-reviewer is unauthorized; correction makes it a reviewer.
+        stream = self._closed_stream(role="l2-gate-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="r1", ledger_reservation="r1", decision=False)
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(self.active, host_message_id="auth",
+            user_quote=f"更正事件 {target_uuid} 的 role 为 outer-reviewer")
+        record_correction(self.active, corrected_event_id=target_uuid, field="role",
+            original_value="l2-gate-reviewer", corrected_value="outer-reviewer",
+            authorized_by_user_message_event_id=message["event_id"], reason="wrong role recorded")
+        # write-time: record_terminal_decision resolves the effective view (M1)
+        decision = record_terminal_decision(self.active, {
+            "decision_type": "reviewer-verdict", "reviewer_event_id": stream["terminal"]["event_id"],
+            "review_kind": "fresh", "verdict": "executable",
+            "verdict_output_ref": stream["terminal"]["event_id"],
+        })
+        self._write_markers(decision)
+        _target, view = self._archive_and_check()
+        self.assertTrue(view["valid"], view)
+
+    # ---- A1-23：lifecycle reopen -> record -> archive --------------------------
+    def test_a1_23_reopen_record_archive_reprojection(self):
+        import archive_convergence
+        from archive_contract.capture import record_user_message, record_correction
+
+        stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
+            raw_reservation="r1", ledger_reservation="r1")
+        self._write_markers(stream["decision"])
+        target, view = self._archive_and_check()
+        self.assertTrue(view["valid"], view)
+        old_manifest = (target / "manifest.json").read_bytes()
+
+        done = self.root / "done"
+        rc = archive_convergence.main(["reopen", str(self.root / "active"), str(done), "case"])
+        self.assertEqual(rc, 0)
+        reopened = self.root / "active" / "case"
+        self.assertEqual((reopened / "evidence" / "revisions" / "r1" / "manifest.json").read_bytes(),
+                         old_manifest)
+        self.active = reopened
+        target_uuid = stream["started"]["event_id"]
+        message = record_user_message(reopened, host_message_id="auth-after-reopen",
+            user_quote=f"更正事件 {target_uuid} 的 reservation_id 为 r1")
+        record_correction(reopened, corrected_event_id=target_uuid, field="reservation_id",
+            original_value="r1", corrected_value="r1",
+            authorized_by_user_message_event_id=message["event_id"], reason="post-reopen")
+        target2, status = None, None
+        from archive_contract import transaction
+        done2 = self.root / "done"
+        target2, status = transaction.archive(self.root / "active", done2, "case", archive_convergence._prepare)
+        self.assertEqual(status, transaction.STATUS_COMMITTED)
+        from archive_contract.presentation import check_view
+        final = check_view(target2)
+        self.assertTrue(final["valid"], final)
+        manifest = json.loads((target2 / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["revision_id"], "r2")
+        self.assertEqual(manifest["parent_revision"]["revision_id"], "r1")
+
+
 if __name__ == "__main__":
     unittest.main()

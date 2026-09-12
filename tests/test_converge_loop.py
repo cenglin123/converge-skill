@@ -1029,6 +1029,7 @@ class TestInitializationDisclosure(unittest.TestCase):
                           "init must print quality_path_guaranteed: false when envelope configured")
             self.assertIn("task-envelope:", output)
             self.assertIn("local ceilings:", output)
+            self.assertIn("[init] envelope-may-block-before-local-ceiling: true", output)
 
     def test_init_omits_guarantee_line_when_no_envelope(self):
         """When no task_tier/task_envelope_cap, _init_budget_config output

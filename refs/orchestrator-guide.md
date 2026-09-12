@@ -45,6 +45,7 @@ task-envelope 初始化时显示：
 - 本地 ceilings（outer/blind/inner）
 - 选定 envelope initial/cap
 - `quality_path_guaranteed: false`（选档是质量-成本权衡，非到达保证）
+- 信封可能先于本地 per-scope 上限（8/3/3）阻断 instrumented run（机器输出 `[init] envelope-may-block-before-local-ceiling: true`）
 
 ## 〇、启动决策：converge 还是直接改？
 

@@ -880,6 +880,17 @@ class TestTaskEnvelope(Base):
         c, out, _ = self.reserve("task-envelope", "a")
         self.assertTrue(out.startswith("FAIL_CLOSED:config_type:task_envelope_cap_lt_initial"), out)
 
+    def test_usable_predicate_requires_resolvable_initial_and_cap(self):
+        """UV3-15：cap-only 配置 `_task_envelope_configured` 为真但 initial 不可解析，
+        故治理门禁不得用它当谓词。"""
+        self.set_config(task_envelope_cap=5)
+        state = budget_gate.read_state(self.active)
+        self.assertTrue(budget_gate._task_envelope_configured(state))
+        self.assertFalse(budget_gate._task_envelope_usable(state))
+        self.set_config(task_tier="critical")
+        state = budget_gate.read_state(self.active)
+        self.assertTrue(budget_gate._task_envelope_usable(state))
+
 
 class TestRootFixedFilesUseLFNewlines(Base):
     """plan Phase 5 step 5 (newline policy): gate-ledger.jsonl and _budget-state.json are
@@ -1449,6 +1460,7 @@ class TestGovernancePreflight(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self._tmp.name)
+        run("init", "--active-dir", str(self.dir), "--task-tier", "critical")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1742,6 +1754,87 @@ class TestGovernancePreflight(unittest.TestCase):
         plan.write_bytes("# plan\n纯散文，无机器块。\n".encode("utf-8"))
         c, out, _ = self.preflight(plan, "--governance")
         self.assertEqual(c, 30, out)
+
+    # -- O5/D3 governance envelope gate (M6: plan.parent is the object active dir) --------
+    def write_plan_at(self, directory, gov, report):
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        parts = ["# plan\n"]
+        for obj in (gov, report):
+            parts.append("```json\n" + json.dumps(obj, indent=2, ensure_ascii=False) + "\n```\n")
+        p = directory / "plan.md"
+        p.write_bytes("\n".join(parts).encode("utf-8"))
+        return p
+
+    def test_a2_3_unconfigured_parent_fails_closed(self):
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        unconfigured = self.dir / "unconfigured"
+        plan = self.write_plan_at(unconfigured, gov, report)
+        c, out, _ = self.preflight(plan)
+        self.assertEqual(c, 30, out)
+        self.assertIn("FAIL_CLOSED:governance_requires_task_envelope", out)
+        self.assertFalse((unconfigured / "_budget-state.json").exists())
+
+    def test_a2_4_a2_12_opt_out_persists_and_passes(self):
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        unconfigured = self.dir / "unconfigured"
+        plan = self.write_plan_at(unconfigured, gov, report)
+        c, out, _ = self.preflight(plan, "--allow-unconfigured-envelope", "no envelope yet")
+        self.assertEqual(c, 0, out)
+        self.assertIn("WARN:unconfigured-envelope:no envelope yet", out)
+        state = json.loads((unconfigured / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["defaults_version"], 2)
+        self.assertEqual(state["envelope_opt_outs"][0]["reason"], "no envelope yet")
+        self.assertEqual(state["envelope_opt_outs"][0]["plan"], str(plan))
+        self.assertIn("recorded_at", state["envelope_opt_outs"][0])
+        for key in ("config", "extensions", "fsm"):
+            self.assertIn(key, state)
+
+    def test_a2_6_empty_reason_fails_closed(self):
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        plan = self.write_plan_at(self.dir / "unconfigured", gov, report)
+        c, out, _ = self.preflight(plan, "--allow-unconfigured-envelope", "")
+        self.assertEqual(c, 30, out)
+        self.assertIn("FAIL_CLOSED:governance_requires_task_envelope", out)
+
+    def test_a2_11_no_bypass_to_another_configured_dir(self):
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        # dir B is configured, but there is no CLI parameter to point at it.
+        other = self.dir / "other-configured"
+        other.mkdir()
+        run("init", "--active-dir", str(other), "--task-tier", "critical")
+        plan = self.write_plan_at(self.dir / "unconfigured", gov, report)
+        c, out, _ = self.preflight(plan)
+        self.assertEqual(c, 30, out)
+
+    def test_a2_13_corrupt_state_maps_to_governance_code(self):
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        target = self.dir / "corrupt"
+        plan = self.write_plan_at(target, gov, report)
+        (target / "_budget-state.json").write_text("{ this is not json", encoding="utf-8")
+        c, out, _ = self.preflight(plan)
+        self.assertEqual(c, 30, out)
+        self.assertIn("FAIL_CLOSED:governance_requires_task_envelope", out)
+        self.assertNotIn("state_corrupt", out)
+
+    def test_a2_13_non_utf8_state_maps_to_governance_code(self):
+        # §9-b：非法 UTF-8 的 _budget-state.json 也须归入 state_corrupt:*，
+        # 由治理门统一映射为治理码——不得裸泄 internal:UnicodeDecodeError。
+        report = self.make_report([])
+        gov = self.make_gov(report, self.restore_changes())
+        target = self.dir / "non-utf8"
+        plan = self.write_plan_at(target, gov, report)
+        (target / "_budget-state.json").write_bytes(b"\xff\xfe{ not utf-8")
+        c, out, _ = self.preflight(plan)
+        self.assertEqual(c, 30, out)
+        self.assertIn("FAIL_CLOSED:governance_requires_task_envelope", out)
+        self.assertNotIn("UnicodeDecodeError", out)
+        self.assertNotIn("state_corrupt", out)
 
 
 # ---------------------------------------------------------------------------
