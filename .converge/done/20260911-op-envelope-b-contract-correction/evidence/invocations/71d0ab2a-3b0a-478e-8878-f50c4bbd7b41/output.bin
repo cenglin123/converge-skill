@@ -1,0 +1,416 @@
+---
+status: candidate-1
+created_at: 2026-09-12
+updated_at: 2026-09-12（由 draft 扩展为 ultraverge 初审 candidate-1）
+review_mode: ultraverge
+scope:
+  - converge-skill
+depends_on:
+  - 20260911-op-envelope-a-tooling-hardening（已完成并归档，`.converge/done/20260911-op-envelope-a-tooling-hardening`）
+object_slug: 20260911-op-envelope-b-contract-correction
+---
+
+# 子计划 B · 归档契约更正语义 + 自指 bootstrap 通道 + 治理成本边界（O1 + O3 + O5 + O6）
+
+> 2026-09-12 用户裁决：撤销独立子计划 C，把 O5（治理类任务默认配置 task-envelope）与 O6（material 增量复核评议）
+> 并入本对象一并 ultraverge 收敛。理由：O5 的规范句位于 CONSTITUTION 第三部受保护文件
+> （`refs/state-schema.md:440-454`、`refs/orchestrator-guide.md:42-47`、`SKILL.md:453-468`），
+> 本就必须 ultraverge；合并可省一次完整 ultraverge 流程。
+>
+> 本文件是 **candidate-1**，供 ultraverge 三名初审并发评议。所有 `文件:行` 引用以 2026-09-12 HEAD `13da605`
+> 工作树实核为准；凡草案行号与实核不符者，本节以实核为准（见 §2 修正说明）。
+
+---
+
+## 1. Goal
+
+让 append-only 归档契约在不改写历史字节的前提下，容纳「编排层记录错误」的合法、显式、可审计更正；
+让「用 converge 修 converge 自身」有显式、可审计、有次数上限的合法通道，消除归档与被修机制之间的依赖循环；
+让治理类任务默认被 task-envelope 覆盖，避免用最紧的 per-scope 上限修治理机制；
+并对 material 增量复核是否可替代全量同字节双审，给出**先评议、后裁决**的收敛期裁决协议。
+
+四个目标各自对应一个决策：D1=O1、D2=O3、D3=O5、D4=O6。
+
+---
+
+## 2. 证据（全部经本作者实核；行号差异已标注）
+
+> 说明：以下每条依据均在本机以 `read`/`grep` 实核。草案简报中的少数行号有偏差，本表给**实核值**并在「修正」列注明。
+> 未实核的断言一律不写入本计划的决策依据。
+
+### 2.1 O1 依据（归档契约封闭性）
+
+| # | 断言 | 实核位置 | 实核结论 | 修正 |
+|---|---|---|---|---|
+| O1a | `EVENT_TYPES` 恰为 6 类，无 correction | `scripts/archive_contract/model.py:21-24` | 已核：`invocation-started/invocation-terminal/artifact-captured/terminal-decision/design-review-completion/user-message` | 与简报一致 |
+| O1b | `EVENT_FIELDS` 定义 6 类事件的字段集 | `model.py:178-205`（`COMMON_EVENT_FIELDS` :178，`EVENT_FIELDS` :179-205） | 已核 | 简报称 :179-205，实核 `EVENT_FIELDS` 定义起始 :179，COMMON 在 :178 |
+| O1c | `validate_event` 为封闭等集（extra/missing 即拒绝） | `model.py:437-458`；封闭等集判定 :456-458 | 已核：函数定义在 :437；terminal-decision 二次特化 :445-455；`set(event) != set(expected_fields)` :456-458 | 简报称 :444-458，实核 :437-458（特化 :445-455，等集 :456-458） |
+| O1d | event graph 校验 | `model.py:958-1037` | 已核 | 一致 |
+| O1e | ledger 配对 binding | `model.py:642-644`（`ledger-binding-missing` :642-644） | 已核 | 一致 |
+| O1f | ledger status 配对，`cancelled+pre_execution=True` 可配 failed | `model.py:678-686`（含 :679-682） | 已核 | 一致 |
+| O1g | 错误码 | `model.py:642-644`、`model.py:678-684` | 已核 | 一致 |
+| O1h | 全仓无 `disclosed_correction` 字段、无 `correction` 事件类型 | `grep -rin "disclosed_correction"` = 0；`EVENT_TYPES` 无 correction；`correction` 仅作为散文出现在历史文档/事件 56 的 `host_message_id` 中 | 已核（作为「事件类型/字段」为零命中；作为普通英文词有历史散文命中，不构成契约机制） | 简报「全仓 0 命中」需精确表述为「无 correction 事件类型/字段」 |
+| O1i | 事故：r2 事件 55 `reservation_id` 误写 `PENDING`，由用户授权披露式更正 | `.converge/done/20260910-process-controller-consolidation/evidence/events/00000056-bbdffdc8-...json`（`user-message`，`host_message_id=opencode-20260911-event55-correction`，`user_quote=授权披露式更正：把事件 55 的 reservation_id 从 PENDING 改为真实存在的 81a2537ea9eb`）；事件 55 现值为 `81a2537ea9eb` | 已核：事故与授权留痕真实存在；**更正实际是以带外方式改写了事件 55 的既有文件**（当前树/git 中事件 55 已是更正后字节），契约内无任何 in-band 更正记录 | 简报叙述成立；补充：这正是 O1 缺口的本质——无带内更正通道，只能带外改写 |
+| O1j | 先例：`--declare-orphan-reservation` 披露机制 | `scripts/archive_convergence.py:291-294` → `model.py:884-893`（`acknowledged_orphan_reservations`，omit-when-empty） + 降级串 `model.py:656-666` | 已核 | 一致 |
+
+### 2.2 O3 依据（自指 bootstrap / 鸡生蛋）
+
+| # | 断言 | 实核位置 | 实核结论 | 修正 |
+|---|---|---|---|---|
+| O3a | reopen：marker + 父 manifest 入 revisions/ | `scripts/archive_contract/transaction.py:305-327`（marker :321-326） | 已核 | 一致 |
+| O3b | `derive_supersedes_decision_event_id` | `model.py:924-937` | 已核 | 一致 |
+| O3c | capture 强制派生，冲突拒绝 | `scripts/archive_contract/capture.py:523-554`（`decision-derived-field-conflict` :549） | 已核 | 一致 |
+| O3d | finish 步骤 7/8 用当前代码重放全部事件 | `scripts/orchest.py:1686-1692`（步骤 7 archive）、`:1694-1698`（步骤 8 check）；`model.load_events` 内嵌 `validate_event` 于 `model.py:413` | 已核：步骤 7/8 调用 `archive_convergence.py`，后者经 `load_events` 逐事件 `validate_event`；这就是「修归档契约须先有新代码」的机制位置 | 一致 |
+| O3e | r2 归档对象因 `ledger-status-conflict` 面临循环 | `model.py:683-684` + 归档路径 O3d | 已核：新语义未落地前，用旧校验归档新对象会被旧规则拦 | 一致 |
+
+### 2.3 O5 依据（治理信封）
+
+| # | 断言 | 实核位置 | 实核结论 | 修正 |
+|---|---|---|---|---|
+| O5a | `TASK_TIERS` 四档 + `critical/ultraverge` 别名 | `scripts/budget_gate.py:124-132` | 已核：small 4/8、medium 8/16、feature 16/24、critical 20/30，`critical/ultraverge=critical` | 一致 |
+| O5b | opt-in 判定 | `budget_gate.py:692-694` | 已核：`"task_tier" in c or "task_envelope_cap" in c` | 一致 |
+| O5c | 未配置时 `reserve --role task-envelope` fail-closed | `budget_gate.py:1137-1139`（`ceiling(state,"task-envelope")` 触发 `FailClosed("task_envelope_not_configured")`，输出经 `_run` :2077-2086 变为 `FAIL_CLOSED:task_envelope_not_configured`）；另 `companion-reserve` 显式码在 :1314 | 已核：raises 点在 :1139；输出格式在 :2082 | 简报称「:1165-1169 附近」，实核为 **:1139**（reserve）与 **:1314**（companion-reserve） |
+| O5d | 未配置行为不变（A8 向后兼容） | `refs/state-schema.md:454` | 已核 | 一致 |
+| O5e | preflight 当前不读 gate state | `budget_gate.py:2134-2139`（parser 仅 `--plan`/`--governance`） | 已核 | 一致 |
+| O5f | 治理 preflight 结构 | `budget_gate.py:1730-1778`（fence 提取 :1754-1762、gov 块判定 :1770-1777、:1778 转 `cmd_preflight_governance` :1718-1727 → `_validate_governance_change` :1540-1652 → `_resolve_and_check_report` :1655-1680 → `_numeric_empirical_conflicts` :1683-1715） | 已核 | 一致 |
+| O5g | 最小侵入插入点 | `budget_gate.py:1777` 之后、`:1778` 之前 | 已核 | 一致 |
+| O5h | 初始化披露三处 | `budget_gate.py:1983-2019`（三行 :2012-2014）；`scripts/converge_loop.py:1072-1095`（:1093-1095）；`scripts/ocsr_spawn_adapter.py:362-404`（:394-402） | 已核 | 一致 |
+| O5i | adapter CLI 未暴露 `--task-*` | `ocsr_spawn_adapter.py:760-771` | 已核：仅 `--converge-active/--mode/--max-outer-loops/--max-blind-rechecks/--ultraverge-min-reviewers/--max-inner-loops/--force` | 一致 |
+| O5j | 「信封可能先于本地上限阻断」无任何代码路径打印 | `grep` 全 `scripts/` 未命中该句；最接近散文在 `SKILL.md:466` | 已核 | 一致 |
+| O5k | 第三部受保护清单 | `CONSTITUTION.md:67-78`；第四部程序 `:91-96` | 已核 | 一致 |
+| O5l | r2 单对象 gate-ledger 共 23 条 reserved | `.converge/done/20260910-process-controller-consolidation/gate-ledger.jsonl` 实测：总 23；executor 5、ultraverge-initial 3、outer-reviewer 6、design-reviewer 5、blind-reviewer 4 | 已核（脚本计数复算） | 一致 |
+
+### 2.4 O6 依据（material 增量复核）
+
+| # | 断言 | 实核位置 | 实核结论 |
+|---|---|---|---|
+| O6a | material revision 后须两个不同 fresh Spawn 审查相同最终 plan 字节；任何字节变化使两份审查同时失效 | `SKILL.md:462`；`refs/orchestrator-guide.md:17-36`；`refs/state-schema.md:95-97` | 已核 |
+| O6b | r2 3 轮修订 = 多轮双审 spawn（成本动机） | r2 gate-ledger：blind-reviewer 4、outer-reviewer 6；结合 O6a | 已核（计数） |
+
+### 2.5 既有测试区（受影响候选，实核类/行）
+
+| 文件 | 实核锚点 |
+|---|---|
+| `tests/test_archive_convergence.py` | 44+ 个 `def test_*`（含 `test_b4_unknown_event_field_is_rejected` :680、`test_strict_ledger_bidirectional_binding` :306、`test_terminal_decision_union_rejects_design_review` :408 等） |
+| `tests/test_budget_gate.py` | `class TestTaskEnvelope` :785、`class TestGovernancePreflight` :1448 |
+| `tests/test_converge_loop.py` | `class TestInitializationDisclosure` :1003 |
+| `tests/test_ocsr_spawn_adapter.py` | `class TestConfigInit` :315 |
+| `tests/test_process_controller_contract.py` | `test_r2_governance_contracts_present` :130、`test_orchest_exact_write_points_not_hardcoded` :199、`test_no_new_direct_gate_accounting_calls_outside_authorized_files` :268 |
+
+---
+
+## 3. 决策
+
+> 全篇不做「A 或 B」式未选定表达；凡出现分叉，均在本节选定并在 Acceptance 验证。
+
+### D1（O1）— 最小 in-band `correction` 事件 + 有效视图投影
+
+**选定方案**：新增第 7 种事件类型 `correction`（append-only，不修改任何既有事件字节），归档/检查时用「有效视图」（raw events + corrections）做图与 ledger 校验，manifest 保留原值并披露更正。
+
+**Closed 字段集**（加入 `EVENT_FIELDS["correction"]`）：
+```
+COMMON_EVENT_FIELDS | frozenset({
+  "corrected_event_id",                 # 被更正事件（必为更低 sequence 的既有事件）
+  "field",                              # 被更正字段名
+  "original_value",                     # 必须与目标事件当前 raw 值逐字相等
+  "corrected_value",                    # 更正后的值
+  "authorized_by_user_message_event_id",# 必须引用更早的 user-message 事件
+  "reason",                             # 非空有界字符串
+  "corrected_at",                       # 时间戳
+})
+```
+
+**可更正字段（正向白名单，硬编码常量 `CORRECTABLE_FIELDS`）**，取记录/定位类字段，刻意排除一切授权与判定字段：
+```
+{"reservation_id", "round", "attempt", "requested_provider", "requested_model"}
+```
+关键取舍（非「或」）：**不采用字段黑名单**。黑名单会在未来新增事件字段时默认放行未知字段，属 fail-open；正向白名单对未来新增字段默认拒绝，符合 fail-closed。
+
+**更正闭包规则（`validate_corrections`，在 `validate_event_graph` 之前调用）**，任一违反即 fail-closed：
+1. `correction-target-missing`：`corrected_event_id` 不存在；
+2. `correction-sequence`：目标 `sequence` 必须 **小于** correction 事件；
+3. `correction-field-not-allowed`：`field` 不在 `CORRECTABLE_FIELDS`，或不属于目标事件的 `EVENT_FIELDS[target_kind]`；
+4. `correction-original-mismatch`：`original_value` ≠ 目标事件当前 raw 值；
+5. `correction-closure-violation`：目标事件被**任何** terminal-decision 引用（`reviewer_event_id`/`started_event_id`/`source_ref`/`supersedes_decision_event_id`/`verdict_output_ref`），或目标事件本身是 terminal-decision / correction 事件；
+6. `correction-unauthorized`：`authorized_by_user_message_event_id` 未解析到更早的 `user-message` 事件；
+7. `correction-chained`：同一 `(corrected_event_id, field)` 已存在一条 correction（每字段至多更正一次，禁止链式重写）；
+8. `correction-value-type`：`corrected_value` 经目标字段同源类型校验（如 `round` 必须 null/正整数，`reservation_id` 非空有界字符串）。
+
+**有效视图**：新增 `apply_corrections(events) -> list[dict]`，返回逐事件浅拷贝并套用更正值；`validate_event_graph` / `validate_ledger` / `project_manifest` 的语义校验一律走有效视图；`load_events` 仍只做 raw 逐事件校验与序列/ID 唯一性校验（保持 append-only 字节与文件名契约）。
+
+**披露**：`project_manifest` 在 `degradations` 增加 `correction:{event_id}:{field}`（复用 `model.py:856-865` 的 set 并集模式），并新增 `corrections` 披露段（omit-when-empty，沿用 `acknowledged_orphan_reservations` 的 `model.py:884-893` 惯例），内容为 `{correction_event_id, corrected_event_id, field, original_value, corrected_value, authorized_by_user_message_event_id}` 排序列表；`INDEX.md` 渲染 `corrections` 块（`render_index_bytes`，与 `degradations` 同风格）。原值保留在两处：raw 事件文件字节不变 + correction 事件的 `original_value`。
+
+**调用入口**：`archive_convergence.py` 新增 `record-correction` 子命令；`capture.py` 新增 `record_correction(...)`，落盘前先跑 `validate_corrections` 全图检查（与 `_prepare_terminal_decision` 同哲学：注定 fail-closed 的事件不落盘）。
+
+**明确边界**：correction 只能修复「语法合法但语义写错」的字段值（`validate_event` 先于 correction 运行，语法非法的事件永不被 correction 拯救）；不提供删除事件、不提供修改已闭合判定、不提供批量重写。
+
+### D2（O3）— 显式、单次、可审计的自指 bootstrap 通道
+
+**选定方案**：新增机器声明 `converge.bootstrap-channel/v1`，只授权「顺序 + 计量 + 事后独立审计」，**不放松任何 fail-closed 校验**。独立计量选定为 **task-envelope**（放弃「专用 scope」分叉：新增专用 scope 会引入第二个计量器，违反 Non-Goal「不新增控制器」，且与既有 `task-envelope` 正交维度重复）。
+
+**Closed 字段集**：
+```
+{"schema", "self_referential", "repairs", "use_limit",
+ "independent_audit_required", "independent_audit_ref",
+ "authorized_by_user_message_event_id", "declared_at"}
+```
+约束：
+1. `self_referential` 必须为 `true`；
+2. `repairs` 为非空路径/符号列表，至少含一处 `scripts/archive_contract/` 或第三部受保护文件；
+3. `use_limit` 必须为整数 `1`（单对象单次）；
+4. `independent_audit_required` 必须为 `true`；`independent_audit_ref` 在归档前填入一个「未参与实现」的 fresh 角色的产物 locator；
+5. `authorized_by_user_message_event_id` 必须解析到本对象内更早的 `user-message`；
+6. 同一 active 对象第二次声明 → `bootstrap-second-declaration` fail-closed；
+7. 声明仅在 `review_mode: ultraverge` 对象被接受，否则 `bootstrap-scope-not-ultraverge`。
+
+**顺序语义**：允许「最小修复先落地 → 事后由未参与实现的 fresh 审计验收 → 再 finish/archive」。实现方式：`orchest.cmd_finish` 在步骤 7/8（`:1686-1698`）识别 bootstrap 声明，要求 `independent_audit_ref` 已在事件流中登记，否则 `bootstrap-independent-audit-missing` fail-closed；归档 manifest 增加 `bootstrap_channel` 披露段（omit-when-empty）+ 降级串 `bootstrap:self-referential:{use}`。
+
+**计量语义**：该对象全部真实调用计入 `task-envelope`（由 D3 保证已配置），不回溯套用修复前的 per-scope 上限；但会计入 `total_reservations_issued`（`budget_gate.py:1128`）与本 scope 计数，不绕过任何 BLOCK。
+
+### D3（O5）— 治理类任务默认要求配置 task-envelope
+
+**选定方案（四处改动，均为最小侵入）**：
+
+1. **preflight 新门禁**：`budget_gate.py` parser 在 `:2134-2139` 增加可选 `--active-dir`；`cmd_preflight` 在 `:1777` 之后、`:1778` 之前插入治理信封门：
+   - 仅当进入治理模式（`args.governance` 或检测到唯一 `converge.governance-change/v1` 块）才检查；纯 legacy 路径 `:1763-1769` 在任何新增代码之前 return，行为与改造前逐字节一致；
+   - 治理模式下缺 `--active-dir` → `FAIL_CLOSED:governance_active_dir_required`；
+   - 读取 `state = read_state(active_dir)`；`_task_envelope_configured(state)` 为 false → `FAIL_CLOSED:governance_envelope_not_configured`；
+   - 通过后原样调用 `cmd_preflight_governance`。
+2. **初始化披露补全**：三处各追加**恰好一行**确定输出 `[init] envelope-may-block-before-local-ceiling: true`（`budget_gate.cmd_init:2012-2014`、`converge_loop._init_budget_config:1093-1095`、`ocsr_spawn_adapter.cmd_config_init:400-402`），把 `SKILL.md:466` 的散文声明落成机器可测输出。
+3. **adapter CLI 对齐**：`ocsr_spawn_adapter.py:760-771` 增加 `--task-tier`、`--task-envelope-initial`、`--task-envelope-cap`，并在 `cmd_config_init`（`:378-386`）写入 config dict，消除「adapter 入口无法配置信封」的缺口。
+4. **推荐档位（有依据，不新增 hard cap）**：
+   - **推导 A（机械下限）**：一次 ultraverge 通过的最少派发 = 3 初审 + ≥1 修复轮 outer + 2 material 双审 + 1 设计审查 + 1 终审 + 1 实施 + 1 独立审计 = **10**；
+   - **推导 B（实测）**：r2 单对象 reserved = **23**（O5l 实测）；
+   - **对照既有档位**：small initial 4 < 10（必在机械下限前阻断）；medium initial 8 < 10（同类风险）；feature initial 16 ≥ 10 但 cap 24 距 r2 实测仅 1 余量；critical initial 20 ≥ 10（机械下限 + 一轮完整修复周期仍在 initial 内），cap 30 ≥ 23 且余量 7。
+   - **结论**：治理类（`review_mode: ultraverge`）对象**推荐 `task_tier: critical`（别名 `critical/ultraverge`）**；机制上**只要求「已配置」**，不强制具体档位——用户可用 `task_envelope_initial`/`task_envelope_cap` 显式选择更小值并接受披露的 `quality_path_guaranteed: false`。不引入任何新数值 hard cap。
+
+### D4（O6）— material 增量复核：收敛期裁决项（默认 record-only）
+
+本决策**不在撰写期选边**；它把 O6 定义为「Phase 5 收敛期由独立评议证据裁决」的协议。**默认立场 = record-only**（呼应父索引「不为未观测故障预设机制」）。
+
+**裁决协议（写入 Phase 5 产物，不预设立场）**：
+
+- **实现方（pro-delta）举证义务**（全部满足才允许实现）：
+  1. 机制论证：给出「对 **X 类修订**（X 必须被显式定义：仅措辞/格式/非语义段落，或含判定语义）做 delta 复核，与全量同字节复核产出**相同判定置信**」的可反驳论证；
+  2. 回放样本：至少一个已归档历史对象可作为回放样本，且能机械复现「delta 复核结论 == 全量同字节复核结论」；
+  3. 失效边界：明确 delta 复核在何种字节变化下必须回退全量双审（fail-closed 回退条件）。
+- **保持方（pro-full）举证义务**：
+  1. 反例或置信差论证：指出 X 类修订中 delta 复核会漏判的具体缺陷形态；
+  2. 若 O6a（`SKILL.md:462`）的「任何字节变化使两份审查同时失效」被修改，须给出不削弱质量门的新不变量表述。
+- **裁决规则**：
+  - 满足实现方 1+2+3 → 允许实现，且仍须独立 fresh 审计验收；
+  - 不满足任一条 → **record-only**：只把结论与证据写入 retrospective，不改 `SKILL.md:462` / `refs/orchestrator-guide.md:17-36` / `refs/state-schema.md:95-97`，不新增代码；
+  - 不得以「节省 spawn」作为唯一理由实现（动机不足以替代机制论证）。
+
+---
+
+## 4. Exact File Matrix
+
+> 行号均为本作者 2026-09-12 实核（HEAD `13da605`）。第三部受保护文件显式标出「改哪一句、为什么 ultraverge 允许」（详见 §11 原文→新文对照表）。**本计划未列出的文件一律不改**；Phase 1 扫描发现任何未授权文件即停止（见 §5）。
+
+| # | 文件 | 改动 | 实核锚点（改点落位） | 保护级别 | 关联决策 |
+|---|---|---|---|---|---|
+| F1 | `scripts/archive_contract/model.py` | 加 `correction` 到 `EVENT_TYPES`；加 `EVENT_FIELDS["correction"]`；加 `CORRECTABLE_FIELDS`；加 `apply_corrections`/`validate_corrections`；`validate_event_graph` 接有效视图；`project_manifest` 加 `corrections` 披露 + `correction:` 降级串；`validate_archive` 重投影带 corrections | `:21-24`、`:178-205`、新常量近 `:178`、新函数近 `:437`/`:958`、`:746`、`:856-865`、`:884` 附近、`:1185-1188` | 无（可执行单源） | D1 |
+| F2 | `scripts/archive_contract/capture.py` | 加 `record_correction(...)`，落盘前全图校验；`__all__`/导出对齐 | 新函数近 `:523`（与 `_prepare_terminal_decision` 同哲学） | 无 | D1 |
+| F3 | `scripts/archive_convergence.py` | 加 `record-correction` 子命令接线 | 近 `:283-287`（现有 record-* 子命令区） | 无 | D1 |
+| F4 | `scripts/budget_gate.py` | parser 加 `--active-dir`；`cmd_preflight` 插入治理信封门；`cmd_init` 披露加一行；新增 `governance_envelope_not_configured`/`governance_active_dir_required` | parser `:2134-2139`；插入点 `:1777`→`:1778`；披露 `:2012-2014` | 无 | D3 |
+| F5 | `scripts/converge_loop.py` | 披露加一行 | `:1093-1095` | 无 | D3 |
+| F6 | `scripts/ocsr_spawn_adapter.py` | CLI 加 `--task-tier/--task-envelope-initial/--task-envelope-cap`；`cmd_config_init` 写入 config；披露加一行 | CLI `:760-771`；config `:378-386`；披露 `:400-402` | 无 | D3 |
+| F7 | `scripts/orchest.py` | `cmd_finish` 识别 bootstrap 声明：要求独立审计已登记，否则 fail-closed；归档披露 bootstrap 降级串 | 步骤 7/8 `:1686-1698` | 无 | D2 |
+| F8 | `refs/state-schema.md` | ①`:40` 事件清单补 `correction`；②`:42` 后加更正闭包段；③`:60` manifest 闭包补 `corrections`；④`:440-454` 补治理默认要求 + 推荐档位；⑤加 `converge.bootstrap-channel/v1` 段 | `:40`、`:42` 后、`:60`、`:442`/`:454`、新段近 `:95` | **第三部**（`CONSTITUTION.md:71`） | D1/D2/D3 |
+| F9 | `refs/orchestrator-guide.md` | `:44-47` 披露清单补「信封可能先于本地 8/3/3 上限阻断」条；`:17-36` material revision 段**仅当 D4 裁决实现时**才改（默认不改） | `:42-47` | **第三部**（`CONSTITUTION.md:72`） | D3（D4 条件性） |
+| F10 | `SKILL.md` | `:453` task_tier 行、`:466` 诚实声明行补「治理类默认要求配置」与推荐档位依据指针 | `:453`、`:466` | **第三部**（`CONSTITUTION.md:68`） | D3 |
+| F11 | `refs/reviewer-discipline.md` | **不修改**（显式声明；本计划不触及 reviewer 行为规范） | — | 第三部（`CONSTITUTION.md:77`） | — |
+| F12 | `CONSTITUTION.md` | **不修改**（父索引 Non-Goal「不改 CONSTITUTION.md」；自指保护，任何修改超出本对象范围） | — | 第三部（`CONSTITUTION.md:67`） | — |
+| F13 | `tests/test_archive_convergence.py` | 追加 correction 正/负例 + 有效视图 + 披露测试 | 文件末追加 | 无 | D1 |
+| F14 | `tests/test_budget_gate.py` | `TestGovernancePreflight`（`:1448`）加信封门用例；`TestTaskEnvelope`（`:785`）加治理默认用例 | `:785`、`:1448` | 无 | D2/D3 |
+| F15 | `tests/test_converge_loop.py` | `TestInitializationDisclosure`（`:1003`）加第四行断言 | `:1003` | 无 | D3 |
+| F16 | `tests/test_ocsr_spawn_adapter.py` | `TestConfigInit`（`:315`）加 `--task-*` passthrough + 第四行断言 | `:315` | 无 | D3 |
+| F17 | `tests/test_process_controller_contract.py` | 复核并更新跨文件不变量（新写入点、公开 API 面） | `:130`、`:199`、`:268` | 无 | D1/D2/D3 |
+| F18 | `.converge/done/**`（历史归档） | **只读**，不重写、不迁移、不原地升级 | — | Archive Contract 不变量 | — |
+
+**第三部允许性说明（要点）**：本对象 `review_mode: ultraverge`，依 `CONSTITUTION.md:91-96` 第四部程序修改第三部规范句合法；F8/F9/F10 的每一处改动都在 §11 给出「原文 → 新文」逐句对照，供初审核验「改动必要且最小」。
+
+---
+
+## 5. 新增门禁 × 既有调用点穷举扫描义务（A 对象教训）
+
+> A 对象的教训：新增 fail-closed 门禁若未穷举所有既有调用点，会把合法旧路径误杀。本计划为此设置 **Phase 1 强制扫描**。
+
+### 5.1 本计划新增/变更的判定位点（须逐点扫描）
+
+| 门禁 ID | 位点 | 预期失败码 | 受影响面 |
+|---|---|---|---|
+| G1 | `validate_corrections`（`model.py`，由 `load_events`→`project_manifest`/`validate_archive` 触发） | `correction-*` 8 码 | 所有归档/检查路径 + capture 落盘前 |
+| G2 | `budget_gate.cmd_preflight` 治理信封门 | `governance_envelope_not_configured` / `governance_active_dir_required` | 所有 `preflight` 调用（治理模式） |
+| G3 | 三处 init 披露第四行 | 无 fail-closed（输出形状变更） | `cmd_init`/`_init_budget_config`/`cmd_config_init` 的调用者与测试 |
+| G4 | `orchest.cmd_finish` bootstrap 独立审计门 | `bootstrap-independent-audit-missing` | finish 步骤 7/8 |
+
+### 5.2 Phase 1 扫描步骤（产物：`scan-report.md` + 未授权文件清单）
+
+1. 以 `grep -rn` 穷举：`load_events(`、`project_manifest(`、`validate_archive(`、`validate_event_graph(`、`cmd_preflight(`、`preflight`、`cmd_init(`、`initialize_state(`、`cmd_finish(`、`_task_envelope_configured(` 的全部调用点；
+2. 以 `grep -rn "record-"` 穷举 `archive_convergence.py` 子命令装配点；
+3. 对每个命中，判定是否落在 §4 File Matrix 授权文件内；
+4. **未授权文件即停止**：任一命中落在 §4 之外（尤其 `.converge/done/**`、`refs/reviewer-discipline.md`、`CONSTITUTION.md`、未列出的 `scripts/*`），立即停止并升级本计划（新增 File Matrix 行须重新走评议），不得带内绕过；
+5. 已预先枚举的受影响测试区（实核）：
+
+| 测试文件:类 | 实核行 | 预计受影响点 |
+|---|---|---|
+| `tests/test_archive_convergence.py`（全文件） | — | G1：`test_b4_unknown_event_field_is_rejected` :680、事件图/ledger 全部用例 |
+| `tests/test_budget_gate.py::TestGovernancePreflight` | :1448 | G2：新增信封门用例 |
+| `tests/test_budget_gate.py::TestTaskEnvelope` | :785 | G2/G3 |
+| `tests/test_converge_loop.py::TestInitializationDisclosure` | :1003 | G3：第四行 |
+| `tests/test_ocsr_spawn_adapter.py::TestConfigInit` | :315 | G3 + `--task-*` |
+| `tests/test_process_controller_contract.py` | :130 / :199 / :268 | 新写入点 / 公开 API 面 / 未授权直调扫描 |
+
+6. 扫描结论写入本对象 `scan-report.md`（在 `.converge/active/...` 内，不污染根目录），作为 Phase 2 红测的输入基线。
+
+---
+
+## 6. Bounded Implementation Sequence
+
+> 每步均有产物与验证；未通过验证不进入下一步。所有实现轮次由 OCSR 便宜模型承担，验收由未参与实现的 fresh 角色承担。
+
+### Phase 0 · 升级闸门（先于任何写操作）
+- 动作：确认 `review_mode: ultraverge`；确认本计划将修改第三部文件（F8/F9/F10），故必须 ultraverge；生成当前 HEAD SHA 与工作树 clean 证据。
+- 产物：`attempts.md` 顶部 Phase 0 记录（HEAD、计划 hash、modest 声明）。
+- 验证：HEAD == 评议基线 SHA；工作树除本 active 目录外无未提交改动。
+
+### Phase 1 · 穷举扫描 + 红测
+- 动作：执行 §5.2 全部扫描；对 G1-G4 写**失败红测**（先证明当前代码在目标情形下失败/无门）。
+- 产物：`scan-report.md`；红测提交到对应测试文件（预期 fail）。
+- 验证：`python -m pytest <受影响测试文件> -q` 显示红测按预期失败；scan-report 列出所有命中且无未授权文件。
+
+### Phase 2 · O1（D1）
+- 动作：实现 F1/F2/F3；补 F13 测试（正例：`reservation_id` 更正使 r2 形态对象可归档；负例：§10 O1 全部对抗项）。
+- 产物：代码 + 测试 + `record-correction` 可运行。
+- 验证：G1 红测转绿；`check` 对含 correction 的合成归档返回 `[]`；对未更正错误值仍返回对应 fail diagnosis。
+
+### Phase 3 · O3（D2）
+- 动作：实现 F7；补 F14 中 D2 用例（bootstrap 声明 schema、单次、缺审计 fail-closed）。
+- 产物：bootstrap 声明校验 + finish 门 + 披露。
+- 验证：G4 红测转绿；无声明路径行为逐字节不变（回归测试）。
+
+### Phase 4 · O5（D3）
+- 动作：实现 F4/F5/F6；补 F14/F15/F16。
+- 产物：preflight 信封门 + 三处披露第四行 + adapter `--task-*`。
+- 验证：G2/G3 红测转绿；纯 legacy preflight（无 gov 块）输出与改造前逐字节一致。
+
+### Phase 5 · O6（D4）收敛期裁决
+- 动作：按 D4 协议收集实现方/保持方证据；产出裁决（实现 或 record-only）。
+- 产物：裁决记录（evidence locator + 结论）写入 `attempts.md`，最终并入 retrospective；若裁决为 record-only，则 F9 `:17-36` 不改，且不新增代码。
+- 验证：裁决满足 D4 裁决规则；实现分支须附回放样本机械复现证据。
+
+### Phase 6 · 验证（含独立 fresh 审计）
+- 动作：对 F8/F9/F10 的规范句改动做逐句对照核验；跑完整测试；由**未参与 Phase 2-5 实现**的 fresh 角色做独立审计。
+- 产物：测试报告 + 独立审计报告。
+- 验证：见 §7 Acceptance 全绿；独立审计无未关闭阻断。
+
+### Phase 7 · 收尾
+- 动作：`finish` → `archive` → `check`；补 retrospective/round-N 决策 marker（由工具派生）。
+- 产物：归档目录 + `check` 返回 `[]`。
+- 验证：归档后 `check` valid；契约不变量（append-only、manifest 哈希、reopen/supersede）全部保持。
+
+---
+
+## 7. Acceptance（条条可机械判定）
+
+| # | 命令 | 期望 |
+|---|---|---|
+| A1 | `python -m pytest tests/test_archive_convergence.py tests/test_budget_gate.py tests/test_converge_loop.py tests/test_ocsr_spawn_adapter.py tests/test_process_controller_contract.py -q` | 全绿，0 fail |
+| A2 | `python -m pytest -q`（全量） | 全绿；通过数 ≥ A 对象基线 480 |
+| A3 | 合成含 `correction` 的归档：`python scripts/archive_convergence.py check <合成根> --format json` | 输出 `[]` |
+| A4 | 合成「correction 引用被 terminal-decision 引用的目标」：`... check ... --format json` | 输出含 `code == "correction-closure-violation"` |
+| A5 | 合成「`original_value` 与目标 raw 值不符」 | 输出含 `code == "correction-original-mismatch"` |
+| A6 | 合成「同一 (target,field) 二次更正」 | 输出含 `code == "correction-chained"` |
+| A7 | manifest 投影：对 A3 归档读取 `manifest.json` | 含 `corrections` 段；`degradations` 含 `correction:<event_id>:<field>`；被更正事件 `events[].sha256` 与磁盘原始字节一致 |
+| A8 | 未配置治理 preflight：`python scripts/budget_gate.py preflight --plan <gov-plan> --active-dir <no-envelope-active>` | 输出 `FAIL_CLOSED:governance_envelope_not_configured`，exit 30 |
+| A9 | 治理 preflight 缺 active-dir：`python scripts/budget_gate.py preflight --plan <gov-plan>` | 输出 `FAIL_CLOSED:governance_active_dir_required`，exit 30 |
+| A10 | 纯 legacy preflight（无 gov 块、无 `--governance`）：与改造前同输入 | 输出逐字节一致（`CLEAN`/`WARN:code_heavy`） |
+| A11 | 三处 init 输出：`budget_gate init` / `converge_loop run` / `ocsr_spawn_adapter config-init`（已配置信封） | 均含 `[init] envelope-may-block-before-local-ceiling: true` |
+| A12 | adapter：`ocsr_spawn_adapter config-init --task-tier critical ...` | 成功写入 `_budget-state.json` 的 `config.task_tier` |
+| A13 | bootstrap：finish 带 bootstrap 声明但无独立审计登记 | `FAIL_CLOSED:bootstrap-independent-audit-missing`，exit 30 |
+| A14 | bootstrap：同对象二次声明 | `FAIL_CLOSED:bootstrap-second-declaration`，exit 30 |
+| A15 | 既有归档回归：`python scripts/archive_convergence.py check .converge/done/20260910-process-controller-consolidation --format json` | `[]`（不因新增事件类型而失效） |
+| A16 | 规范句核验：`git diff` 第三部文件 | 每一处改动都能在 §11 对照表中找到对应「原文 → 新文」行，无表外改动 |
+
+---
+
+## 8. Non-Goals
+
+- 不引入通用事件编辑能力；不提供「重写历史」的批量工具。
+- 不放松 fail-closed 默认；correction 与 bootstrap 通道均 opt-in 且显式授权。
+- 不新增控制器/registry/renderer；不为未观测故障预设机制。
+- **O6 默认不实现**（record-only 是默认立场；实现须满足 D4 全部举证义务）。
+- 不修改 `CONSTITUTION.md`（含自指保护清单本身）。
+- 不修改 `refs/reviewer-discipline.md`。
+- 不改判定机制本身（reviewer 拓扑、verdict 语义、预算门裁决）。
+- 不迁移/重写任何历史归档（`.converge/done/**` 只读）。
+- 不新增数值 hard cap；O5 只推荐既有档位。
+
+---
+
+## 9. Risks
+
+| R | 风险 | 触发条件 | 处置 |
+|---|---|---|---|
+| R1 | correction 被当后门 | 有人用 correction 改写授权/判定字段 | D1 正向白名单 + 闭包规则 5 + §10 O1 对抗回归；Phase 6 独立审计 |
+| R2 | bootstrap 通道过宽 | `repairs` 为空/泛化，或 `use_limit>1` | D2 硬校验 `use_limit==1`、`self_referential==true`、必须含受保护/契约路径；二次声明 fail-closed |
+| R3 | O5 与未配置任务冲突 | 旧治理流程未配置 task-envelope 直接跑 preflight | 仅治理模式生效；纯 legacy 路径逐字节不变（A10）；错误码给出明确修复动作 |
+| R4 | 规范句修改无法回滚 | 第三部改动引入语义漂移 | §11 逐句对照 + A16 `git diff` 核验；改动最小化（只加不删关键不变量） |
+| R5 | G1 误杀既有归档 | 新增 correction 校验误判合法旧事件 | `correction-*` 只在存在 correction 事件时触发；A15 既有归档回归必过 |
+| R6 | init 第四行破坏既有输出断言 | 测试对三行输出做整段匹配 | Phase 1 枚举测试区；F15/F16 同步更新；新行只追加不改前三行 |
+
+---
+
+## 10. 对抗回归要求（必须逐条测试）
+
+### O1（correction）
+1. **越权更正**：`field` 为 `role`/`event_id`/`decision_type`/`user_quote` 等非白名单字段 → 拒绝（`correction-field-not-allowed`）。
+2. **缺授权**：`authorized_by_user_message_event_id` 指向不存在或非 user-message 的事件 → 拒绝（`correction-unauthorized`）。
+3. **已闭合引用**：目标事件被任一 terminal-decision 引用，或目标本身是 terminal-decision → 拒绝（`correction-closure-violation`）。
+4. **链式更正**：同一 `(target,field)` 二次更正 → 拒绝（`correction-chained`）。
+5. **批量重写**：一次提交多个 correction 指向同一目标不同字段，其中任一字段闭包违规 → 整图拒绝（校验在写盘前全图执行）。
+6. **原值伪造**：`original_value` 与目标 raw 值不符 → 拒绝（`correction-original-mismatch`）。
+7. **顺序倒置**：correction 的 sequence 小于目标 → 拒绝（`correction-sequence`）。
+
+### O3（bootstrap）
+1. **超限使用**：`use_limit != 1` 或同对象二次声明 → 拒绝。
+2. **未声明使用**：无 bootstrap 声明却试图走「先落地后审计」顺序 → 走既有 fail-closed 路径，不放行。
+3. **与 reopen 叠加**：reopened 对象（`transaction.reopen:305-327`）再次声明 bootstrap → 按「同 slug 单次」拒绝；父 manifest 不被改写。
+4. **无独立审计**：finish 时 `independent_audit_ref` 未登记 → `bootstrap-independent-audit-missing`。
+
+### O5（治理信封）
+1. **未配置任务直调 preflight**：治理模式 + 未配置 → `governance_envelope_not_configured`。
+2. **legacy 无 gov 块路径**：无 `--governance` 且无 gov 块 → 不进入新门，输出逐字节不变。
+3. **缺 active-dir**：治理模式缺 `--active-dir` → `governance_active_dir_required`。
+4. **adapter 无法配置的反例消除**：`--task-tier` passthrough 成功后 `_task-envelope` 可用。
+
+---
+
+## 11. 规范句修改：原文 → 新文对照表（第三部受保护文件）
+
+> 依 `CONSTITUTION.md:91-96` 第四部程序，本对象 ultraverge 允许修改第三部规范句。以下每处改动「只增不删关键不变量」，并保留原有语义。行号为实核值。
+
+| 文件:行 | 原文（关键句） | 新文（增量） | 理由 |
+|---|---|---|---|
+| `refs/state-schema.md:40` | 「公共字段：`schema_id/schema_version/event_type/event_id/sequence`。…`invocation-started` 拥有…」 | 在事件清单末尾追加：「`correction` 是第 7 种事件，携带 `corrected_event_id/field/original_value/corrected_value/authorized_by_user_message_event_id/reason/corrected_at`；它不修改任何既有事件字节，只经有效视图生效。」 | D1 需要规范层声明事件类型，否则可执行单源与规范单源不一致 |
+| `refs/state-schema.md:42` 后 | （该段末尾「最终 round 与 retrospective 必须反向引用同一 decision event id/value。」） | 加新段：「更正闭包：仅 `CORRECTABLE_FIELDS={reservation_id,round,attempt,requested_provider,requested_model}` 可更正；被任何 terminal-decision 引用的事件、terminal-decision 与 correction 事件本身不可更正；每 `(事件,字段)` 至多一次；`original_value` 必须与 raw 值逐字相等；违者对应 `correction-*` fail-closed。」 | D1 定义闭包，保证 append-only 与判定不可改写 |
+| `refs/state-schema.md:60` | 「manifest 承诺 canonical records、events、…、degradations、parent revision。」 | 在清单补「corrections（omit-when-empty，含原值与更正值）」 | D1 披露进入 manifest 冻结投影 |
+| `refs/state-schema.md:453-454`（task envelope 节） | 「配置方式：…」/「**未配置行为**：…其它任何角色的 reserve/settle 行为与改造前一致」 | 追加 bullet：「**治理类默认**：`review_mode: ultraverge` 的治理对象默认要求配置 task-envelope；治理 preflight 未配置 → `FAIL_CLOSED:governance_envelope_not_configured`。推荐 `task_tier: critical`（`critical/ultraverge`）——机械下限 ≈10、r2 实测 23 reserved 的推导见 `.converge/active/20260911-op-envelope-b-contract-correction/plan.md` §3 D3。非治理对象不受影响（A8 不变）。」 | D3 规范层声明门禁与推荐依据 |
+| `refs/state-schema.md`（新段，近 :95） | （现有 bootstrap 例外段 :95） | 加 `converge.bootstrap-channel/v1` 的 closed 字段与「单对象单次、ultraverge-only、需独立审计」约束 | D2 声明机器格式，避免实现无规范依据 |
+| `refs/orchestrator-guide.md:44-47` | 「task-envelope 初始化时显示：- 本地 ceilings…- 选定 envelope initial/cap…- `quality_path_guaranteed: false`…」 | 追加第 4 条：「- 信封可能先于本地 per-scope 上限（8/3/3）阻断 instrumented run（机器输出 `[init] envelope-may-block-before-local-ceiling: true`）」 | D3 把既有散文声明（`SKILL.md:466`）落成机器可测输出 |
+| `SKILL.md:453` | 「| `task_tier` | 未配置 | …未配置时 `task-envelope` scope 不可用…对其它角色的 reserve/settle 无任何影响（A8 向后兼容）…」 | 句末补：「**治理类（ultraverge）对象默认要求配置**，推荐 `critical`；治理 preflight 未配置即 `FAIL_CLOSED:governance_envelope_not_configured`（非治理对象行为不变）。」 | D3 规范层与机制一致 |
+| `SKILL.md:466` | 「> **Task-envelope 诚实声明**：task-envelope 是用户选定的更严格质量-成本叠加层，可能在本地 8/3/3 上限到达前阻断 instrumented run…」 | 句首补：「**治理类任务默认必须选定**（不再纯 opt-in）；」 | D3 与门禁语义对齐 |
+| `refs/orchestrator-guide.md:17-36` | material revision 同字节双审规则 | **默认不改**；仅当 D4 裁决为「实现」时才改写，且须经新一轮评议 | D4 默认 record-only |
+
+---
+
+## 12. O6 收敛期裁决项（编号与 D4 对应，供三名初审聚焦）
+
+- 本项**不是实现任务**，是「收敛期由证据裁决」的协议；默认产出为 record-only。
+- 三名初审须就以下问题给出立场与举证（见 D4）：
+  1. 「X 类修订」应如何定义才既可机械判定又不被滥用？
+  2. delta 复核与全量同字节复核的「相同判定置信」是否可被机制论证，还是必须依赖回放样本？
+  3. 若无法满足，record-only 应记录哪些证据/边界，供未来对象复用？
+- 禁止在无回放样本时以「成本」为唯一理由推进实现。

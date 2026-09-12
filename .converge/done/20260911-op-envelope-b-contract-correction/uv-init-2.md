@@ -1,0 +1,209 @@
+---
+round: 2
+reviewer_backend: opencode
+reviewer_instance_id: 20260912_112317_5747b7
+generated_at: 2026-09-12T03:34:17.177651+00:00
+verdict: 阻断需修复
+---
+阻断需修复
+
+# uv-init-2 · ultraverge 初审（独立 Reviewer · 第 2 席）
+
+对象：`.converge/active/20260911-op-envelope-b-contract-correction/plan.md`（candidate-1，416 行）
+基线：HEAD `13da6055f173ab1459f62cb36de11bb05b2b19cc`（与计划声明一致）
+方法：计划中每条 `文件:行`/符号/行为断言全部实开核对；代码、测试、历史归档均只读实核。未修改任何文件（本报告除外）。
+
+结论摘要：**阻断需修复**。计划有 4 个目标（D1=O1、D2=O3、D3=O5、D4=O6），其中 D1 的核心闭包规则与自身白名单互斥（无法更正它声称要更正的事件）、D3 的新门禁会击穿 21 处既有治理 preflight 测试而 File Matrix 未给更新路径、D2 的 Goal 主张与机制自述相矛盾且声明宿主完全未定义、D4 的「实现」分支无界。另有若干事实断言失真。目标本身均有价值、可在同一框架内修复，故判 `阻断需修复` 而非 `需重新设计`。
+
+---
+
+## 一、前置自检 5 问
+
+1. **产物身份自洽**：**通过（有命名漂移）**。产物自述四域（契约更正 / 自指 bootstrap / 治理成本边界 / 增量复核裁决），D1-D4 各对应一个决策，内部不矛盾。但 D3 标题与机制触发集合不一致（「治理类」vs `review_mode: ultraverge` vs 代码实际的「治理模式」，见 I2-9），单条 issue。
+2. **产物边界诚实**：**不通过（issue）**。Goal（plan.md:28-30）称「消除归档与被修机制之间的依赖循环」，D2（plan.md:149）却明说「**不放松任何 fail-closed 校验**」。既然不放松校验，finish 步骤 7/8 仍以当前工作树代码重放事件（`orchest.py:1686-1698` 实核无误），依赖关系依旧，只是被显式化 + 事后审计；「消除」为过度主张（见 I2-2）。另「机械下限 = 10」不是下界（见 I2-8）。
+3. **产物数据纯度**：**通过**。无业务数据、无环境硬编码；新增均为机制常量（`CORRECTABLE_FIELDS`、closed 字段集）。
+4. **职责边界自洽**：**不通过（issue）**。D2 的 bootstrap 声明无宿主文件 / 无解析函数 / 无 owner（见 I2-3）；D1 的「有效视图」由谁施加（校验函数内部 vs 调用方）未定界（见 I2-7）；D2 的计量显式依赖 D3（plan.md:168「由 D3 保证已配置」），而 O3/O5 同对象（见拆分建议）。
+5. **命名一致性**：**不通过（issue）**。`bootstrap` 一词在本仓库已至少三义：既有 calibration-report 编译器 bootstrap 例外（`refs/state-schema.md:95`、`refs/orchestrator-guide.md:36`）、legacy 证据导入 `capture.bootstrap_import_legacy`（`scripts/archive_contract/capture.py:600`）、新增自指 `converge.bootstrap-channel/v1`（见 I2-10）。「治理类」与 `review_mode: ultraverge` 同节互换（见 I2-9）。
+
+---
+
+## 二、DR 7 维逐维结论
+
+| 维度 | 结论 | 依据 |
+|---|---|---|
+| DR1 一致性 | **issue** | 闭包规则 #5 列出 `started_event_id`（不属于 terminal-decision），与白名单互斥（I2-1）；规范句限定 ultraverge，代码门限治理模式（I2-9）；O6a 锚点 `state-schema.md:95-97` 不含失效规则（I2-12）；O1h grep 断言失真（I2-11）。 |
+| DR2 完整性 | **issue** | bootstrap 声明宿主 / 解析 / 单次检测载体缺失（I2-3）；O6 实现分支无 X 类定义 / File Matrix / 测试 / Acceptance（I2-6）；`validate_event` 无 correction 分支安排（I2-15）；21 处既有 preflight 调用点未纳入（I2-5）。 |
+| DR3 可维护性 | **issue** | 21 处既有 preflight 测试与 `scripts/README.md:164` 未纳入 File Matrix（I2-5）；`docs/plans/active/` 存 4 份未跟踪草案副本，与 active plan 双份维护、且违反本计划 Phase 0「clean tree」自检（I2-14）。 |
+| DR4 职责边界 | **issue** | 有效视图施加层未定界（I2-7）；bootstrap 声明 owner 未定（I2-3）；D2→D3 顺序耦合（拆分建议）。 |
+| DR5 残留与冗余 | **issue** | `docs/plans/active/20260911-op-envelope-b-contract-correction.md`（草案，untracked）与 candidate-1 已分叉；`CORRECTABLE_FIELDS` 在代码与 state-schema 两处复述（双单源，I2-10/DR7）。 |
+| DR6 可移植性 | **pass** | 新增均为仓库相对路径与机制常量；无新环境特定路径 / 用户名 / OS 假设。 |
+| DR7 可扩展性 | **issue（轻）** | 白名单硬编码于代码又在规范层复述，未来新增字段须两处同改（双单源）；bootstrap「同 slug 单次」在 `transaction.reopen:305-327` 后如何续算未定义（I2-3）；四域合一的审查面问题（拆分建议）。 |
+
+---
+
+## 三、逐条 issue
+
+### I2-1 · D1 闭包规则与白名单互斥，D1 无法完成其立身用例
+- **severity**: architectural
+- **文件:行**: `plan.md:134`（闭包规则 5）与 `plan.md:125`（`CORRECTABLE_FIELDS`）；证据 `model.py:180-184`（字段归属）、事件 55/57
+- **原文**（:134）：「`correction-closure-violation`：目标事件被**任何** terminal-decision 引用（`reviewer_event_id`/`started_event_id`/`source_ref`/`supersedes_decision_event_id`/`verdict_output_ref`），或目标事件本身是 terminal-decision / correction 事件」
+- **事实核验**：`reservation_id`/`round`/`attempt`/`requested_provider`/`requested_model` 五个白名单字段**只存在于 `invocation-started`**（`model.py:180-184`）。而每个 spawn 的 `invocation-started` 都被其 `invocation-terminal` 经 `started_event_id` 引用（`model.py:487-488` 校验；`validate_event_graph` 还强制所有 started 必有 terminal，`model.py:992-994`）。r2 事故事件 55（`invocation-started`，role=design-reviewer）正是被事件 57（`invocation-terminal`）以 `started_event_id=cabcac00-...` 引用。
+- **影响**：若规则 5 按字面把 `started_event_id` 纳入「被引用」，则 `CORRECTABLE_FIELDS` 的全部字段都落在不可更正集合内 —— **D1 无法完成 O1i/Goal 声称要修复的 `reservation_id` 更正**，A3/A7 无法达成。若实现时忽略 `started_event_id`，则规则 5 含死条款，A4 只测 terminal-decision 引用，规则与验收不一致。两种读法都是缺陷。
+- **单选建议**：**采用替代设计「按目标事件类型 + 判定消费字段定闭包，删除引用邻近度谓词」** —— 规则 5 改为：(a) 目标 `event_type ∈ {terminal-decision, correction}` 即拒；(b) 目标 `field` 不得属于任何 terminal-decision / invocation-terminal 的授权或判定消费字段（用显式常量 `DECISION_CONSUMED_FIELDS`，如 `reviewer_event_id`/`verdict`/`decision_kind`/`accepted_state`/`started_event_id` 仅在被更正字段为它们本身时保护）；(c) 保留规则 1/2/3/4/6/7/8。即 `reservation_id` 是定位字段，更正它不改变 terminal 的引用与判定的值，不应被「被引用」误伤。
+
+### I2-2 · O3 Goal 主张「消除依赖循环」与机制自述「不放松校验」矛盾
+- **severity**: conceptual
+- **文件:行**: `plan.md:28-30`（Goal）与 `plan.md:149`（D2）
+- **原文**（:29）：「让「用 converge 修 converge 自身」有显式、可审计、有次数上限的合法通道，**消除归档与被修机制之间的依赖循环**」；（:149）：「只授权「顺序 + 计量 + 事后独立审计」，**不放松任何 fail-closed 校验**」
+- **事实核验**：`orchest.cmd_finish` 步骤 7/8（`orchest.py:1686-1698`）经 `archive_convergence.py` 用**当前工作树**的 `model.load_events`/`validate_event` 重放事件（`model.py:413`）。不放松校验 ⇒ 被修代码仍须先落地 ⇒ 校验代码仍是「被审对象」，循环未消除，只是被显式化 + 加审计。
+- **影响**：Q2 边界诚实失败。用户的 Goal 预期与交付能力不符；下游可能据此认为存在真逃生舱。
+- **单选建议**：**改 Goal 措辞为「使自指修复的顺序显式、合法、可审计」**，并在 Non-Goals 明确「本机制不消除、也不试图消除校验代码与被修对象的重合」。若坚持「消除」，则须给出真正的机械逃生（如归档时使用经独立审计的冻结校验器快照），但那会放松 fail-closed，须另立设计。
+
+### I2-3 · O3 bootstrap 声明无宿主文件 / 无解析函数 / 无 owner，「单次」与 `review_mode` 均无机械承载
+- **severity**: architectural
+- **文件:行**: `plan.md:151-164`（closed 字段）、`:166`（顺序语义）、`:219`（F7 锚点）、`:220`/`:401`（F8 ⑤）
+- **原文**（:166）：「`orchest.cmd_finish` 在步骤 7/8（`:1686-1698`）识别 bootstrap 声明，要求 `independent_audit_ref` 已在事件流中登记」；（:164）：「声明仅在 `review_mode: ultraverge` 对象被接受」
+- **事实核验**：(a) File Matrix F7 只写 `cmd_finish` 识别，全文未定义声明写在哪个文件、由哪个函数解析；(b) `review_mode` 在 `scripts/`、`refs/`、`SKILL.md`、`CONSTITUTION.md` 中**零出现**（全仓仅 plan.md frontmatter），现有 state 机器字段是 `_budget-state.json.fsm.mode`（实核本 active 目录 `{"fsm":{"mode":"ultraverge"}}`）；(c) `independent_audit_ref` 被要求「已在事件流中登记」，但它本身是声明的字段，二者循环；(d) 「同一 active 对象第二次声明」如何枚举未定义。
+- **影响**：§5.1 G4 声称的 `bootstrap-second-declaration`/`bootstrap-scope-not-ultraverge`/`bootstrap-independent-audit-missing` 三个 fail-closed 码均无机械承载；A13/A14 不可判定。这也直接回应「会不会成为常规后门」：触发器无法证明自身受限，后门风险不可评估。
+- **单选建议**：**定义声明的宿主与生命周期，并改用既有机器状态** —— 在 active 目录新增固定文件（如 `bootstrap-channel.json`，纳入 ROOT_FIXED/`is_root_allowed_name` 与 File Matrix），用其内容而非 plan frontmatter 判断；`ultraverge` 判定改用 `_budget-state.json.fsm.mode == "ultraverge"`；「单次」按该文件的不可重写 + 已登记审计 locator 判定；把新函数与文件加入 F7/F8 与红测。若做不到，则本对象只记录 O3 为 prose 顺序规则（见 I2-4）。
+
+### I2-4 · O3 与 r2 既有先例重复，未证明存在 ordering + 审计无法解决的新故障（Occam/Non-Goal）
+- **severity**: architectural
+- **文件:行**: `plan.md:56-65`（O3 依据）、`:147-168`（D2）
+- **原文**（:30）：「消除归档与被修机制之间的依赖循环」
+- **事实核验**：r2 归档对象（`.converge/done/20260910-process-controller-consolidation/attempts.md`）已用「**归档次序决策：本对象的 archive 依赖 D11 代码落地（否则 n 永拦），故收敛对象的 finish/archive 推迟到实施与最终审计完成之后执行**」解决了同形问题，且该归档现 `check` valid（实核 `{"valid":true}`），**未引入任何新机器声明/事件/门禁**。
+- **影响**：违反 Non-Goal「不为未观测故障预设机制」与 Occam；新增机器契约 + state-schema 段 + finish 门禁的成本没有得到「既有做法失败」的证据支撑。
+- **单选建议**：**本对象将 O3 降级为 record-only（把 r2 已有的 ordering+审计先例写成 prose 规范/指南），不新增机器契约**；仅当能提供「r2 式 ordering + 审计确实失败/被绕过」的实证时，才另立对象实现 bootstrap 通道。
+
+### I2-5 · D3 新门禁击穿 21 处既有治理 preflight 调用点，File Matrix/Acceptance 未给更新路径
+- **severity**: architectural
+- **文件:行**: `plan.md:176`（缺 `--active-dir` → FAIL_CLOSED）、`:226`（F14）、`:245`（G2 受影响面）；代码 `tests/test_budget_gate.py:1546-1547` 及 `:1554,1566,1575,1584,1591,1602,1613,1623,1633,1641,1656,1666,1675,1682,1690,1699,1708,1717,1724,1736,1743`
+- **原文**（:176）：「治理模式下缺 `--active-dir` → `FAIL_CLOSED:governance_active_dir_required`」；F14 仅「`TestGovernancePreflight`（`:1448`）**加**信封门用例」
+- **事实核验**：`TestGovernancePreflight.preflight()`（`tests/test_budget_gate.py:1546-1547`）恒为 `run("preflight", "--plan", str(plan), *extra)`，**21 处全部不传 `--active-dir`**，且均带 `converge.governance-change/v1` 块（即都会进入新门）。`scripts/README.md:164` 的治理 preflight 文档同样未含 `--active-dir`。
+- **影响**：改造后这 21 个用例由「期望 exit 0 / `PREFLIGHT_OK` / `BLOCK:empirical_conflict`」变为 `FAIL_CLOSED:governance_active_dir_required`，A1「全绿」**不可达成**；这正是 A 对象教训「新增门禁 × 既有调用点」的重演（A 对象已因同类两轮阻断）。
+- **单选建议**：**保留 fail-closed 语义，但把 21 处既有调用点 + `scripts/README.md:164` 显式纳入 F14/File Matrix（逐处补 `--active-dir`，并对既有用例给出「原文→新文」），同时在 Phase 1 加「缺 active-dir 必 fail-closed」红测**。不建议改为静默跳过（那会让门禁形同虚设）。
+
+### I2-6 · D4「实现」分支无界：无 X 类定义、无 File Matrix、无测试、无 Acceptance
+- **severity**: structural
+- **文件:行**: `plan.md:187-204`（D4）、`:221`（F9 条件性）、`:299-302`（Phase 5）、`:344`（Non-Goal）
+- **原文**（:194）：「给出「对 **X 类修订**（X 必须被显式定义：仅措辞/格式/非语义段落，或含判定语义）做 delta 复核…」」；（:201-202）：「满足实现方 1+2+3 → 允许实现」
+- **事实核验**：F9 对 `refs/orchestrator-guide.md:17-36` 标注「仅当 D4 裁决实现时才改」，但 §4 File Matrix 无 O6 代码行、§7 Acceptance 无 O6 条目、§6 Phase 5 无有界实施/验证步骤。X 类在 D4 中仍是「或」式未选定。
+- **影响**：若 Phase 5 判为「实现」，计划没有可执行的实施范围与验收，收敛无法收口；「默认 record-only」的立场在结构上被「允许实现」架空。
+- **单选建议**：**本对象将 O6 明确为 record-only（结论与证据写入 retrospective，不改 `SKILL.md:462`/`orchestrator-guide.md:17-36`/`state-schema.md:95-100`，不新增代码）**；任何实现另立后续对象，并在该对象中显式定义 X 类、回放样本、fail-closed 回退条件与 File Matrix/Acceptance。
+
+### I2-7 · D1「有效视图」施加层未定界，`validate_archive` 直接校验点未纳入 File Matrix，`check` 仍会失败
+- **severity**: implementation
+- **文件:行**: `plan.md:139`（load_events 保持 raw）、`:213`（F1 锚点仅到 `:1185-1188`）；代码 `model.py:1178-1181` vs `model.py:1185-1188`
+- **原文**（:139）：「`load_events` 仍只做 raw 逐事件校验…`validate_event_graph` / `validate_ledger` / `project_manifest` 的语义校验一律走有效视图」
+- **事实核验**：`validate_archive` 在 `model.py:1178-1181` **直接**调用 `load_events`→`validate_event_graph(events)`→`validate_ledger(root, events)`（raw），随后才在 `:1185-1188` 调 `project_manifest`。F1 的 validate_archive 锚点只列 `:1185-1188`。若 correction 更正的是 `reservation_id`（如事件 55 形态），`:1181` 的 raw `validate_ledger` 会因 ledger 无法与 raw 值配对而 `ledger-invocation-orphan`/`ledger-binding-missing`，`check` 失败。另外「由谁施加有效视图」未说明，存在调用方与校验函数各施加一次（双施加）或都不施加的风险。
+- **影响**：A3（合成 correction 归档 `check` 返回 `[]`）与 A15 回归不可达成；`validate_corrections` 的调用点（§5.1 G1 写「由 load_events→project_manifest/validate_archive 触发」）与 `load_events` 保持 raw 的决定互相矛盾。
+- **单选建议**：**指定唯一施加点**：把 `apply_corrections`/`validate_corrections` 收进 `validate_event_graph` 与 `validate_ledger` 的入口（各自内部施加一次，禁止调用方再施加），使 `validate_archive:1178-1181` 无需改动即走有效视图；同时把 `:1178-1181` 与「唯一施加点」写入 F1，并加「更正后的归档经 `check` 返回 `[]`」回归。
+
+### I2-8 · 「机械下限 = 10」不是下界，不足以支撑对 small/medium 的否定
+- **severity**: implementation
+- **文件:行**: `plan.md:182`（推导 A）、`:184`（对照既有档位）
+- **原文**（:182）：「**推导 A（机械下限）**：一次 ultraverge 通过的最少派发 = 3 初审 + ≥1 修复轮 outer + 2 material 双审 + 1 设计审查 + 1 终审 + 1 实施 + 1 独立审计 = **10**」；（:184）：「small initial 4 < 10（必在机械下限前阻断）；medium initial 8 < 10（同类风险）」
+- **事实核验**：`SKILL.md:163-177` 明定 ultraverge 若评议 verdict = `可执行` 则**跳过完整收敛**，故不必然有修复轮；material 双审只在发生 material revision 时触发；设计的 3 初审 + 1 设计审查 = 4 即可完成一次首轮通过。故 10 是「含一轮修复 + material + 实施/审计」的**典型估计**，不是机械下界。当前本对象 `_budget-state.json` 的 `config` 甚至为空。
+- **影响**：以不成立的下界论证「small/medium 必被阻断」，属数值依据失真；推荐 `critical` 的证据基础被削弱（虽然 r2 实测 23 仍支持 critical）。
+- **单选建议**：**改标为「典型用量估计」并给出真正的机械下界（≥ `ultraverge_min_reviewers` 初审 + 1 设计审查 = 4）**，推荐 `critical` 的依据改为「r2 实测 23 reserved，critical cap 30 留 7 余量、feature cap 24 仅 1 余量」这一可复核事实，删除「必在机械下限前阻断」。
+
+### I2-9 · D3 规范句限定 `review_mode: ultraverge`，代码门限却是「治理模式」，两集合不一致
+- **severity**: wording
+- **文件:行**: `plan.md:174-178`（门禁条件）、`:400`/`:403`（拟写入 `state-schema.md:453-454`、`SKILL.md:453` 的新句）
+- **原文**（:400 新文）：「**治理类默认**：`review_mode: ultraverge` 的治理对象默认要求配置 task-envelope」；（:174-178）门禁条件仅为「进入治理模式（`args.governance` 或检测到唯一 gov 块）」
+- **事实核验**：代码门禁不读 `review_mode`（该字段全仓无机器解析），凡带 gov 块的 preflight 一律检查；规范句却把义务限定到 ultraverge。非 ultraverge 的治理计划会被门禁拦下，与规范句矛盾。
+- **影响**：规范单源与可执行单源不一致（DR1），未来读者无法据文档预测门禁行为。
+- **单选建议**：**统一为「治理模式即要求」并据此改写三处规范句（去掉 `review_mode: ultraverge` 限定），或改用 `_budget-state.fsm.mode` 做机器判定并在文档中同义表述**；二选一，推荐前者（与现有 gov 块触发机制一致、无需新解析）。
+
+### I2-10 · `bootstrap` 命名三义冲突
+- **severity**: wording
+- **文件:行**: `plan.md:149`/`:220`/`:401`（新 `converge.bootstrap-channel/v1`）；既有 `refs/state-schema.md:95`、`refs/orchestrator-guide.md:36`、`scripts/archive_contract/capture.py:600`
+- **原文**（:149）：「新增机器声明 `converge.bootstrap-channel/v1`」；F8 ⑤ 拟加「新段，近 :95」
+- **事实核验**：`refs/state-schema.md:95`/`refs/orchestrator-guide.md:36` 的 bootstrap 指「编译器落地前的 calibration-report 内嵌例外」；`capture.py:600 bootstrap_import_legacy` 指 legacy 证据导入。新段若放在 `:95` 旁，读者会与既有 bootstrap 例外混淆。
+- **影响**：命名一致性受损，DR5/DR7；跨文档检索「bootstrap」会多义命中。
+- **单选建议**：**重命名为 `converge.self-referential-repair/v1`（或 `self-modification-channel`），并与既有 bootstrap 例外段显式区隔**；manifest 字段 `bootstrap_channel`、降级串 `bootstrap:self-referential:` 一并改名。
+
+### I2-11 · O1h 的「grep = 0 命中」断言失真
+- **severity**: evidence
+- **文件:行**: `plan.md:52`
+- **原文**：「全仓无 `disclosed_correction` 字段、无 `correction` 事件类型 | `grep -rin "disclosed_correction"` = 0」
+- **事实核验**：实核 `docs/plans/active/20260911-op-envelope-b-contract-correction.md:25` 含字面量 `disclosed_correction`。该文件不是「历史散文/事件 56」，而是本对象草案，计划的「修正」列也未覆盖它。
+- **影响**：计划以「全仓 0 命中」支撑 O1h，实际为假；A 对象曾连续 4 轮因事实失真被阻断。
+- **单选建议**：**改为限定范围的准确表述**：「`scripts/` 与 `refs/` 无 `disclosed_correction` 字段、`EVENT_TYPES` 无 `correction`；`docs/plans/active/…md` 有该字面量（草案，不构成契约机制）」。
+
+### I2-12 · O6a 锚点 `state-schema.md:95-97` 不含「字节变化使审查失效」规则
+- **severity**: evidence
+- **文件:行**: `plan.md:87`
+- **原文**：「任何字节变化使两份审查同时失效 | `SKILL.md:462`；`refs/orchestrator-guide.md:17-36`；`refs/state-schema.md:95-97`」
+- **事实核验**：该句在 `refs/state-schema.md:100`；`:95` 是 calibration bootstrap 例外，`:97-99` 是 `converge.review-target/v1` 的字段定义。
+- **影响**：低（结论仍成立），但属失真锚点，须列入台账。
+- **单选建议**：**改为 `refs/state-schema.md:97-100`**（含 review-target 定义与失效句），并保留 `:95-96` 作为 bootstrap 例外独立引用。
+
+### I2-13 · F2 引用不存在的 `__all__`/导出
+- **severity**: evidence
+- **文件:行**: `plan.md:214`
+- **原文**：「加 `record_correction(...)`，落盘前全图校验；`__all__`/导出对齐」
+- **事实核验**：`scripts/archive_contract/capture.py` 无 `__all__`（实核 `rg "__all__"` 无命中），`model.py`/`archive_convergence.py` 亦无。
+- **影响**：低；实现者可能据错误描述新增不一致导出。
+- **单选建议**：**删除 `__all__`/导出对齐**，或明确写「新增 `record_correction` 的公开导出（若引入）」。
+
+### I2-14 · 草案副本未跟踪且与 candidate-1 分叉，违反本计划 Phase 0 的 clean-tree 自检
+- **severity**: structural
+- **文件:行**: `plan.md:277`（Phase 0 验证）；工作树 `docs/plans/active/`（`git status` 显示 `?? docs/plans/active/`）
+- **原文**（:277）：「HEAD == 评议基线 SHA；工作树除本 active 目录外无未提交改动」
+- **事实核验**：`docs/plans/active/` 有 4 个未跟踪草案（含本对象 `20260911-op-envelope-b-contract-correction.md`，内容与 candidate-1 已分叉，例如其 :25 引 `disclosed_correction`）。该目录未被 File Matrix 列出，也不在 active 目录内。
+- **影响**：双份维护与残留（DR5）；Phase 0 自检若按字面执行会直接失败，属计划内部不一致。
+- **单选建议**：**Phase 0 之前删除或移走 `docs/plans/active/` 下的草案副本（或将其列入 File Matrix 并说明用途），并把 Phase 0 的 clean-tree 判据改为「除 active 目录与本对象声明的草案外无改动」**。
+
+### I2-15 · `validate_event` 未安排 correction 分支，字段级校验归属不明
+- **severity**: implementation
+- **文件:行**: `plan.md:213`（F1 未列 `validate_event`）、`:110-121`（closed 字段集）、`:129`（validate_corrections 时机）
+- **原文**（:129）：「**更正闭包规则（`validate_corrections`，在 `validate_event_graph` 之前调用）**」
+- **事实核验**：`validate_event`（`model.py:437-575`）对每种事件类型都有语义分支；新增第 7 类型若不加入分支，`corrected_at`/`reason`/`corrected_event_id` 的 base 校验无归属；且 `validate_corrections` 若不在 `validate_event` 内被调用，「在 validate_event_graph 之前调用」的挂接点不明确（`load_events` 明确保持 raw）。
+- **影响**：correction 事件的非法时间戳/空 reason 可能逃过 base 校验，或与闭包校验职责重叠。
+- **单选建议**：**在 `validate_event` 增加 `correction` 分支**（校验 `corrected_event_id` UUID、`corrected_at` 时间戳、`reason` 非空有界、`corrected_value` 类型），并在 F1 锚点补 `:437`；`validate_corrections` 只做图级闭包，二者职责分离。
+
+### I2-16 · §11 对第三部文件的「原文 → 新文」对照不完整（F8 ⑤、F9、F10 部分行只有摘要）
+- **severity**: structural
+- **文件:行**: `plan.md:401`（state-schema bootstrap 段）、`:402`（orchestrator-guide:44-47）、`:403`/`:404`（SKILL.md:453/:466）
+- **原文**（:401）：「加 `converge.bootstrap-channel/v1` 的 closed 字段与「单对象单次、ultraverge-only、需独立审计」约束」
+- **事实核验**：该行「新文」只给摘要，未给实际将写入的字段块文本；F9/F10 行给了新句但未给完整落位上下文；任务/宪法第四部要求第三部每处修改有可核对的「原文 → 新文」。A16 依赖此表判定「无表外改动」，摘要式行无法核验。
+- **影响**：规范句修改的可审计性下降；A16 不可机械判定。
+- **单选建议**：**为 F8 ⑤/F9/F10 的每一处补上逐字的「原文（含上下文）→ 新文（完整句/完整 fenced 字段块）」**，特别把 `converge.bootstrap-channel/v1` 的 closed 字段与约束全文纳入对照表。
+
+---
+
+## 四、专项小结（对应任务书第 4-9 项）
+
+- **O1 专项**：封闭字段集与 `validate_event` 等集模型**可兼容**，但缺 `validate_event` 分支归属（I2-15）；manifest 复用 `degradations` 集合通道**可行**（`model.py:856-862` 实核为集合并集）；`--declare-orphan-reservation` 的「omit-when-empty」惯例可复用，但需注意它是**调用方声明**而 corrections 应**由事件派生**，语义不同（计划文本已正确表述为派生）。图级约束的机械承载**存在但规则 5 错误**（I2-1）；「禁止链式」由规则 7 承载、可判定；「禁止批量」与白名单多字段更正的关系仅是措辞（未单列）。
+- **O3 专项**：触发条件/次数上限/审计呈现均**未落到机械层**（I2-3）；与 finish 步骤 7/8 的关系清楚（复用 `orchest.py:1686-1698`）；**未真正打破循环**（I2-2）；且与 r2 先例重复（I2-4），有成为「被文档化但不可执行的后门」的风险。
+- **O5 专项**：preflight 读 state 的参数设计方向可行，但破坏 21 处既有调用点（I2-5）；fail-closed 与既有 `task_envelope_not_configured` 先例**一致**（`budget_gate.py:1139` 实核）；legacy 路径兼容**成立**（插入点在 `:1769` return 之后）；三处 init 披露改动**一致**（均 `if _task_envelope_configured`，行号实核无误）；推荐档位数值依据**部分不成立**（I2-8）；opt-out 仅有「选更小档 + init 一行披露」，无显式「拒绝信封要求」路径 —— 计划应明说这是**强制**（治理模式无 opt-out）还是提供带披露的显式逃生，见 I2-9 的范围统一。
+- **O6 专项**：裁决规则**给了方向性判据但非机械判据**（「相同判定置信」需人工论证）；默认 record-only **在文字上保持**，但「允许实现」分支使其在结构上悬空（I2-6）。
+- **治理合规**：Phase 0 升级闸门**保留**；File Matrix 对第三部修改的「原文→新文」**不完整**（I2-16）；**四域合一不合理**（见拆分建议）。
+- **范围与回归**：穷举扫描的**义务**已写入 §5，但**不完整**（21 处 preflight 调用点只被标为「新增用例」而非更新，I2-5）；已知测试区枚举与实际基本一致（`tests/test_archive_convergence.py` 的 306/408/680、`test_budget_gate.py` 的 785/1448、`test_converge_loop.py` 的 1003、`test_ocsr_spawn_adapter.py` 的 315、`test_process_controller_contract.py` 的 130/199/268 全部实核存在），但 §2.5 称 `test_archive_convergence.py` 有「44+ 个 `def test_*`」而实核为 **103**，表述虽不假但低估，应给实数。Acceptance：A1（受 I2-5 影响不可达成）、A3/A7（受 I2-7 影响）不满足「条条可机械判定」。
+
+---
+
+## 五、事实核验台账（计划断言 vs 实核）
+
+**核对无误**：`EVENT_TYPES :21-24`；`COMMON_EVENT_FIELDS :178`/`EVENT_FIELDS :179-205`；`validate_event :437-458`（特化 `:445-455`、等集 `:456-458`）；`validate_event_graph :958-1037`；`ledger-binding-missing :642-644`；`ledger-status-conflict :678-686`；`derive_supersedes :924-937`；`capture decision-derived-field-conflict :549`（在 `:523-554` 内）；`orchest` 步骤 7/8 `:1686-1692`/`:1694-1698`；`load_events` 内 `validate_event :413`；`TASK_TIERS :126-132`；`_task_envelope_configured :692-694`；`FailClosed :1139`；`companion :1314`；`_run :2077-2086`；preflight parser `:2134-2139`；治理 preflight `:1730-1778` 及 `_validate_governance_change :1540`/`_resolve_and_check_report :1655`/`_numeric_empirical_conflicts :1683`/`cmd_preflight_governance :1718`；插入点 `:1777`→`:1778`；三处 init 披露（`:2012-2014`、`converge_loop.py:1093-1095`、`ocsr_spawn_adapter.py:400-402`）；adapter CLI `:760-771`；`state-schema.md:40/:42/:60/:453-454`；`orchestrator-guide.md:17-36/:44-47`；`CONSTITUTION.md:67-78/:91-96`；r2 gate-ledger 23 reserved（executor 5、ultraverge-initial 3、outer-reviewer 6、design-reviewer 5、blind-reviewer 4）；A 对象测试基线 480（A retrospective 实核 `480 passed`）。
+
+**失真/不精确**：O1h「grep = 0」（I2-11，假）；O6a `state-schema.md:95-97`（I2-12，实际 `:97-100`）；F2 `__all__`（I2-13，不存在）；§2.5「44+」（实为 103）；`review_mode` 无机器承载（I2-3）；Phase 0 clean-tree 与当前 `?? docs/plans/active/` 冲突（I2-14）。
+
+---
+
+## 六、是否建议拆分对象
+
+**是。** 理由：
+1. 本对象把四个互不相同的机制（O1 归档契约语义、O3 自指通道、O5 预算治理、O6 评议协议）装进同一 416 行计划，唯一理由（plan.md:15-18）是「省一次 ultraverge」。但 O5 的规范句既已在第三部、本就须 ultraverge，省的是流程次数而非审查面；而四域合一会让任一域的阻断拖住其余域（本报告已给出 ≥5 条 architectural/structural 阻断）。
+2. 违反 Bitter Lesson/Occam 自检与「不要把多个机制塞进同一个巨型计划」的教训：四域的失败语义、回滚路径、受影响文件均不同。
+3. **最小拆分建议**：把 **O6 移出**（它是默认 record-only 的协议，不属实现计划，应并入本对象 retrospective；任何实现另立对象），得到「O1+O2?+O3+O5」的归档/预算对象。**理想拆分**：O1+O3（归档契约自指修复）为一个对象；O5（治理信封默认）为另一个对象，O3 以 `depends_on` 依赖 O5（或把 O3 计量改回自身 scope，避免跨对象顺序耦合）。若只能做一处拆分，**至少把 O6 移出**。
+
+---
+
+## 七、我无法独立核实的事实断言
+
+1. `plan.md:53` O1i：事件 55 的 `reservation_id` 曾经字面为 `PENDING`、且是「以带外方式改写既有文件」更正。当前 git 历史中事件 55 仅有一次提交（`529e691`）且已是更正后字节，无法从仓库证据证明改写前的内容；仅有事件 56 的 `user_quote` 自述。可证：当前值 = `81a2537ea9eb`、事件 56 记录了授权。
+2. `plan.md:64` O3e：「r2 归档对象因 `ledger-status-conflict` 面临循环」。r2 done 中确有 D11 闭包配对与「archive 依赖 D11 落地故推迟 finish」的记录（attempts.md 实核），但「面临循环」的瞬时状态无独立证据；这反而支持 I2-4 的「既有 ordering 已解决」判断。
+3. `plan.md:195` D4 举证义务 2：「至少一个已归档历史对象可作为回放样本，且能机械复现」。计划未指明该样本，我无法核实其存在与可复现性。
+4. `plan.md:184` 关于 `small`/`medium`「必在机械下限前阻断」的推论不可机械复现（见 I2-8），非可核实事实断言，按逻辑缺陷处理。

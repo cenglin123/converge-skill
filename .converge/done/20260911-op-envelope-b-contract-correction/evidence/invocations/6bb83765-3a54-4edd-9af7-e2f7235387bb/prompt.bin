@@ -1,0 +1,36 @@
+# Task: 子计划 B · 强制设计审查（ultraverge 终局）
+
+你是本对象的设计审查者（fresh、跨厂商）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（指定输出除外）。UTF-8。
+
+## 审查对象（终局字节，冻结）
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-7；本轮为复审：你的 M1-M6 已落地，其后又经 R3/R4/R5 与 blind-2/3/4 多轮修订（M5 严格化、闭合集扩充、record_correction 闭合前置、plan.parent 门禁等）。本轮只回答：修订是否保持了原设计的正确性与简洁性？有没有修订过程引入的新设计级问题？
+
+## 依据
+
+1. `refs/design-review-prompt.md`（按其 DR 维度与输出要求执行）
+2. 上述 plan.md
+3. 代码：`scripts/archive_contract/model.py`、`capture.py`、`scripts/archive_convergence.py`、`scripts/budget_gate.py`、`scripts/converge_loop.py`、`scripts/ocsr_spawn_adapter.py`、`tests/`
+
+## 任务
+
+按 `refs/design-review-prompt.md` 的维度对该计划的**设计质量**（而非事实核对——事实已由双权威复核）做独立审查：
+
+- 架构与模块边界：O1 的 `resolve_events` 有效视图 + `event-correction` 事件、O5 的 preflight 门禁，落点是否干净；有无更简单的等价设计被错过（Occam）。
+- 失败语义：全部新 fail-closed 路径的错误码、退出码、披露通道是否一致、可诊断。
+- 约定与命名：`event-correction`/`corrections`/`--allow-unconfigured-envelope`/`FAIL_CLOSED:governance_requires_task_envelope` 等命名与仓库既有约定是否协调。
+- 系统边界：与 reopen/supersede、material gate、calibration、task-envelope 的交互是否闭合；跨对象影响（归档契约变更对历史归档 check 的影响）。
+- 向后兼容与回滚：legacy 路径不变性声明是否可信；每项改动能否独立回滚。
+- 可测性：对抗回归清单是否足以封死滥用面（更正当后门 / bootstrap 后门 / 门禁误伤）。
+- 实施顺序：两 Track 的 Phase 划分与验证点是否能在实施中及时暴露设计错误。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-b-contract-correction\design-review.md`
+
+必须包含：
+- 首行结论：`设计通过` / `设计需修订`（二选一；修订级问题必须列出）
+- 按 DR 维度逐维结论（pass/issue + 理由）
+- 关键设计决策的独立评价（含你认为"更简单的等价设计"若存在）
+- 必须在实施前修正的设计级问题清单（可为空；每条给单选修法）
+- highlights：3-5 条本设计最值得肯定/最值得警惕的点

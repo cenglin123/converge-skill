@@ -1,0 +1,36 @@
+# Task: 子计划 B 实施 · 独立 fresh 审计（对抗式）
+
+你是 fresh 独立审计者（跨厂商独立上下文，未参与计划与实施）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows/bash）。**只读**：不得修改任何仓库文件（可运行测试/命令）。UTF-8。
+
+## 受审对象
+
+- 规格：`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-8，含 §5 File Matrix、§8 Acceptance、§11 对抗清单、§12 第三部逐字对照、§15/16 机器块）
+- 实施：当前工作树相对 HEAD `13da605` 的未提交改动
+- 实施者自述：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-impl-report.md`（仅参考，不可信其结论）
+
+## 必须核实（逐条结论 + 证据）
+
+1. **范围纪律**：`git status --short`/`git diff --stat` 是否只落在 File Matrix 授权文件；`SKILL.md`/`refs/*` 的修改是否与 §12 对照表**逐字一致**（逐处 diff 核对原文→新文）。
+2. **语义守恒**：`budget_gate.py` 预算计数函数与既有 ledger 事件字段是否零改动；无 gov 块的 legacy preflight 路径行为是否完全不变（用既有 TestGovernancePreflight 负例与 TestPreflight 佐证）。
+3. **O1 正确性（对抗重点）**：
+   - 三闭集（CORRECTION_CLOSED_FIELDS / STRUCTURAL_REF_FIELDS / EVIDENCE_FIELDS）并起来是否真的封死所有身份/结构/证据字段（自己过一遍 `EVENT_FIELDS` 全部字段，找漏网）；`invocation-terminal.instance_id` 在内（MF-1）；
+   - `resolve_events` 是否"恰好一次施加"（validate_event_graph/validate_ledger 入口 resolve、capture 写期 resolve、record_correction 对 raw+[pending] 直调——不存在二次施加）；
+   - M5：user_quote 必须含 corrected_event_id **与** field/corrected_value，无 reason 分支；越权/缺授权/时序颠倒/链式/批量（单字段约束）是否都被对抗用例封死；
+   - 生命周期：record-correction 仅 active 根；未闭合事件流 → `FAIL_CLOSED:correction-precondition-unclosed`；done 根须 reopen 的验收是否存在；
+   - manifest `corrections` omit-when-empty + `correction:` 降级串；既有归档零字节差异回归。
+4. **O5 正确性**：plan.parent 门禁位置（duplicate 检查后、governance 分派前）；`--allow-unconfigured-envelope` 持久化（`defaults_version` 缺省置 2）；损坏 state 统一失败码；三处披露一致；adapter config-init 新参数可用。
+5. **测试质量（对抗）**：新增 28+ 条测试是否真实判别——抽查 ≥6 条，确认"无实现时必红"；特别核 A1-18/A1-22/authorization 用例。
+6. **Acceptance 逐条**：映射到测试/命令，pass/fail。
+7. **独立复跑**：`TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`，报告数字（自述 508 passed/5 skipped）。
+8. **遗留风险**：可能在真实运行中爆发的点。
+
+## 输出
+
+- 报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-audit.md`
+  - 首行 verdict：`通过` / `不通过`
+  - 1-8 逐条结论 + 证据；blocking 列表（若有）+ 单选修法；非阻断观察
+- 追加 `.converge\active\20260911-op-envelope-b-contract-correction\attempts.md` 一节 `## Phase 6 · 独立审计结论`（verdict + blocking 摘要 + 复跑数字）
+
+## 回执
+
+verdict；blocking 数；复跑数字；最担心的 1-2 点。

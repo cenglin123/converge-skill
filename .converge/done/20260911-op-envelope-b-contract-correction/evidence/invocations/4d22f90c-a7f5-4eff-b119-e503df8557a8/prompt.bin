@@ -1,0 +1,38 @@
+# Task: 实施子计划 B（O1 契约更正事件 + O5 治理信封默认）
+
+你是本收敛对象的 Implementation Executor（fresh、跨厂商——指 fresh 独立上下文）。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`（Windows，bash shell）。UTF-8 读写。**禁止 git 写操作**（只读 `git diff`/`git status` 允许）。
+
+## 规格（唯一权威）
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-8）。辅助：同目录 `attempts.md`（全部处置历史与披露）。
+
+- **Track-1（O1）**：`event-correction` 事件类型 + `resolve_events` 有效视图（写入期与归档期共用）+ `record-correction` CLI + manifest `corrections`（omit-when-empty）+ 闭合集（含 `invocation-terminal.instance_id`、`invocation_id`/`invocation_kind`/`parent_instance_id`、四证据字段、`sha256`/`size`）+ M5 严格授权（user_quote 须含 corrected_event_id 与 field/corrected_value；**无 reason 分支**）+ 生命周期（仅 active 根；done 须 reopen）+ `FAIL_CLOSED:correction-precondition-unclosed` + 对抗回归（计划 §11 全清单，含 A1-22）。
+- **Track-2（O5）**：preflight 治理门（plan 含 `converge.governance-change/v1` 块 → 读 `plan.parent/_budget-state.json`，**无 `--active-dir` 参数**；信封不可用 → `FAIL_CLOSED:governance_requires_task_envelope`；`--allow-unconfigured-envelope <reason>` → `WARN:unconfigured-envelope` 并把 opt-out reason 持久写入 state——写盘前若缺 `defaults_version` 置 2；损坏 state → 统一映射该失败码；legacy 无 gov 块路径行为完全不变）+ 三处 init 披露加"信封可能先于本地上限阻断"行 + adapter `config-init` CLI 暴露 `--task-tier/--task-envelope-initial/--task-envelope-cap` + 第三部规范句按 §12 **逐字**对照表修改。
+- **Exact File Matrix 是唯一授权改动范围**（含第三部 refs 的逐字对照表行）。矩阵之外不得改。
+
+## 实施顺序
+
+Phase 1（扫描+红测）→ Track-1（O1）→ Track-2（O5）→ Phase 6 验证。按 plan 的 Bounded Sequence 执行；`refs/*` 的修改严格按 §12 逐字对照，不得自由发挥。
+
+## 硬性约束
+
+- TDD：先红后绿；每条对抗用例都要真实判别（先验证其在无实现时失败）。
+- 不改预算裁决/计数语义（`realized()/pending()/effective_usage()`）；不改既有 ledger 事件类型与字段；不改 `scripts/archive_contract/` 之外的归档契约行为。
+- 追加 `attempts.md`（实施记录），不改 `.converge/**` 其它内容。
+- 若实现中发现必须扩范围 → 停止并在报告中说明，不要自行扩。
+
+## 关键环境事项（务必遵守）
+
+- 测试必须用长路径：`TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q`
+- 全量基线：**480 passed, 5 skipped**（A 落地后）。实施后应 ≥480 全绿（新增测试另计）。
+- 本对象在飞无其它派发；实施会改动 gate/契约自身——按顺序做完即可，不需要并发保护。
+
+## 产物
+
+1. 矩阵内源码与测试改动。
+2. 追加 `attempts.md`：实施记录 + 测试结果。
+3. 报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-impl-report.md`（改动清单、测试命令与数字、py_compile、git diff --check、Acceptance 逐条对照、偏差与未决项——不得虚报）。
+
+## 回执
+
+改动文件列表；全量测试通过/失败/skipped；Acceptance 逐条 pass/fail；第三部文件是否严格按 §12 逐字替换（是/否）；未决项。

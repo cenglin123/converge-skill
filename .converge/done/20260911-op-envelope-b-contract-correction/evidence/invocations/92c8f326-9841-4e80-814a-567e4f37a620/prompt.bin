@@ -1,0 +1,38 @@
+# Task: 子计划 B · 完整收敛 outer 评议 R2（candidate-3）
+
+你是 fresh 独立 Reviewer（跨厂商，与 plan 作者及此前评审无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（指定输出除外）。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-3，83,818 B；Track-1 = O1 更正事件 / Track-2 = O5 治理信封默认；O3、O6 已定案 record-only/移除）
+
+## 必读
+
+1. 上述 `plan.md`
+2. `round-1.md`（R1 三条阻断 R1-1/R1-2/R1-3 + 五条非阻断）、`attempts.md`（UV 三票 + R1 处置表 + preflight 自验）
+3. `uv-init-1/2/3.md`（抽查用）
+4. `CONSTITUTION.md`、`SKILL.md`、`refs/design-review-prompt.md`、`refs/state-schema.md`、`refs/orchestrator-guide.md`
+5. 代码事实（全部行号实核）：`scripts/archive_contract/model.py`、`capture.py`、`scripts/archive_convergence.py`、`scripts/budget_gate.py`（含 `_resolve_and_check_report`）、`scripts/converge_loop.py`、`scripts/ocsr_spawn_adapter.py`、`tests/test_budget_gate.py`（TestGovernancePreflight）、r2 归档 `.converge/done/20260910-process-controller-consolidation/`
+
+## 评审重点
+
+1. **R1 三条阻断是否真正闭合**（逐条 yes/no + 证据）：
+   - R1-1 立身用例：r2 terminal-decision 实数是否已实核并重写推导链（推导是否逐步可复算）。
+   - R1-2 共享 Acceptance：冲突条目是否全部列表化并修正；你自己再扫一遍 §8，找是否还有"实现后 exit 语义翻转"的条目。
+   - R1-3 calibration：报告是否真实存在、路径/hash/digest/freshness 是否逐字段可验证；preflight 自验输出是否真实（你可复跑）。
+2. **UV 三票 50 条处置抽查**（≥10 条回 plan 原文）。
+3. **D1 三项闭合性**（闭包规则/有效视图/授权时序）是否仍自洽；candidate-3 的修改是否引入新矛盾。
+4. **D3 穷举复核**：自己数 TestGovernancePreflight 受影响用例，与计划比对；legacy 放行证明；数值依据。
+5. **事实核验**：新增/修改内容的行号与符号逐条实开核对（含 §12 逐字对照表——R1-4 后应全部逐字）。
+6. **可执行性与治理合规**：两 Track Phase bounded；Acceptance 机械可判定；机器块 + 用户授权事件 + ultraverge 要素齐备。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-b-contract-correction\round-2.md`
+
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`
+- 前置自检；R1-1/2/3 闭合清单；UV 处置抽查表；逐条 issue（编号 + severity + 文件:行 + 原文 + 单选建议）
+- 若 `可执行`：实施前必须满足的前置条件清单（可为空）
+- 结尾：是否需拆分对象；无法核实的断言清单
+
+判定纪律：事实失真即阻断；穷举缺一即阻断；不因轮次放行，不为凑数升级。

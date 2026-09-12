@@ -1,0 +1,45 @@
+{
+  "defaults_version": 2,
+  "config": {
+    "task_tier": "critical"
+  },
+  "extensions": [
+    {
+      "extension_id": "ext-b-blind-4",
+      "ts": "2026-09-12T05:38:09Z",
+      "scope": "blind",
+      "triggering_block_event_id": "a84ef08aff1a",
+      "granted_at_usage": 3,
+      "prior_ceiling": 3,
+      "new_ceiling": 4,
+      "supersedes": null,
+      "user_quote": "C（并入 B）——……推进到底，把几个修复计划依次做完，如果没有特殊情况，不必向我请示",
+      "user_message_event_id": "ab8896b1-68e1-4170-9545-a1ab4e960c4b",
+      "round_stamp": "opB-material-recert-2"
+    }
+  ],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {
+      "1": [
+        "structural",
+        "architectural",
+        "evidence"
+      ],
+      "2": [
+        "conceptual",
+        "architectural",
+        "structural",
+        "implementation",
+        "evidence"
+      ],
+      "3": [
+        "conceptual",
+        "architectural",
+        "structural",
+        "implementation",
+        "evidence"
+      ]
+    }
+  }
+}

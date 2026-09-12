@@ -1,0 +1,726 @@
+# attempts.md · 20260911-op-envelope-b-contract-correction
+
+> 本文件由 fresh Plan Repair Executor 于 2026-09-12 创建（candidate-1 → candidate-2 编排层修订）。
+> candidate-3 由 fresh Plan Repair Executor 追加（outer R1 处置，§五/§六/§七）。
+> candidate-4 由 fresh Plan Repair Executor 追加（终局设计审查 M1–M6 + outer round-2 R2-1..R2-8，§九/§十）。
+> candidate-5 由 fresh Plan Repair Executor 追加（第二权威盲审 `blind-recheck-2.md` I-1..I-7 处置，§十一/§十二）。
+> candidate-6 由 fresh Plan Repair Executor 追加（第二权威盲审 blind-3 原件 Issue-1..4 与观察 a/b 处置，§十三；`blind-recheck-3.md` 原件已被 blind-4 错位评审覆盖）。
+> candidate-7 由 fresh Plan Repair Executor 追加（blind-4 错位评审 Issue-1..4 与 O-0 处置，§十四）。
+> UTF-8；本任务不做任何 git 写操作。
+
+## Phase 0 · 记录（修订任务基线）
+
+- 基线 HEAD：`13da6055f173ab1459f62cb36de11bb05b2b19cc`（`git log -1` 实核）。
+- candidate-1：416 行；candidate-2：660 行 / 70161 字节 / SHA-256 `f67248201dd3cc8ff744b787c0ff3b8fa1dff4df7a003a585f0c419dea7da8b7`。
+- candidate-3：695 行 / 83818 字节 / SHA-256 `e7690e761f07330ba76cdb2aef35871af06e6cb7d9cd1c9c372a5b6d439887f8`。
+- 工作树：除已知未跟踪 `docs/plans/active/`（4 个规划文档）外无未提交改动（`git status --porcelain` = `?? docs/plans/active/`）。
+- modest 声明：本任务仅修订计划与记录，不实现、不提交、不改历史归档。
+- 信封配置说明：Phase 0 的 `budget_gate init --task-tier critical` 属**实施阶段**动作，本修订任务不执行（当前 O5 门禁尚未实现，preflight 现版不读 state，自验按现版跑通）。
+- 本计划的 `converge.governance-change/v1` 机器块与内嵌 calibration-report 见 plan.md §15/§16。candidate-4 修订**未触碰** §15 机器块与 §六 的 canonical calibration fence（字节不变）。
+
+---
+
+## 一、三票逐条处置表（issue → 处置 → 落点）
+
+统计：**issue 总数 50**（UV1 18 + UV2 16 + UV3 16）；**处置**：修复 **37**、因 S1 删除 **10**、因 S2 删除 **3**、其他 **0**。
+（三票的“拆分建议”为意见类，不计入 50 条 issue，由 §4 统一回应。）
+
+### UV1（`uv-init-1.md`，18 条）
+
+| issue | 类型 | 处置 | 落点 |
+|---|---|---|---|
+| B1 preflight 新门禁击穿既有治理调用 | architectural | 修复 | §6.2 逐处穷举（21 处调用 / 17 受影响）+ §6.3 扫描义务 + §7 T2-P4 迁移（helper/setUp 注入 `--active-dir`）+ §8 A2-10 |
+| B2 O3 bootstrap 无宿主/定位器/单次载体 | architectural | 因 S1 删除 | §13 处置记录；D2 整体移出 |
+| B3 有效视图与 manifest 冻结投影冲突 | architectural | 修复 | §3 D1「有效视图（单层施加点）」+「manifest 投影」+ §8 A1-9 |
+| B4 O6「实现」分支无有界路径 | structural | 因 S2 删除 | §14 record-only 定案；删除实现分支 |
+| N1 `grep disclosed_correction = 0` 失真 | evidence | 修复 | §2 O1g：删除“=0”，限定为“契约内无该字段/事件类型，仅 docs 草案与计划引述命中” |
+| N2 O6a 锚点 `state-schema:95-97` | evidence | 修复 | §2.3 改为 `:97-100`（失效句 :100） |
+| N3 `FailClosed` 抛出点写成 :1139 | evidence | 修复 | §2 O5c：抛出点 **:705**，触发点 :679-680/:1137-1139 |
+| N4 F2 `__all__` 不存在；F3 漏 dispatch | evidence | 修复 | §5 T1-F2 删 `__all__`（实核 capture.py 无该结构）；T1-F3 加 `:286-287` + `:360-362` |
+| N5 closure 误列 `started_event_id` | structural | 修复 | §3 D1 `DECISION_REFERENCED` 仅取 4 个 decision 字段；显式排除 `started_event_id`（:186/:978/:140） |
+| N6 `corrections` 段须 omit-when-empty | structural | 修复 | §3 D1「manifest 投影」：manifest 键与 INDEX 段均 omit-when-empty；§8 A1-10 |
+| N7「治理类」≠`review_mode: ultraverge` | structural | 修复 | §3 D3 触发谓词 = 含唯一 gov 机器块；§12 规范句逐字改为“含治理机器块的治理计划” |
+| N8 本计划自身缺 gov 块/授权事件 | structural | 修复 | §15 附录 A 机器块（真实 UUID/真实 SHA/`kind: mechanism`）+ §16 内嵌 report + 本文件二·自验 |
+| N9 Phase 0 clean-tree 不成立 | evidence | 修复 | §7 Phase 0：改为“除已知未跟踪 `docs/plans/active/`（4 个规划文档）外无未提交改动” |
+| N10「机械下限=10」不是下界 | implementation/wording | 修复 | §3 D3：真机械下界 = 3+1 = **4**；典型路径“估计非下界” ≈10 |
+| N11 O1 授权绑定过弱 | architectural | 修复 | §3 D1 授权绑定加固：exists ∧ user-message ∧ `seq(corr)>seq(umsg)>seq(target)`；§11 O1.4 |
+| N12 O3 未破环且计量前提未满足 | architectural | 因 S1 删除 | §13；不再声称“消除依赖循环” |
+| N13 `validate_event` correction 分支缺失 | structural | 修复 | §3 D1 类型谓词映射；T1-F1 锚点 :573-575 |
+| N14 命名不统一 | wording | 修复 | §3 D1 命名锁定：事件 `event-correction` / manifest `corrections` / 前缀 `correction:` |
+
+### UV2（`uv-init-2.md`，16 条）
+
+| issue | 类型 | 处置 | 落点 |
+|---|---|---|---|
+| I2-1 闭包规则与白名单互斥 | architectural | 修复 | §3 D1 闭包重设计（动态白名单 = `EVENT_FIELDS[target_type]` − 闭合身份字段）+ 立身用例推导链 |
+| I2-2 O3 Goal 与“不放松校验”矛盾 | conceptual | 因 S1 删除 | §13 |
+| I2-3 O3 无宿主/解析/owner | architectural | 因 S1 删除 | §13 |
+| I2-4 O3 与 r2 先例重复 | architectural | 因 S1 删除 | §13（引 r2 `attempts.md:210` + `check valid`） |
+| I2-5 击穿 21 处 preflight，未给更新路径 | architectural | 修复 | §6.2（21 处分类，17 受影响）+ helper 原文→新文 + §5 T2-F8 |
+| I2-6 D4 实现分支无界 | structural | 因 S2 删除 | §14 |
+| I2-7 有效视图未定界，`validate_archive` raw 校验 | implementation | 修复 | §3 D1 单层施加点（`validate_event_graph`/`validate_ledger` 入口 + `project_manifest`）；T1-F1 锚点 :1178-1181 |
+| I2-8「机械下限=10」 | implementation | 修复 | §3 D3 数值依据重写 |
+| I2-9 规范句 ultraverge vs 治理模式 | wording | 修复 | §3 D3 触发谓词；§12 全部规范句 |
+| I2-10 `bootstrap` 命名三义 | wording | 因 S1 删除 | 不再引入 `converge.bootstrap-channel/v1` |
+| I2-11 grep=0 失真 | evidence | 修复 | §2 O1g |
+| I2-12 O6a 锚点 | evidence | 修复 | §2.3 :97-100 |
+| I2-13 F2 `__all__` | evidence | 修复 | §5 T1-F2 |
+| I2-14 草案副本与 clean-tree 冲突 | structural | 修复 | §7 Phase 0；§5 S-F6（只读明列） |
+| I2-15 `validate_event` 无 correction 分支 | implementation | 修复 | §3 D1；T1-F1 |
+| I2-16 §11 对照不完整 | structural | 修复 | §12 逐字「原文→新文」全表 |
+
+### UV3（`uv-init-3.md`，16 条）
+
+| issue | 类型 | 处置 | 落点 |
+|---|---|---|---|
+| UV3-1 D2 不解决被拒操作，破环不成立 | conceptual | 因 S1 删除 | §13 record-only |
+| UV3-2 D2 缺机械承载 | architectural | 因 S1 删除 | §13 |
+| UV3-3 O5 触发条件与 policy 范围不一致 | architectural | 修复 | §3 D3 触发谓词；§12 |
+| UV3-4 击穿 17+ 既有正例，A1 必失败 | structural | 修复 | §6.2（实核 17 受影响）+ §7 T2-P4 + §8 A2-10 |
+| UV3-5 未处理治理自举例外/生命周期倒置 | architectural | 修复 | §3 D3「active-dir 生命周期与治理自举交互」（init→preflight 强制顺序；opt-out 兜底） |
+| UV3-6「禁止批量」无机械承载 | implementation | 修复 | §3 D1 禁止批量重写（schema 层单字段闭集，批量不可表达） |
+| UV3-7 规则 5 字段归属错误 | implementation | 修复 | §3 D1 `DECISION_REFERENCED` 表（真实字段与行号） |
+| UV3-8 推导 A 非下界；critical initial 20 < r2 23 | evidence | 修复 | §3 D3：下界 4 / 典型 ≈10 / r2 23 且 `initial 20 < 23` 如实披露 |
+| UV3-9 O6a 行号失真 | evidence | 修复 | §2.3 :97-100 |
+| UV3-10 grep=0 不实 | evidence | 修复 | §2 O1g |
+| UV3-11 `bootstrap` 一词三义 | wording | 因 S1 删除 | 不再引入新 bootstrap 命名 |
+| UV3-12 D2 测试归属错位 | structural | 因 S1 删除 | D2 移出 |
+| UV3-13 §11“原文”非逐字 | evidence | 修复 | §12 逐字对照 |
+| UV3-14 无显式 opt-out | implementation | 修复 | §3 D3 `--allow-unconfigured-envelope <reason>` + `WARN:unconfigured-envelope:<reason>`；§8 A2-4/A2-6；§11 O5.3/O5.6 |
+| UV3-15 谓词 `_task_envelope_configured` ≠ 可用 | implementation | 修复 | §3 D3 谓词修正：`_task_envelope_initial`/`_task_envelope_hard_cap` 不抛；新增 `_task_envelope_usable` 近 :719 |
+| UV3-16 D4 item1 无机械判据 | wording/suggestion | 因 S2 处置 | §14 record-only + 主观项披露；§4 Track 回应拆分建议 |
+
+### 意见类（不计入 50 条）
+
+- UV1 结语“是否建议拆分对象：否（条件性）”、UV2 结语“建议拆分：是”、UV3 结语“建议拆分：是”→ §4「为何不拆对象」：以 Track-1（O1）/Track-2（O5）结构化拆分回应；O3/O6 已按 S1/S2 移出实现序列。
+
+---
+
+## 二、preflight 机器块自验运行输出（S5 · candidate-2 历史存档）
+
+> **candidate-3 更新**：本节是 candidate-2 的历史自验（内嵌 bootstrap 块 `c24d5262…`）。candidate-3 已按 R1-3 改用生成报告（§六）并复跑（§七：`PREFLIGHT_OK:governance-change`，EXIT=0）。下列 `c24d5262…`/`bootstrap-calibration-op-b` 仅作历史留痕，**非当前机器块**。
+
+对象 plan：`.converge/active/20260911-op-envelope-b-contract-correction/plan.md`
+（candidate-2 内嵌块值：`calibration.sha256 = c24d5262981f3f7e712f19dd34283d9b24cfad0447b3609952495bdbf1395e66`；`corpus_digest = 953db6ed80d038d87bd446e4d40bb674fd035fd639e4b174c820300bc616bc4e`。）
+
+### 2.1 带 `--active-dir`（O5 新参数尚未实现，符合预期）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+usage: budget_gate [-h]
+                   {reserve,settle,ingest-verdict,preflight,summary,bind,refresh-cap,unbind,init,hook-pretooluse} ...
+budget_gate: error: unrecognized arguments: --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+EXIT=2
+```
+
+说明：`--active-dir` 是 T2-F1 待实现参数；按简报“若 O5 的 --active-dir 尚未实现，preflight 现版不读 state，直接跑通即可”，本自验按现版（不带该参数）执行，见 2.2。
+
+### 2.2 现版 preflight（不带 `--active-dir`）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:5,100
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+结论：机器块合法——`_validate_governance_change`（非空 `archaeology_refs` 且 4 个 `git:` 引用经 `cat-file -e` 存在）、`_resolve_and_check_report`（locator 恰好命中 1 个 `bootstrap-calibration-op-b`、canonical SHA 复算一致、corpus_digest/freshness 一致、eligible_samples=0 一致）全部通过；`_numeric_empirical_conflicts` 无冲突（全部 `kind: mechanism`）。
+
+### 2.3 负向对照（证明校验是活的，非空跑）
+
+把副本置于独立目录、仅将 gov 块的 `calibration.sha256` 改为 `0`×64：
+
+```
+$ python scripts/budget_gate.py preflight --plan <tmp>/opb_calcheck/plan.md
+WARN:code_heavy:5,100
+FAIL_CLOSED:calibration_hash_mismatch
+EXIT=30
+```
+
+结论：calibration 块确实经 `budget_gate.py:1655-1680` 机械复算；命中错误即 fail-closed。
+
+---
+
+## 三、实核修正的行号清单（本次修订）
+
+| 断言 | candidate-1 值 | 本次实核值 | 说明 |
+|---|---|---|---|
+| `FailClosed("task_envelope_not_configured")` 抛出点 | :1139 | **:705** | `_task_envelope_initial` 内；:1139 是触发调用点 |
+| O6a material 同字节失效句 | `state-schema.md:95-97` | **:97-100（句在 :100）** | :95-96 为 calibration bootstrap 例外 |
+| `capture.py` `__all__` | 存在（F2 称“`__all__`/导出对齐”） | **不存在** | 仅 `archive_contract/__init__.py:5` 有 `__all__` |
+| `archive_convergence.py` `record-correction` 落点 | parser :283-287 | **parser :286-287 + main dispatch :360-362** | 需补 dispatch 分支 |
+| `validate_event` 类型分支末尾 | — | **:573-575（user-message）之后插入** | 新增 `event-correction` 分支 |
+| `validate_event_graph` 入口 | :958-1037 | **:958 起，:959 前接 `resolve_events`** | 有效视图单层施加 |
+| `validate_ledger` 入口 | :594-694 | **:594 起，:601 前接 `resolve_events`** | 有效视图单层施加 |
+| `validate_archive` raw 校验链 | F1 仅列 :1185-1188 | **:1178-1181（raw graph/ledger）+ :1185-1188（project）** | 有效视图设计需覆盖 :1178-1181 |
+| `project_manifest` 披露锚点 | :746、:856-865、:884 | **:745-781 投影、:856-862 降级集合、:884-898 omit-when-empty、:1194-1291 INDEX** | 修正锚点范围 |
+| `budget_gate` preflight parser | :2134-2139 | **:2134-2139**（一致） | 新增参数点 |
+| 治理门插入点 | :1777→:1778 | **:1777→:1778**（前有 :1769/:1771/:1775/:1776 早返回） | 决定 21 处中 4 处不受影响 |
+| 信封可用谓词 | `_task_envelope_configured` :692-694 | **`_task_envelope_initial` :697-706 + `_task_envelope_hard_cap` :709-718** | cap-only 配置的 gap |
+| `TASK_TIERS` | :124-132 | **:126-132**（`_TASK_TIERS_BASE` :126，别名 :132） | 数值不变 |
+| `test_budget_gate.py` preflight 调用数 | “21 处”（UV2）/“17+”（UV3） | **21 处调用，17 处受影响、4 处不受影响** | 逐处见 plan §6.2 |
+| `test_archive_convergence.py` 用例数 | “44+” | **103** | 仅表述修正 |
+| `scripts/README.md` 治理 preflight 文档 | 未列 | **:164**（需补 `--active-dir`） | T2-F7 |
+| `validate_archive` 报告锚点 | — | **CONSTITUTION.md:67-78 / :91-96**（一致） | — |
+| 本次工作树 | “clean tree” | **`?? docs/plans/active/`（4 个文档）** | Phase 0 判据改写 |
+
+---
+
+## 四、candidate-2 产物哈希（回执用）
+
+- plan.md：**70161 字节** / SHA-256 **`f67248201dd3cc8ff744b787c0ff3b8fa1dff4df7a003a585f0c419dea7da8b7`**。
+- 本文件：见任务报告。
+
+---
+
+## 五、outer R1 逐条处置表（candidate-2 → candidate-3）
+
+| issue | 类型 | 处置 | 落点实核 |
+|---|---|---|---|
+| R1-1 r2 terminal-decision 实数失真（称唯一事件 54，实为 3 条） | evidence/factual · 阻断 | 修复 | plan §3 D1 立身用例推导链步骤 3：实开 r2 `evidence/events/`，3 条 `terminal-decision` = seq 17 `e4182ce3` / 45 `ea64c374` / 54 `777a0e2d`，经 `reviewer_event_id`/`verdict_output_ref` 指向事件 14/42/53，`supersedes` 指向 null/17/45，全量集合 {14,42,53,17,45} 不含事件 55 `cabcac00` |
+| R1-2 A-S4 与 D3 门禁自相矛盾（实现后 exit 0 → 30） | structural/acceptance · 阻断 | 修复 | plan §8 A-S4 补 `--active-dir .converge/active/20260911-op-envelope-b-contract-correction` + 注明 Phase 0 已配置 `critical`；新增 §8.4「Acceptance × Track-2 门禁交互复核」表（A-S4 为唯一冲突项，逐条列 A1/A2/A-S 全组） |
+| R1-3 calibration 复用已被 r2 消耗的 bootstrap 例外 | governance/evidence · 阻断 | 修复 | 生成器真实产出 `evidence/calibration-report.json`（§六）；plan §15 `calibration.path` 改为 `attempts.md::json-fence[…id=calibration-op-b]` 并按生成值复算 sha256/digest/freshness；删除全部「bootstrap 内嵌块」表述；§5.3 S-F7 新增文件条目；§16 改为生成报告载体说明 |
+| R1-4 §12 五处「原文」仍含省略号 | structural/evidence · 非阻断 | 修复 | plan §12：`state-schema.md:40/:42后/:454后`、`SKILL.md:453/:466` 均补为**完整逐字原行**（无省略号） |
+| R1-5 D1 规则 10 谓词映射不闭合 | implementation · 非阻断 | 修复 | plan §3 D1：完整字段→值谓词表（覆盖 `allowed()` 全部放行字段，未列出即 fail-closed）+ 规则 10b（候选有效事件跑完整 `validate_event`）；值域 `null|有界非空字符串|整数`，dict/list 拒绝；§11 O1.10 同步 |
+| R1-6 `project_manifest` 派生面未声明有效视图 | implementation/design · 非阻断 | 修复 | plan §3 D1「有效视图」：显式 `raw_events` vs `effective_events` 双列表，逐一列行号（投影 :758-781、final :782-790、allowed_blobs :792-796、degradations :856-862；raw 字节 :759-762、校验入口 :746-747） |
+| R1-7「4 处不受影响用例零改动」表述不准 | wording · 非阻断 | 修复 | plan §6.2 标题/表行 18-21、§7 T2-P4、§8 A2-10、§11 O5.7 全部改为「测试方法体与断言零改动；仅共享 helper 变化，调用形态随之变化，因早返回不受门禁影响」 |
+| R1-8 全量测试数字与本机环境绑定 | evidence/environment · 非阻断 | 修复 | plan §8.4 环境事实 + §10 R8：本机基线 `4 failed / 476 passed / 5 skipped / 11 subtests`，4 failed 为 Windows 8.3 短路径（`ADMINI~1` vs `Administrator`）；A1-1/A-S1/A-S2 判据取「非新增失败」 |
+
+统计：R1 共 **8** 条（阻断 3 / 非阻断 5），**全部修复**；无「或」式未选定方案。
+
+---
+
+## 六、R1-3：calibration 生成报告真实产出（candidate-3）
+
+### 6.1 检索结论（生成前）
+
+`grep`/`glob` 全仓实核：**不存在**任何独立 `converge.calibration-report/v1` 生成文件（`refs/`、`docs/`、`.converge/done/**` 均无 `*calibration*`）；唯一既有 report/v1 块是 r2 plan.md 内嵌的手写 bootstrap 块（`id=bootstrap-calibration-r2`，`freshness.repository_head=85b9c286…`、`high_watermark=17`，与当前 HEAD/生成器形状不同），**不可复用**。故改用落地生成器真实产出。
+
+### 6.2 生成命令与输出
+
+```
+$ python scripts/distill_antipatterns.py --calibration --root . \
+    --output .converge/active/20260911-op-envelope-b-contract-correction/evidence/calibration-report.json \
+    --id calibration-op-b --source-revision r1
+EXIT=0
+```
+
+生成报告实核字段（对象 `evidence/calibration-report.json`，canonical 2385 B）：
+
+- `schema=converge.calibration-report/v1`、`id=calibration-op-b`、`scope=done-corpus`
+- `freshness={"repository_head":"13da6055f173ab1459f62cb36de11bb05b2b19cc","source_archive_revision":"r1","source_event_high_watermark":0}`
+- `corpus` = 19 条按 `ref` 排序的 `done:<slug>` 条目，均 `quantitative_status=unavailable`、`reason=no_sample`
+- `corpus_digest=ff64a62b27970bb8064c9cbbf11037c0f049383270d167c1090eab64ee5e07eb`
+- `quantitative_aggregates={"eligible_samples":0,"status":"unavailable"}`
+- 文件 SHA-256 / canonical SHA-256 = `c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`（单 LF、无 CR）
+
+> 说明：生成器扫描 `<root>/.converge/done/*/retrospective.md` 的 `converge.calibration-sample/v1` 块；本仓 19 个 done retrospective 均无该样本块，故全 corpus 记 `unavailable/no_sample`、`eligible_samples=0`——这是生成器的**真实、确定性**输出，非手写。
+
+### 6.3 locator 载体（plan §15 引用；allowlisted 根文件 `attempts.md` 内唯一 `calibration-report` fence）
+
+> locator 语法（`refs/state-schema.md:72`）的 `root-file` 必须是 plan 同目录的 bare allowlist 文件名（`_ROOT_ALLOWLIST` 含 `attempts.md`），`evidence/` 路径不可寻址；故生成报告的 canonical 字节以 allowlisted 根文件 `attempts.md` 的 fenced 块承载，plan §15 `calibration.path = attempts.md::json-fence[schema=converge.calibration-report/v1,id=calibration-op-b]`。此块 canonical SHA-256 与独立文件一致（`c4755e…`）。
+
+```json
+{
+  "corpus": [
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260601-converge-three-layer-separation"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260610-model-tiering-amendment"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260610-skill-slimming-plan"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260610-skill-slimming-plan-ultraverge"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260611-audit-driven-corrections"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260611-cost-data-section"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260612-blind-recheck"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260612-execution-gap"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260612-execution-gap-v2"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260612-skill-weight-reduction"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260621-converge-mechanism-coherence"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260621-mode-differentiation-and-fork-executor"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260712-archive-contract"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260725-dogfood-adapter-usage"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260725-ocsr-converge-integration"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260826-doc-layer-refactor"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260826-doc-need-to-know"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260910-process-controller-consolidation"
+    },
+    {
+      "quantitative_status": "unavailable",
+      "reason": "no_sample",
+      "ref": "done:20260911-op-envelope-a-tooling-hardening"
+    }
+  ],
+  "corpus_digest": "ff64a62b27970bb8064c9cbbf11037c0f049383270d167c1090eab64ee5e07eb",
+  "freshness": {
+    "repository_head": "13da6055f173ab1459f62cb36de11bb05b2b19cc",
+    "source_archive_revision": "r1",
+    "source_event_high_watermark": 0
+  },
+  "id": "calibration-op-b",
+  "quantitative_aggregates": {
+    "eligible_samples": 0,
+    "status": "unavailable"
+  },
+  "schema": "converge.calibration-report/v1",
+  "scope": "done-corpus"
+}
+```
+
+---
+
+## 七、R1-3：preflight 复跑（candidate-3）
+
+### 7.1 带 `--active-dir`（O5 新参数尚未实现 → 记录实际行为）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+usage: budget_gate [-h]
+                   {reserve,settle,ingest-verdict,preflight,summary,bind,refresh-cap,unbind,init,hook-pretooluse} ...
+budget_gate: error: unrecognized arguments: --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+EXIT=2
+```
+
+### 7.2 现版 preflight（不带 `--active-dir`；candidate-3 机器块 + 生成报告 locator）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:4,63
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+---
+
+## 八、candidate-3 产物哈希（回执用）
+
+- plan.md：**83818 字节** / SHA-256 **`e7690e761f07330ba76cdb2aef35871af06e6cb7d9cd1c9c372a5b6d439887f8`**。
+- calibration 报告文件 `evidence/calibration-report.json`：**2385 字节** / SHA-256 **`c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`**。
+- 本文件：见任务报告。
+
+---
+
+## 九、candidate-4：设计审查 M1–M6 + round-2 R2-1..R2-8 逐条处置
+
+> 触发：`design-review.md`（终局设计审查，M1–M6 单选修法）+ `round-2.md`（outer 评议，R2-1..R2-8 非阻断）。全部按单选修法落地，不另立方案。
+
+### 9.1 M1–M6（设计级）
+
+| # | 问题（设计审查） | 单选修法处置 | plan 落点 |
+|---|---|---|---|
+| M1 | 有效视图覆盖不完整：`capture._prepare_terminal_decision`（`capture.py:523-575`）与 continue-parent 查找读 raw，写入期/归档期两个真相 | 提升为「写入期与归档期共用同一 `resolve_events`」：写入前判定入口先 resolve 再派生/判定，raw 仅身份/字节/哈希；新增 A1-11 双期一致用例 | §3 D1「写入期与归档期共用同一 `resolve_events`（M1）」；§2 O1l/O1m；§5 T1-F2；§7 T1-P3；§11 O1.16；§10 R9 |
+| M2 | 动态白名单未定义/未测试出边结构字段，闭包只用了一半 | 新增最小结构引用集 `CORRECTION_STRUCTURAL_REF_FIELDS = {(invocation-terminal,started_event_id),(invocation-started,parent_event_id),(design-review-completion,invocation_event_id)}` 一律不可更正（`reservation_id` 保留可更正） | §3 D1 `allowed()` 与 M2 理由段；§2 O1n；§8 A1-12/13/14；§11 O1.12/13/14；§10 R10；§12 :42 规范句 |
+| M3 | 更正机制自身无修复/取代路径，`corrected_value` 写错永久生效 | 规则 7 改为取代链：允许同 `(target,field)` 追加，`original_value` 必须等于**当前 effective 值**，每条独立授权，raw append-only，披露全链取代关系；删除 `correction-chained` | §3 D1 规则 6/7、manifest 投影；§8 A1-6/A1-15/A1-16；§11 O1.7/9；§10 R11；§12 :42 规范句 |
+| M4 | 规则 10 谓词映射表与 10b 重复 → 维护漂移 | 删除规则 10 映射表与 `_validate_field_value` 抽取；唯一值/跨字段来源 = 应用全部更正后的候选有效事件跑完整 `validate_event`；`original_value` 逐字校验保留 | §3 D1 规则 10 与「值/跨字段谓词唯一来源」段；§5 T1-F1；§11 O1.10；§3.5 ADR；§0.3/§0.4 标注 R1-5 被取代 |
+| M5 | 授权缺少内容绑定，任意旧 user-message 可作凭据 | `authorized_by.user_quote` 必须含 `corrected_event_id` 或本次 `reason` 逐字子串，否则 `correction-unauthorized`；复用 user-decision-source 逐字匹配哲学 | §3 D1 规则 8、授权绑定段；§8 A1-8/A1-17；§11 O1.15；§10 R12；§12 :42 规范句 |
+| M6 | `--active-dir` 可任意指向（旁路）；opt-out 仅瞬态 stdout | **取消 `--active-dir`**，改以 `plan.parent` 读 state；opt-out reason 持久写入对象 `_budget-state.json` 顶层 `envelope_opt_outs`（选定 `_budget-state.json`，非 gate-ledger）；删除 A2-5 类负例 | §3 D3 门禁行为/载体/生命周期；§2 O5f/O5n；§5 T2-F1/F7/F8；§6.1/§6.2；§7 T2-P2/P4；§8 A2-1..A2-6/A2-11/A2-12/A-S4/§8.4/§8.5；§11 O5；§10 R6/R13；§12 :454 规范句 |
+
+### 9.2 R2-1..R2-8（round-2 非阻断，单选修法）
+
+| # | 建议 | 处置 | plan 落点 |
+|---|---|---|---|
+| R2-1 | A1-1 期望列与 §8.4「非新增失败」不一致 | A1-1 改「非新增失败（本机基线 4 failed/476 passed）」 | §8 A1-1；§8.4 |
+| R2-2 | A-S2 并用相对/绝对判据 | 删「≥480」，改「≥ 改造前同环境基线通过数」 | §8 A-S2 |
+| R2-3 | §6.2 行 19 早返回行号不精确 | 改注 `:1767-1768（legacy 分支 CRLF 检查）` | §6.2 表行 19 |
+| R2-4 | §12 `state-schema.md:60`「原文」为逐字前缀 | 补全为完整逐字原行；§12 标题改「逐字定位片段（无省略号）」 | §12 标题与 :60 行 |
+| R2-5 | D1 步骤 3「三条 source_ref 全为 null」不精确 | 改「三条均无 `source_ref` 键」 | §3 D1 步骤 3 |
+| R2-6 | 「批量不可表达」归因缺值谓词 | 补「等集判定只约束 key；值形态由 `corrected_event_id`（单 UUID）/`field`（单字符串 ∈ allowed）值谓词拒绝」 | §3 D1 禁止批量重写；§11 O1.8 |
+| R2-7 | T1-F2 锚点范围偏短 | `:523-554` → `:523-575` | §5 T1-F2；§3 D1 调用入口 |
+| R2-8 | `DECISION_REFERENCED` 边界应写死「直接引用」 | 规则 5/§11 明确「被 4 个 decision 字段**直接**引用」，不含经 `started_event_id` 间接关联的 started | §3 D1 定义句；§11 O1.5/6；§10 R1 |
+
+统计：**M1–M6 全部落地（6/6）**；**R2-1..R2-8 全部落地（8/8）**；无未选定分叉。
+
+### 9.3 M6：`TestGovernancePreflight` 受影响面重判（逐用例实核）
+
+- 事实：`write_plan`（`tests/test_budget_gate.py:1534-1544`）恒把 plan 写到 `self.dir`；M6 门禁读 `plan.parent`，故新门禁读取的就是 `self.dir`。
+- 分类（`self.preflight` 实核 21 处，行号同 §6.2）：**17 处**恰好 1 个 gov 块 → 到达新门禁（:1554/:1566/:1575/:1584/:1591/:1602/:1613/:1623/:1633/:1641/:1656/:1666/:1675/:1690/:1699/:1708/:1717）；**4 处**早返回（:1682 两块、:1724 CRLF、:1736 无块、:1743 `--governance` 无块）→ 不达门禁。
+- 与 candidate-3 的差异：candidate-3 靠 helper 注入 `--active-dir`；M6 下 **helper 无需迁移**，仅 `setUp` 在 `self.dir` 跑一次 `init --task-tier critical`。17 处到达者转绿、断言不变；4 处方法体/断言/调用形态零改动。
+- 另：`TestPreflight:272/278` 两处 legacy 调用仍不受影响（无 gov 块 → legacy 早返回于 `:1769`）。
+- 结论：受影响数仍为 **17**，但机制由「21 处 helper 迁移」降为「1 处共享 `setUp` + 0 处 helper 迁移」。
+
+---
+
+## 十、candidate-4 preflight 自验与产物哈希
+
+### 10.1 现版命令行为（candidate-4 定稿字节上实跑）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:5,73
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+`WARN:code_heavy` 由 4,63（candidate-3）变为 5,73，因 candidate-4 新增了 M1–M6/R2 说明段落与代码块；机器块仍唯一且通过 `_validate_governance_change`/`_resolve_and_check_report`/`_numeric_empirical_conflicts`。
+
+### 10.2 `--active-dir` 已不存在（M6 的现版证据）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+usage: budget_gate [-h]
+                   {reserve,settle,ingest-verdict,preflight,summary,bind,refresh-cap,unbind,init,hook-pretooluse} ...
+budget_gate: error: unrecognized arguments: --active-dir .converge/active/20260911-op-envelope-b-contract-correction
+EXIT=2
+```
+
+现版 preflight 无该参数（`budget_gate.py:2134-2139`），与 M6「取消 `--active-dir`」一致。
+
+### 10.3 新设计行为说明（实现后预期）
+
+- 门禁插入 `:1777→:1778`；对象 active 目录 = `plan.parent`；`read_state(plan.parent)`（`:247-263`）对缺失 `_budget-state.json` 返回空 config → `_task_envelope_usable` 假 → `FAIL_CLOSED:governance_requires_task_envelope`（A2-3）。
+- 本对象 `plan.parent` 即 `.converge/active/20260911-op-envelope-b-contract-correction`，Phase 0 `init --task-tier critical` 后该目录 state 可用 → A-S4 exit 0。
+- opt-out 路径把 `{reason,plan,recorded_at}` 持久追加到 `plan.parent/_budget-state.json` 顶层 `envelope_opt_outs`（A2-4/A2-12），未使用 opt-out 时不写该键、不改 state 字节。
+
+### 10.4 负向对照（证明校准校验是活的）
+
+复制 plan+attempts 到临时目录，仅把 gov 块 `calibration.sha256` 改为 `0`×64：
+
+```
+$ python scripts/budget_gate.py preflight --plan <TEMP>/opb_c4_calcheck/plan.md
+WARN:code_heavy:5,73
+FAIL_CLOSED:calibration_hash_mismatch
+EXIT=30
+```
+
+结论：calibration 块确实经 `budget_gate.py:1655-1680` 机械复算；命中错误即 fail-closed（复制后写回用 `write_bytes` 避免 CRLF 污染，否则先在 `:1767-1768` 判 `crlf_payload`）。
+
+### 10.5 candidate-4 产物哈希（回执用）
+
+- plan.md：**109410 字节** / SHA-256 **`c50876de3bb53865b2c513dcfd711a19fcb0b402c88c3f2c52f12432a25d23ae`**（754 行）。
+- calibration 报告文件 `evidence/calibration-report.json`：**2385 字节** / SHA-256 **`c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`**（未变）。
+- §15 机器块 canonical 字节与 §六 fence 未变（locator 复算通过）。
+- 本文件：见任务报告（哈希在回执中给出，避免自指）。
+
+---
+
+## 披露 · record-verdict 误记（2026-09-12，编排层）
+
+- 事实：blind-recheck-2 的真实 verdict 为 **阻断需修复**（评审者 frontmatter 与正文首行均为阻断需修复）。编排层向 `orchest.py record-verdict` 传入字面量 `可执行`（命令行硬编码错误），导致：(1) ingest-verdict 以 `可执行` 记账；(2) 工具把产物 frontmatter `verdict` 覆写为 `可执行`。
+- 处置：frontmatter 已恢复为评审者真实 verdict（阻断需修复）；ingest-verdict 对 `可执行` 不写 severities、无 ledger 事件污染（budget state 无残留字段）；本披露即为永久记录。**本事件正是本计划 O1（event-correction）要解决的 operator-error 类型的活案例**——在 correction 机制落地前，按现行契约"如实披露、不回填 ledger"处理。
+- 影响面：无预算影响（blind 2/3 已消耗是事实）；收敛流程以修复后的真实 verdict 继续。
+
+---
+
+## 十一、candidate-5：blind-2 I-1..I-7 逐条处置（第二权威盲审，单选修法）
+
+> 触发：`blind-recheck-2.md`（fresh 独立 Reviewer，blank-slate；verdict = **阻断需修复**）I-1..I-7（3 high + 4 low）。全部按单选修法落地，不另立方案。修订对象：`plan.md`（candidate-4 → candidate-5）。
+> 附注：本文件的「record-verdict 误记」披露即 I-3/O1 机制立项的活案例；candidate-5 按现行契约「如实披露、不回填 ledger」处理。
+
+| # | severity | 问题 | 处置（单选修法） | plan 落点 |
+|---|---|---|---|---|
+| I-1 | high | A1-1 单文件测试基线数字失真：写 `4 failed/476 passed`（实为全量数），本机单文件实测为 `4 failed/97 passed/2 skipped` | 取建议第一分支：A1-1 命令保持单文件，括号改本机单文件基线 `4 failed/97 passed/2 skipped`；全量基线 `4 failed/476 passed/5 skipped/11 subtests` 仅留 A-S2/§8.4/§10 R8（删除 A1-1 中误挂的全量数字） | §8 A1-1（2026-09-12 实测复现） |
+| I-2 | high | M4「结构字段会被 `validate_event` 拒绝」与 `allowed()`/`validate_evidence_ref` 矛盾（四字段实际可更正） | 取建议 (a)：新增显式常量 `CORRECTION_EVIDENCE_FIELDS = {prompt_evidence, output_evidence, source_locator, snapshot}` 并入不可更正集合；`allowed()` 增 clause；删除「会被 `validate_event` 拒绝」失真表述；§12 `:42` 规范句、§11 O1.10/17 同步；新增 A1-18 | §3 D1 命名锁定/`allowed()`/理由段/规则 4/M4 删除面；§2 O1o；§3.5；§5 T1-F1；§8 A1-18；§9；§11 O1.10/17；§12 :42 |
+| I-3 | high | `record_correction` 仅跑 `validate_corrections`，未封闭「decision 后追加更正」的写期—归档期分叉（`decision-reviewer-authority`/`user-decision-degradations` 永久 fail-closed） | 取建议第一分支：prepare 钩子对 `raw + [pending]` 跑**完整有效视图校验**（先 `validate_corrections`，再对 `resolve_events(...)` 跑 `validate_event_graph` 含 `validate_reviewer_verdict_authority` + `validate_ledger`，与 `validate_archive:1178-1181` 同源）；加两条对抗用例 A1-19（更正 reviewer started.role 不得落盘）/A1-20（更正不得使既有 user-decision 的 `presented_degradations` 重算失配） | §3 D1 调用入口；§5 T1-F2；§6.1 G1；§7 T1-P2/P3；§8 A1-19/A1-20；§10 R1/R9；§11 O1.18/19；§12 :42 |
+| I-4 | low | §12 称 `state-schema.md:60` 为「完整原行的逐字前缀」，实为完整原行（588=588） | 改「完整逐字原行」（标题行同步；与 :60 行尾注 R2-4 一致） | §12 标题行 |
+| I-5 | low | opt-out 经 `initialize_state` 追加 `envelope_opt_outs` 会因 `needs_write` 只比较 config/fsm/extensions 而静默不写盘 | 写死门禁直接 `read_state(plan.parent)`→改 dict→`write_state(plan.parent, state)`，**绕过 `initialize_state`/`needs_write`**；§6.2、R13、§5 T2-F1、§12 :454 同步 | §3 D3 门禁行为 3/载体段；§5 T2-F1；§6.2；§10 R13；§11 O5.10；§12 :454 |
+| I-6 | low | 损坏 state（`state_corrupt:*`）未纳入门禁码统一，`read_state` 对其抛异常经 `_run` 输出非治理码 | §8.2 增 A2-13「`plan.parent/_budget-state.json` 存在但损坏」负例；统一语义写死：门禁捕获 `read_state` 异常（含 `state_corrupt:*`）→ 映射 `FAIL_CLOSED:governance_requires_task_envelope`（`state_corrupt:*` 仅内部 detail） | §3 D3 门禁行为 1；§5 T2-F1/T2-F8；§6.2；§8 A2-13；§10 R14；§11 O5.9；§12 :454 |
+| I-7 | low | §16「逐字节一致」仅为 canonical 意义；独立文件不被 preflight 机械校验 | §16 限定为「canonical 形式下逐字节一致」，注明 fence raw body sha `9a08eb6e…` ≠ canonical `c4755e…`、独立文件仅作证据留痕；§15 同步 | §15 附录 A 前言；§16 附录 B |
+
+统计：**I-1..I-7 全部落地（7/7）**；无未选定分叉。新增 Acceptance：A1-18/A1-19/A1-20/A2-13（Track-1 至 A1-20、Track-2 至 A2-13）。
+
+### 11.1 I-1 复现实测
+
+```
+$ python -m pytest tests/test_archive_convergence.py -q
+... (4 failed)
+4 failed, 97 passed, 2 skipped in 13.84s
+```
+
+4 fail 均为 Windows 8.3 短路径环境差异（`ADMINI~1` vs `Administrator`），与全量基线 `4 failed, 476 passed, 5 skipped, 11 subtests` 中的 4 fail 同源。
+
+### 11.2 I-7 canonical/raw 字节实核
+
+```
+raw body sha256(fence)  = 9a08eb6e5a8264f75993ad7c13ab59b4ae274bb4ab429daf869df5487550447b
+canonical sha256(报告)  = c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581
+```
+
+故 §16「逐字节一致」必须限定为 **canonical 形式**；`evidence/calibration-report.json` 仅经 `attempts.md` fence 的 locator 被读取，preflight 不直接校验该独立文件。
+
+---
+
+## 十二、candidate-5 preflight 复跑与产物哈希
+
+### 12.1 preflight 复跑（candidate-5 定稿字节上实跑）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:5,80
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+结论：§15 机器块与 §六 canonical calibration fence **均未改动**，故 `_validate_governance_change`/`_resolve_and_check_report`/`_numeric_empirical_conflicts` 全部通过；机器块不含自哈希（`calibration.sha256` 指向 `attempts.md` fence 的 canonical 字节，而非 plan 正文），故 candidate-5 正文变化**不使机器块失效**。`WARN:code_heavy` 由 5,73（candidate-4）变为 5,80，因新增 I-2/I-3 理由段与 §0.6 索引。
+
+### 12.2 candidate-5 产物哈希（回执用）
+
+- plan.md：**122808 字节** / SHA-256 **`f926f32cca66787140c091b60f61ad53537e15a0baedffb5ff2aad5047ec8f99`**（**786 行**）。
+- calibration 报告文件 `evidence/calibration-report.json`：**2385 字节** / SHA-256 **`c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`**（未变）。
+- §15 机器块 canonical 字节与 §六 fence 未变（locator 复算通过；fence raw body sha `9a08eb6e…`）。
+- 本文件：见任务报告（哈希在回执中给出，避免自指）。
+
+---
+
+## 十三、candidate-6：blind-3 Issue-1..4 与观察 a/b 逐条处置（第二权威盲审，单选修法）
+
+> 触发：`blind-recheck-3.md`（fresh 独立 Reviewer，blank-slate；verdict = **阻断需修复**）Issue-1..4（1 high + 1 medium + 2 low）+ 观察 a/b。全部按单选修法落地，不另立方案。修订对象：`plan.md`（candidate-5 → candidate-6）。candidate-5 定稿字节 `122808` / `f926f32c…`。
+
+| # | severity | 问题 | 处置（单选修法） | plan 落点 |
+|---|---|---|---|---|
+| Issue-1 | high | `CORRECTION_EVIDENCE_FIELDS` 漏 `artifact-captured.sha256`/`size`：二者为已冻结证据身份，却既不被 `validate_event`（仅格式，`model.py:530-533`）也不被 `_verify_evidence_bytes`（`:1040-1054`）与盘上 blob 交叉校验，可静默改写 manifest 的 artifact 身份披露 | 取建议：将 `"sha256"`、`"size"` 加入 `CORRECTION_EVIDENCE_FIELDS`（全仓仅 `artifact-captured` 有这两个顶层名，精确闭合、零误伤）；A1-18 增补该两字段；同步不变量句、§11 O1.17、§12 证据字段集 | §3 D1 常量/不变量/理由段；§8 A1-18；§11 O1.17；§12 :42 |
+| Issue-2 | medium | plan.md:291 字面「对 `resolve_events(raw+[pending])` 的有效视图跑 `validate_event_graph`/`validate_ledger`」，与二者入口各自 resolve 冲突 → 二次施加，误报 `correction-original-mismatch` | 改写为：落盘前先 `validate_corrections`，再对 `raw+[pending]` **直接调用** `validate_event_graph`/`validate_ledger`（各自入口 resolve 一次；不得先 resolve 再把结果传入）；§11 O1.16/O1.18、A1-19 写死该调用形态 | §3 D1 调用入口；§11 O1.16/O1.18；§8 A1-19 |
+| Issue-3 | low | A1-11 期望「capture 不抛 `user-decision-degradations`」非无条件可判定：decision 为 user-decision 时 `model.py:1035` 必 fail-closed（正是 A1-20 语义） | 场景收敛为「更正先于 **reviewer-verdict** decision」并显式标注（无 user-decision 时）；§11 O1.16 同步 | §8 A1-11；§11 O1.16 |
+| Issue-4 | low | `attempts.md`/`scan-report.md`/`_budget-state.json` 为对象本地被实际修改/新建的过程文件，却未列入 §5 File Matrix，Phase 1 扫描会误判为未授权文件 | §5.3 增 S-F8 行：对象本地过程文件——仅对象 active 目录内，非源文件、非第三部 | §5.3 S-F8 |
+| 观察-a | 非 issue | `duplicate_governance_block` 标 `:1776`，实际判定在 `:1776`、print/返在 `:1777` | 锚点写准为「判定 `:1776`／print `:1777`」（不改变插入点 `:1777→:1778` 语义） | §2 O5h；§3 D3 门禁行为；§5 T2-F1；§6.2 |
+| 观察-b | 非 issue | bootstrap 例外区间引作 `:95-96`，实测 `:96` 为空行、内容在 `:95` | 区间引用改 `:95`（不改变结论） | §2 O6a；§3 D3 生命周期；§16 |
+
+统计：**Issue-1..4 与观察 a/b 全部落地（6/6）**；无未选定分叉。核心机制与 §15 机器块/calibration canon 字节未改动。plan.md 最终 **124783 字节 / SHA-256 `23bded6b038d3382c93f09316a8d2fa8f238250814a36f17e5f13129972782a4` / 790 行**（candidate-5 +1975 字节，≤ 2000 上限）；preflight 复跑 `PREFLIGHT_OK:governance-change`（EXIT=0）。
+
+---
+
+## 披露 · blind-4 派发产物路径错配导致 blind-3 原件被覆盖（2026-09-12，编排层事故）
+
+- 事实链：
+  1. 原始 `blind-recheck-3.md`（对 candidate-5 的复核，verdict=阻断需修复，Issue-1..4）已通过 `record-verdict` 记账（reservation `9aa1c3dd0a9e`，settle succeeded）。
+  2. 编排层随后派发 blind-4 时复用了未更新的 prompt 模板（内文写"写入 blind-recheck-3.md"），而 adapter 监视 `blind-recheck-4.md` → 路径错配。
+  3. worker 正常运行并按 prompt 把对 **candidate-6** 的完整复核写入 `blind-recheck-3.md`，**覆盖了原件**；ocsr 因监视路径无产物而判"确定性失败"，adapter 将 blind-4 invocation（`3f7bfc94…`）记为 `failed/backend-error`（又一例 pre_execution 误分类：模型实际已运行）。
+  4. 原始 blind-3 评审全文**已不可恢复**（无临时副本；其结论已通过 record-verdict 与 attempts.md 的处置表留痕）。
+- 现状认定：现 `blind-recheck-3.md` 的内容实为 **blind-4 评审**（对象 candidate-6，verdict=阻断需修复，Issue-1..4 + O-0）；其文件名与轮序错位。保留现文件在原路径，不做掩盖性改名；其 spawn 记录为 failed 属误分类，本文披露即为对账依据。
+- 流程教训（编排层）：派发前必须校验 `--output-name` 与 prompt 内产物路径一致（ocsr 已知陷阱，r2 已记录，本次违反）。
+- 对材料双权威的影响：candidate-6 的盲审侧权威 = 本文件（阻断）；candidate-7 修复后须重新 outer+blind 双认证（blind 额度将再次扩展，引用同一用户授权事件 `ab8896b1…`）。
+
+---
+
+## 十四、candidate-7：blind-4 错位评审 Issue-1..4 与 O-0 逐条处置（第二权威盲审，单选修法）
+
+> 触发：**blind-4**（产物被 adapter 按错位文件名写入 `blind-recheck-3.md`；内容实为对 **candidate-6** 的第 4 次盲审，verdict = **阻断需修复**）Issue-1..4（1 high + 1 medium + 2 low）+ O-0。全部按编排层单选修法落地，不另立方案。修订对象：`plan.md`（candidate-6 → candidate-7）。candidate-6 定稿字节 `124783` / `23bded6b038d3382c93f09316a8d2fa8f238250814a36f17e5f13129972782a4`。
+
+| # | severity | 问题 | 处置（单选修法） | plan 落点 |
+|---|---|---|---|---|
+| Issue-1 | high | M5 的 `reason` 子串分支可被更正作者自由文本绕过，计划自称的防护未兑现 | 删除 `reason` 分支：`user_quote` 须**同时**含（a）`corrected_event_id` 逐字子串、（b）被更正 `field` 名或逐字 `corrected_value`；立身链步骤 6 与结论显式声明 r2 历史操作在新 M5 下不可原样重放（**刻意收紧**），推导链其余步骤保持 | §3 D1 规则 8/内容绑定/越权用例/立身链；§0.4 M5；§10 R12；§11 O1.15；§8 A1-8/A1-17；§12 `:42` |
+| Issue-2 | medium | `record_correction` 写期全图校验会误拒未闭合对象上的合法更正（无未闭合 invocation / 未结清 reservation 前置未声明） | 取建议第一分支：显式写入前置条件「**仅事件流已闭合**（无未闭合 invocation、无未结清 reservation）时可调用」；A1-2/A1-19/A1-20 fixture 注明「完整事件流」 | §3 D1 调用入口；§5 T1-F2；§8 A1-2/A1-19/A1-20 |
+| Issue-3 | low | `find_orphan_reservations` 读 raw，更正后孤儿诊断与严格校验不一致 | T1-F1 明确其改走 `resolve_events`；新增回归 A1-21 | §5 T1-F1；§8 A1-21；§7 T1-P3；§8.4 |
+| Issue-4 | low | 白名单仍放行 `invocation_id`/`invocation_kind`/`parent_instance_id`，与 M2 叙述不一致 | 三者并入 `CORRECTION_STRUCTURAL_REF_FIELDS`（`invocation_id` 含 `invocation-started`/`invocation-terminal` 两条）；同步 M2 边界叙述与 §12 规范句 | §3 D1 常量/`allowed()` 叙述/M2 边界段；§10 R10；§12 `:42` |
+| O-0 | process | `blind-recheck-3.md` 文件名错位、`plan.md` 修订历史引用失配 | 修订历史注明：现文件内容为对 candidate-6 的第 4 次盲审（blind-4），其结论（**阻断**）已由本轮逐条处置；后续最终双认证产物名将严格一致 | §17 修订历史 |
+
+统计：**Issue-1..4 + O-0 全部落地（5/5）**；无未选定分叉。核心机制与 §15 机器块/calibration canon 字节未改动。
+
+### 14.1 candidate-7 preflight 复跑（定稿字节上实跑）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:5,86
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+结论：§15 机器块与 §六 canonical calibration fence **未改动**，故 `_validate_governance_change`/`_resolve_and_check_report`/`_numeric_empirical_conflicts` 全部通过；机器块不含自哈希（`calibration.sha256` 指向 `attempts.md` fence 的 canonical 字节，而非 plan 正文），故 candidate-7 正文变化**不使机器块失效**，无需按 `_resolve_and_check_report` 修正。`WARN:code_heavy` 由 5,82（candidate-6）变为 5,86（新增 Issue-1..4/O-0 理由段与 A1-21）。
+
+### 14.2 candidate-7 产物哈希（回执用）
+
+- plan.md：**132806 字节** / SHA-256 **`6ac0bb8a395c745b06d766bcbd9c6fa9c1491eb62485d7b2084a3daca55e82d8`**（**799 行**）。
+- calibration 报告文件 `evidence/calibration-report.json`：**2385 字节** / SHA-256 `c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`（未变）。
+- §15 机器块 canonical 字节与 §六 fence 未变（locator 复算通过；fence raw body sha `9a08eb6e…`）。
+- 本文件：见任务报告（哈希在回执中给出，避免自指）。
+
+---
+
+## 披露 · 设计复审写入同名文件致原设计评审被覆盖（2026-09-12，编排层事故 #2）
+
+- 事实：编排层派发设计复审时 prompt 模板替换失败（转义错误，输出路径仍为 `design-review.md`），复审 worker 按模板覆盖了原设计评审（M1-M6 原文，18,545 B）。现 `design-review.md` 内容为**设计复审**（verdict=设计需修订，MF-1..MF-4）。
+- 缓解：M1-M6 的单选修法全文已被 plan.md（candidate-4..7 修订节）、round-3.md（逐条落地核对）、attempts.md（处置表）引用留存，原文结论可重建；原文件本身不可恢复。
+- 同类事故第 2 次（第一次：blind-3 被 blind-4 覆盖）。根因相同：派发前未机械校验 prompt 内产物路径与 `--output-name` 一致。编排层已在两次处置中如实披露；后续派发的 prompt 与 `--output-name` 由同一变量生成，杜绝手改。
+- 证据影响：design-review 轮的 invocation（`d70ed95d…`，succeeded）对应的产物字节已不存在；manifest 归档时该引用将指向现复审内容——以本披露为准对账。
+
+---
+
+## 十五、candidate-8：设计复审 MF-1..MF-4 逐条处置（单选修法）
+
+> 触发：**设计复审**（现 `design-review.md`，verdict = **设计需修订**；原 M1–M6 初评已被同名覆盖，其单选修法处置留档于 `plan.md` §0.4 与本文件 §九/§十四）。全部按编排层单选修法落地，不另立方案、不新增章节、不做「顺带优化」。修订对象：`plan.md`（candidate-7 → candidate-8）。candidate-7 定稿字节 `132806` / `6ac0bb8a395c745b06d766bcbd9c6fa9c1491eb62485d7b2084a3daca55e82d8`。
+
+| # | severity | 问题 | 处置（单选修法） | plan 落点 |
+|---|---|---|---|---|
+| MF-1 | high | `CORRECTION_STRUCTURAL_REF_FIELDS` 漏 `("invocation-terminal","instance_id")`：它是 `validate_event_graph`（`model.py:1002`）与 `validate_ledger`（`:689-693`）的实例身份锚点，`validate_event` 只做可选文本校验（`:490-493`），故规则 10 拦不住，实例身份可在有效视图漂移 | 加入 `CORRECTION_STRUCTURAL_REF_FIELDS`；同步 §12 `state-schema.md:42` 字段集与 R10；新增对抗 A1-22（期望 `correction-field-not-allowed`）；执行类别完备性扫描（结论见下） | §3 D1 常量/叙述/规则 4；§5 T1-F1；§9 Non-Goal；§10 R10；§11 O1.20；§8 A1-22；§12 `:42` |
+| MF-2 | high | O5 opt-out 路径 `read_state`→改 dict→`write_state` 产出的新 state 缺 `defaults_version`，被 `cfg()`（`budget_gate.py:425`）永久当作 legacy v1；`initialize_state` 既有-state 分支不补写该键（`:324-341`），当前 `DEFAULTS==LEGACY_DEFAULTS` 掩盖影响 | opt-out 写盘前 `state.setdefault("defaults_version", 2)`（缺则置 2，不覆盖既有 legacy v1；与 `initialize_state` 新 state `:406-411` 同形）；A2-4/A2-12 增断言 `defaults_version == 2` 且键形同新 state | §3 D3 门禁行为/opt-out 载体；§10 R13；§8 A2-4/A2-12 |
+| MF-3 | high | `record_correction(root)` / `record-correction <root>` 未限定 active vs done；立身用例 r2 已归档，直接向 done 追加会破 `tree-closure`/`manifest-projection-mismatch`；A1-2 合成根绕开真实生命周期 | D1 增生命周期定案段：更正仅在 **active** 根调用；已归档对象须 `reopen` → record → `archive` 重投影（旧 manifest 入 `revisions`/`revision_chain`）；新增端到端 A1-23（r2 副本 reopen → 补 M5 合规授权 → record-correction → archive → `check` 返回 `[]`） | §3 D1 生命周期段；§11 O1.22；§7 T1-P3；§8 A1-23；§8.4 |
+| MF-4 | medium | `record_correction` 的「事件流未闭合」前置拒绝无对外失败码，调用方无法区分「对象尚未闭合，稍后可重试」与「更正非法」 | 定义专用码 `FAIL_CLOSED:correction-precondition-unclosed`（`EXIT_FAIL_CLOSED`，exit 30），在 T1-F2/§6.1 G1/§11 O1.21/§7 T1-P2 登记为**唯一口径**（不退化为 `invocation-open`/`ledger-*` 或任何 `correction-*`） | §5 T1-F2；§6.1 G1；§7 T1-P2；§11 O1.21；§3 D1 调用入口 |
+
+统计：**MF-1..MF-4 全部落地（4/4）**；无未选定分叉、无新增章节。核心机制与 §15 机器块/calibration canon 字节未改动。
+
+### 15.1 MF-1 类别完备性扫描（「图/账本实例身份锚点」类）
+
+**方法**：以 Python 枚举 `EVENT_FIELDS`（`model.py:179-205`）中匹配 `(^|_)(id|ids|instance|identity)(_|$)` 及 `*_ref` 的全部字段（共 **30** 个），与三集合逐一比对：`CORRECTION_CLOSED_FIELDS`、`CORRECTION_STRUCTURAL_REF_FIELDS`（含本轮新增 `("invocation-terminal","instance_id")`）、`CORRECTION_EVIDENCE_FIELDS`，并对仍 `ALLOWED` 的字段逐一判定是否与 `instance_id` 同类（被 `validate_event_graph`/`validate_ledger` 用作实例身份锚点交叉校验）。
+
+**结果**：比对后仍 `ALLOWED` 的 identity-ish 字段共 **11** 个，逐条判定如下：
+
+| 字段 | 类别 | 是否与 `instance_id` 同类（图/账本实例身份锚点） | 依据 |
+|---|---|---|---|
+| `invocation-started.reservation_id` | 值/预算绑定 | 否 | 立身用例要更正的值字段；其账本绑定（`model.py:642-644`）按有效值校验，更正即修复 |
+| `invocation-terminal.host_evidence_ref` | 事件内派生引用 | 否 | 值谓词 `resolution_source=="tool_response"` 时钉死为 `invocation:{invocation_id}:tool-response`（`model.py:511`），由规则 10 完整 `validate_event` 拦 |
+| `invocation-terminal.settlement_ref` | 账本结算引用 | 否 | 账本绑定 `== f"gate-ledger.jsonl:{rid}"`（`model.py:685`），有效视图上 `validate_ledger` fail-closed |
+| `artifact-captured.artifact_id` | artifact 身份标签 | 否 | 非实例身份；图内唯一性键（`model.py:988`）+ snapshot path 约束（`:545`）在有效视图上 fail-closed |
+| `artifact-captured.revision_id` | artifact revision 标签 | 否 | 非实例身份；图内唯一性键（`model.py:988`）fail-closed，无跨记录引用 |
+| `terminal-decision.reviewer_event_id` / `source_ref` / `supersedes_decision_event_id` / `verdict_output_ref` | 判定入边 | 否（已闭合） | `terminal-decision` 整类被 `allowed()` 关闭（`target.event_type not in {"terminal-decision","event-correction"}`），不进入可更正面 |
+| `design-review-completion.highlights_ref` | 引用标签 | 否 | 非实例身份锚点；仅文本载体 |
+| `user-message.host_message_id` | 宿主消息标签 | 否 | 无任何跨事件引用（`model.py:575` 仅 `_text`）；非图/账本锚点 |
+
+**结论**：在图/账本作为**实例身份锚点**交叉校验的 `*_id`/identity 类中，candidate-7 的白名单**仅遗漏 `invocation-terminal.instance_id` 一个**，本轮已闭合（A1-22）；除它之外**无其他同类遗漏**。其余 `ALLOWED` 的 identity-ish 字段或属故意保留的值字段（`reservation_id`），或整类闭合（`terminal-decision.*`），或非图/账本锚点且其值一致性由规则 10 的完整 `validate_event`/图唯一性在有效视图上 fail-closed 兜住。**不因此扩大本轮手术面**（严格遵守 MF-1 单选修法）。
+
+### 15.2 candidate-8 preflight 复跑（定稿字节上实跑）
+
+```
+$ python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:5,87
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+结论：§15 机器块与 §六 canonical calibration fence **未改动**，`_validate_governance_change`/`_resolve_and_check_report`/`_numeric_empirical_conflicts` 全部通过；机器块不含自哈希（`calibration.sha256` 指向 `attempts.md` fence 的 canonical 字节），故 candidate-8 正文变化**不使机器块失效**。`WARN:code_heavy` 由 5,86（candidate-7）变为 5,87（新增 MF 处置与 A1-22/A1-23）。
+
+### 15.3 candidate-8 产物哈希（回执用）
+
+- plan.md：**139260 字节** / SHA-256 **`bdacb8f9c73b026febf6d5f7dfb06624ef01e71d9c39a304442fb4fd9641a59c`**（**810 行**；candidate-7 +6454 字节，未新增章节）。
+- calibration 报告文件 `evidence/calibration-report.json`：**2385 字节** / SHA-256 `c4755e111b6902f64b4623ab994cc4cd0f3dd7d6f448469d7c83e9ca814ed581`（未变）。
+- §15 机器块 canonical 字节与 §六 fence 未变（locator 复算通过；fence raw body sha `9a08eb6e…`）。
+- 本文件：见任务报告（哈希在回执中给出，避免自指）。
+
+---
+
+## 编排层决定 · 评审循环收口（2026-09-12，用户裁决）
+
+- 用户指令（已记 user-message 事件）："评审差不多就可以了，只要方向明确，剩下的问题可以在执行中去解决"。
+- 效力：**candidate-8（132KB 级，含 MF-1..4 全部落地）为终局计划**；R6/blind-5 双认证豁免；MF-1..4 与全部历史 issue 的遗留精度问题转入实施阶段解决（实施后仍有独立 fresh 审计兜底）。
+- 权威链：outer R5 + blind-4 对 candidate-7 双认证"可执行"；candidate-8 = candidate-7 + 设计复审自 prescribed 的 MF-1..4 外科修复（repair7 报告），方向未变。
+- 预算终态：outer 5/8、ultraverge 3/3、blind 3+1（扩展 ext-b-blind-4，第 4 号产物为错位评审，已披露）。
+
+---
+
+## 十六、实施记录（Implementation Executor，fresh 跨厂商；2026-09-12）
+
+> 规格 = candidate-8 `plan.md`；按 §7 Bounded Sequence 执行 Phase 0 → Phase 1 → Track-1（O1）→ Track-2（O5）→ Phase 6。
+> 全程未做 git 写操作（仅只读 `git diff/status/show`）。文件改动严格限于 §5 Exact File Matrix。
+
+### 16.1 Phase 0（升级闸门）
+
+- HEAD 保持 `13da605`；工作树除已知未跟踪 `docs/plans/active/` 与 `.converge/active/`（gitignored）外无未提交改动。
+- 在对象 active 目录配置 task-envelope：
+  `python scripts/budget_gate.py init --active-dir .converge/active/20260911-op-envelope-b-contract-correction --task-tier critical`
+  输出：`[init] local ceilings: {'outer': 8, 'blind': 4, 'ultraverge': 3, 'total': 63}` / `[init] task-envelope: initial=20, cap=30` / `[init] quality_path_guaranteed: false` / `[init] envelope-may-block-before-local-ceiling: true` / `OK`（EXIT=0）。
+- A-S4 自验（Phase 0 后）：`python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md` → `WARN:code_heavy:5,87` + `PREFLIGHT_OK:governance-change`（EXIT=0）。
+
+### 16.2 Phase 1（扫描 + 红测）
+
+- §6.3 穷举 grep 全量落于 `scan-report.md`；未发现 File Matrix 之外的必需改动。
+- 红测判别：新增用例引用的 `resolve_events`/`validate_corrections`/`correction_field_allowed`/`record_correction`/`event-correction` 在 HEAD 基线**全部不存在**（`git show HEAD:...|grep -c` = 0），故实现前必然红；实现后转绿。
+
+### 16.3 Track-1（O1）改动
+
+- `scripts/archive_contract/model.py`：`EVENT_TYPES` 加 `event-correction`；`EVENT_FIELDS["event-correction"]`；`CORRECTION_CLOSED_FIELDS`/`CORRECTION_STRUCTURAL_REF_FIELDS`（含 `("invocation-terminal","instance_id")`）/`CORRECTION_EVIDENCE_FIELDS`；`correction_field_allowed`/`_decision_referenced_ids`/`_correction_authorization_binds`/`validate_corrections`/`_apply_corrections_to_event`/`resolve_events`；`validate_event` 分支；`validate_event_graph`/`validate_ledger` 入口 resolve；`find_orphan_reservations` 走 resolve；`project_manifest` 有效视图投影 + `corrections`（omit-when-empty，含取代链/effective）+ `correction:` 降级串；`render_index_bytes` 条件 `## Corrections` 段。
+- `scripts/archive_contract/capture.py`：`record_correction` + `_prepare_correction`（落盘前对 `raw+[pending]` 直接调 `validate_corrections`/`validate_event_graph`/`validate_ledger`，各入口 resolve 一次）+ `_correction_stream_closed`（MF-4 专用码）；M1：`_prepare_terminal_decision` 与 continue-parent 查找入口先 `resolve_events`。
+- `scripts/archive_convergence.py`：`record-correction` 子命令（parser + dispatch；前置未闭合→`FAIL_CLOSED:correction-precondition-unclosed`/exit 30）。
+- `refs/state-schema.md`：§12 逐字三处（:40 追加事件类型段、:42 后追加更正闭包段、:60 manifest 清单插 `corrections`）。
+- `tests/test_archive_convergence.py`：新增 `EventCorrectionTests` 20 条（覆盖 A1-2..A1-23 与 §11 O1.1..O1.22）。
+
+### 16.4 Track-2（O5）改动
+
+- `scripts/budget_gate.py`：`_task_envelope_usable`（UV3-15）；`_validate_state_shape` 增 `envelope_opt_outs` 形状校验；`_record_envelope_opt_out`（直接 `read_state`→改 dict→`write_state`，绕过 `needs_write`，写盘前 `setdefault("defaults_version",2)`）；`_governance_envelope_gate`（`plan.parent` 读 state，异常统一映射 `governance_requires_task_envelope`，opt-out reason 空即拒）；`cmd_preflight` 插入点 `:1777→:1778` 之后；parser `--allow-unconfigured-envelope`；`cmd_init` 第 4 行披露。
+- `scripts/converge_loop.py`：`_init_budget_config` 第 4 行披露。
+- `scripts/ocsr_spawn_adapter.py`：`config-init` 加 `--task-tier/--task-envelope-initial/--task-envelope-cap` + config passthrough + 第 4 行披露。
+- `refs/state-schema.md:454 后`、`refs/orchestrator-guide.md:44-47`、`SKILL.md:453/:466`、`scripts/README.md:164-166`：§12/T2-F7 逐字修改。
+- `tests/test_budget_gate.py`：`TestGovernancePreflight.setUp` 在 `self.dir`（= `plan.parent`）`init --task-tier critical`；新增 A2-3/A2-4/A2-12/A2-6/A2-11/A2-13 门禁负例；`TestTaskEnvelope` 增 UV3-15 谓词用例。`tests/test_converge_loop.py`/`tests/test_ocsr_spawn_adapter.py` 增第 4 行与 `--task-*` 断言。
+
+### 16.5 Phase 6 验证
+
+- `TEMP=TMP=C:\Users\Administrator\AppData\Local\Temp python -m pytest tests -q` → **508 passed, 5 skipped, 11 subtests passed**（基线 480 passed, 5 skipped；新增 28 条）。
+- `python -m py_compile`（全部 10 个被改 .py）通过；`git diff --check` 无告警。
+- A1-10 r2 既有归档 `check` 返回 `[]`（`test_a1_10_existing_archive_regression`）。
+- A-S4 见 §16.1。
+
+### 16.6 偏差与披露（如实）
+
+1. **A1-23 生命周期用例采用合成归档而非 r2 副本**：r2 的 event 55 当前字节已是更正后值、且其原始 `PENDING` 字节不可独立恢复（plan §2 O1h 已披露），对 r2 副本直接"更正 reservation_id"只能做同值更正。为仍端到端覆盖 `archive → reopen → record-user-message → record-correction → archive(revision r2) → check`，用例以合成的闭合归档执行，并断言旧 manifest 原字节进入 `evidence/revisions/r1/`、新 manifest `revision_id=r2`、`check` 为 `[]`。结论等价于 A1-23 的生命周期判据；未原地改写任何 `.converge/done/**` 字节（S-F2）。
+2. **A1-20 fixture 用 `observed → host-reported` 而非 `configured → unavailable`**：单字段更正必须使候选有效事件通过完整 `validate_event`；`configured`/`unavailable` 与 `resolution_source` 的 `PROVENANCE_MATRIX` 无交集，单独改 `evidence_level` 会先触发 `correction-value-type`。改用 `observed → host-reported`（同源 `tool_response`，候选合法）后，规则 10 通过、`validate_event_graph` 的 `user-decision-degradations` 重算失配正确 fail-closed，达成 A1-20 的判别意图。
+3. **A1-11 用 `role l2-gate-reviewer → outer-reviewer`**：两者均需与 ledger `target_role` 一致（`budget_gate.ROLE_CONSUMES`），故 ledger role 为合法 `outer-reviewer`；原始未授权 role 使"写入期若读 raw 必被 `decision-reviewer-authority` 拒绝"成为强判别点，有效视图读则通过——直接证明 M1 写入期/归档期同源。
+4. 无范围扩张、无未授权文件改动；`scan-report.md` 为对象 active 目录内过程产物（S-F8）。
+
+
+
+## Phase 6 · 独立审计结论
+
+- **verdict：通过**（fresh 跨厂商独立审计者，未参与计划与实施；只读审计，未修改任何仓库文件）
+- **blocking 数：0**
+- **复跑数字**：`TEMP=TMP=C:\Users\Administrator\AppData\Local\Temp python -m pytest tests -q` → **508 passed, 5 skipped, 11 subtests passed**（273.61s），与实施自述一致；`git diff --check` exit 0；独立复跑 `preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md` → `WARN:code_heavy:5,87` / `PREFLIGHT_OK:governance-change` / EXIT=0。
+- **独立证据**：14/14 改动文件全部落在 File Matrix；6 处定向变异（instance_id 结构集 / decision 引用闭包 / M5 id 绑定 / M1 写期 resolve / 孤儿诊断 resolve / correction 降级串）全部令对应测试转红；三闭集独立枚举无身份/结构/证据漏网；`PENDING→r1→r2` 取代链有效视图独立复算；二次施加被 `correction-original-mismatch` 拒绝。
+- **非阻断偏差（建议归档前顺手闭合）**：
+  1. `refs/state-schema.md:60` 与 plan §12 逐字差 1 字符（实现 `）、parent revision` vs 计划 `），parent revision`），语义等价，A-S3 非 100% 逐字。
+  2. `_budget-state.json` 为非法 UTF-8 时门禁输出 `FAIL_CLOSED:internal:UnicodeDecodeError`（仍 exit 30 fail-closed），未统一到 `governance_requires_task_envelope`；A2-13 只覆盖非法 JSON。修法：`read_state` 捕获 `UnicodeDecodeError` 归入 `state_corrupt:*`。
+- **其他观察**：`original_value` 规则 6 存在类型盲等值（`True==1`）致披露可非逐字；`scripts/orchest.py` 等 `capture.read_events` 消费者仍读 raw，存在控制器侧第二真相（`orchest.py` 不在 File Matrix，计划 §6.3 未列 `read_events(`）；done 根无显式守卫；测试缺 `correction-target-missing`/`correction-sequence`/批量三条直接负例；A1-6/A1-15 取代链用同值未判别有效值取后者（本审计以异值独立确认）。均非阻断。
+- 完整报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-audit.md`

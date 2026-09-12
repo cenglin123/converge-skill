@@ -1,0 +1,25 @@
+# 编排层修订指令 · candidate-7 → candidate-8（设计复审 MF-1..MF-4 落地）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-7）
+2. `design-review.md`（**注意**：现内容为设计**复审**，verdict=设计需修订，含 MF-1..MF-4，每条带单选修法；原始 M1-M6 评审已被覆盖，其内容以 plan 修订节与 attempts.md 披露为准）
+3. `attempts.md`
+
+## 必须落地（严格按复审单选修法）
+
+1. **MF-1**：把 `("invocation-terminal", "instance_id")` 加入 `CORRECTION_STRUCTURAL_REF_FIELDS`；同步 §12 `state-schema.md:42` 字段集清单、R10；新增对抗验收 A1-22（期望 `correction-field-not-allowed`）；执行一次类别完备性扫描（确认无其他 `*_id`/identity 字段同类遗漏），扫描结论写入 attempts.md。
+2. **MF-2**：opt-out 写盘前，若 state 缺 `defaults_version` 则置 `2`；A2-4/A2-12 增加断言 `defaults_version == 2` 且键形同新 state。
+3. **MF-3**：D1 增加生命周期定案段：更正仅在 **active** 根调用；已归档对象须先 `reopen` → record → `archive` 重投影（进 revision_chain）；新增端到端 Acceptance（r2 副本 reopen → 补 M5 合规授权 → record-correction → archive → `check` 返回 `[]`，旧 manifest 入 revisions）。
+4. **MF-4**：定义前置未闭合的专用失败码 `FAIL_CLOSED:correction-precondition-unclosed`（`EXIT_FAIL_CLOSED`），在 T1-F2、§6.1、§11 登记为唯一口径。
+
+## 硬约束
+
+- frontmatter `status: candidate-8`；修订历史追加一行；最小手术，禁止新增章节/扩写。
+- 全文联动（§3/§5/§7/§8/§11/§12）同步；修完实跑 `python scripts/budget_gate.py preflight --plan <plan路径>`，机器块如失效则修正至通过，输出贴 attempts.md。
+
+## 回执
+
+plan.md 字节数/SHA-256；MF-1..4 逐条一句话 + 类别扫描结论；preflight 复跑结论。

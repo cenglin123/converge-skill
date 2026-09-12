@@ -1,0 +1,18 @@
+# Task: 审计后顺手闭合 §9-a/b（最小手术）
+
+你是 fresh 修复 Executor。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作。只做以下两条，改动最小：
+
+1. **§9-a**：`refs/state-schema.md:60` 附近，实现插入段末尾 `）、parent revision` 的 `、` 改为 `，`（即 `…取代链关系），parent revision`），与计划 §12 新文逐字对齐。
+2. **§9-b**：`scripts/budget_gate.py` 的 `read_state` 异常捕获 `except (json.JSONDecodeError, OSError)` 增补 `UnicodeDecodeError`（使非法 UTF-8 state 归入 `state_corrupt:*`，从而被治理门统一映射为 `FAIL_CLOSED:governance_requires_task_envelope`）。在 `tests/test_budget_gate.py` 补一条负例：写入非 UTF-8 字节的 `_budget-state.json` → 含 gov 块的 preflight 得到统一治理失败码（而非裸 `internal:UnicodeDecodeError`）。
+
+验证（必须执行并报告数字）：
+```
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests/test_budget_gate.py -q
+TEMP='C:\Users\Administrator\AppData\Local\Temp' TMP='C:\Users\Administrator\AppData\Local\Temp' python -m pytest tests -q
+python -m py_compile scripts/budget_gate.py
+git diff --check
+```
+
+产物：上述两文件改动 + 追加 `.converge\active\20260911-op-envelope-b-contract-correction\attempts.md` 一节 `## Phase 6b · 审计顺手闭合 §9-a/b`；报告 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-fixab-report.md`。
+
+回执：全量测试数字；确认无其它改动。

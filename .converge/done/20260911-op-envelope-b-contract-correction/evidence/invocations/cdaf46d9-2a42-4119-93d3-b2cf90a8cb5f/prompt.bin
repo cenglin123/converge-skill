@@ -1,0 +1,65 @@
+# 编排层修订指令 · candidate-1 → candidate-2（ultraverge UV1 三票合并处置）
+
+你是 Plan Repair Executor（fresh Executor）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作。
+
+## 输入（必读，按序）
+
+1. `plan.md`（candidate-1，待修订）
+2. `uv-init-1.md`、`uv-init-2.md`、`uv-init-3.md`（三票初审；逐条 issue 都必须处置：修复或记录为何不修）
+3. `attempts.md`、本简报
+4. 代码与 refs（全部行号实核后引用）
+
+## 编排层范围裁决（已定，必须执行）
+
+| # | 裁决 | 依据（UV 票） |
+|---|---|---|
+| S1 | **删除 D2/O3**（自指 bootstrap 通道整体移出本计划，改为"处置记录"：O3 结论 = "自指修复的合法时序是『最小修复先落地 → fresh 审计验收 → 对象归档』，r2 已实践且归档成功（`.converge/done/20260910-process-controller-consolidation`），不存在被死锁拒绝的操作；bootstrap 通道 record-only，不再设计"）。File Matrix 同步删除 D2 相关条目 | UV3-1(conceptual)、UV2 I2-2/I2-3/I2-4、UV1 B2/N12 |
+| S2 | **O6 定案 record-only**：删除"裁决为实现则实施"的分支；D4 改写为"O6 处置协议 = 评议已定：不实现"，并给出 record-only 的理由结构（缺真实复现样本 + 首轮双审成本未实证超阈）。 plan 中保留"何种证据出现时才应重启该议题"的判据清单 | UV1 B4、UV2 I2-6、UV3-16 |
+| S3 | **保留 D1（O1 更正事件）**，按下方"逐条修复要求"改造 | UV1 B3/N5/N6/N11/N13/N14、UV2 I2-1/I2-7/I2-15、UV3-6/7 |
+| S4 | **保留 D3（O5 治理信封默认）**，按下方"逐条修复要求"改造；两族机制（archive 契约 / budget gate）在计划内按**独立 Track** 组织（Track-1 = O1，Track-2 = O5），各自有独立 File Matrix 行组、独立 Phase 序列、独立 Acceptance；并写一段"为何不拆对象"（合并省一次 ultraverge 全流程；两 Track 无共享代码路径，除 tests/test_process_controller_contract.py 的静态断言外互不依赖）——回应用户已裁决的合并 | UV3-16 建议拆分 → 以结构化 Track 回应 |
+| S5 | **本计划自身必须合规**：加入 `converge.governance-change/v1` 机器块（放附录，plan 内合法 json fence），`user_message_events.execution_authorization = ab8896b1-68e1-4170-9545-a1ab4e960c4b`（真实事件，sequence 9）、`quality_goal = 06754e6f-94fc-4a8a-9d80-65f89ae68e3a`（sequence 10）；`numeric_changes` 用 `kind: mechanism`（本计划不改任何数值默认，critical 只是推荐档位）；`archaeology_refs` 用真实完整 SHA：`git:13da6055f173ab1459f62cb36de11bb05b2b19cc`、`git:a49a2a1828f185a3060e0981d8724a7fa6617c0d`、`git:529e691672a341b9c4cc0fe798eb63c487d25dfc`、`git:43e76b64b8dc434695acd413b5870e050b95d8dc`；`counterevidence_refs: []`；`change_id: op-envelope-b`。calibration 字段：先实读 `_resolve_and_check_report`（budget_gate.py :1655-1680 附近）与 state-schema :87-95 的 bootstrap 例外，**检索仓库内是否已有 calibration-report**（grep `calibration`、`corpus_digest`）；若有真实报告则引用；若确无，用计划内嵌块（bootstrap 例外），且 locator/hash/digest/freshness 必须能通过 :1655-1680 的机械校验——你必须在写完后实际运行 `python scripts/budget_gate.py preflight --plan <plan路径> --active-dir <对象目录>` 验证机器块合法（若 O5 的 --active-dir 尚未实现，preflight 现版不读 state，直接跑通即可），把运行输出贴进 attempts.md | UV1 N8 |
+
+## D1（O1）逐条修复要求
+
+- **闭包规则重设计**（UV2 I2-1 架构级：原规则与白名单互斥）：可更正字段白名单 = 被更正事件**自身 EVENT_FIELDS 中实际存在**的字段，且排除以下"闭合字段"：`event_id`/`sequence`/`event_type`/`schema_id`/`schema_version`（身份与顺序不可更正）；terminal-decision 类型事件**整体不可更正**（判定闭合）。逐条写清"立身用例"（r2 事件 55 `reservation_id` 误写 `PENDING`）在该规则下可更正的推导链。
+- **terminal-decision 引用字段归属修正**（UV1 N5 / UV3-7）：闭包判定不得使用 `started_event_id`（不在 terminal-decision 字段集）；"被 decision 引用"的机械定义 = `validate_event_graph` 中实际存在的引用边（列出 model.py 的真实引用字段与行号）。
+- **有效视图层定界**（UV1 B3 / UV2 I2-7）：选定单层方案——所有校验器（`validate_event_graph`/`validate_ledger`/`validate_archive`/manifest 投影/check）统一通过一个 `resolve_events(events)` 视图函数读取（correction 事件按 sequence 应用，视图中被更正字段显示 corrected_value）；manifest 投影 = 有效视图 + 新增 **omit-when-empty** 的 `corrections` 键（每条含 corrected_event_id/field/original_value/corrected_value/authorized_by）；原始值只存在于 correction 事件本体（append-only，不覆盖）。写明该选择如何同时满足：check 不再因旧值失败、manifest 哈希仍可复算、A15 既有归档回归不破（omit-when-empty）。
+- **validate_event 增加 correction 分支**（UV1 N13 / UV2 I2-15）：`EVENT_TYPES`/`EVENT_FIELDS` 增 `event-correction`；字段集你设计后逐字段写明类型校验。
+- **"禁止批量"机械化**（UV3-6）：一条 correction 事件恰好更正一个事件的恰好一个字段（schema 层单字段约束），批量在结构上不可表达。
+- **授权绑定加固**（UV1 N11）：`authorized_by_user_message_event_id` 必须满足：存在、类型 user-message、`sequence(correction) > sequence(user-message) > sequence(corrected event)`（即先有错误、后有授权、最后更正）；写明越权用例如何被拒。
+- **命名统一**（UV1 N14）：全文统一 `event-correction`（事件类型）与 manifest `corrections`（披露键）。
+
+## D3（O5）逐条修复要求
+
+- **触发谓词对齐**（UV3-3 / UV1 N7 / UV2 I2-9）：机器触发条件 = plan 含 `converge.governance-change/v1` 块；所有规范句（第三部）同步改写为"含治理机器块的治理计划"，**不得**使用模糊的"治理类任务"或绑定 `review_mode`。给出每处"原文 → 新文"逐字对照（UV3-13：原文列必须逐字）。
+- **门禁行为**：preflight 检出 gov 块 → 要求 `--active-dir` 且其 state 的信封可用 → 否则 `FAIL_CLOSED:governance_requires_task_envelope`；显式 opt-out `--allow-unconfigured-envelope <reason>` → 打印 `WARN:unconfigured-envelope:<reason>` 并继续（UV3-14）。opt-out 的使用随 preflight 输出可见（审计面）。
+- **信封可用判定修正**（UV3-15）：不得直接用 `_task_envelope_configured`；用"initial/cap 可解析"（`_task_envelope_initial`/`_task_envelope_hard_cap` 不抛 `FailClosed`）作为谓词，行号实核。
+- **既有测试穷举（A 教训，最高优先）**：实开 `tests/test_budget_gate.py` 的 `TestGovernancePreflight`（:1448 起）与其它调用 preflight 的用例，**逐个列出**会被新门禁打断的用例（UV2 称 21 处、UV3 称 17+，你数出准确数），并在 File Matrix 写明每个的更新方式：统一注入 `--active-dir`（指向已配置 task_tier 的临时 state）或按用例语义改期望；`test_governance_flag_requires_block`、CRLF/畸形/locator 错误等负例不受影响的要逐一说明为何不受影响。
+- **active-dir 生命周期**（UV3-5）：写明 preflight 的 `--active-dir` 指向**治理对象自身的 active 目录**（对象初始化时先配置信封、后跑 preflight），不存在倒置；与"治理自举例外的交互"给出明确语义。
+- **数值依据重写**（UV1 N10 / UV2 I2-8 / UV3-8）：真机械下界 = `ultraverge_min_reviewers(3) + 设计审查 1 = 4`；典型路径估计 ≈10 并标明"估计非下界"；推荐 `critical`（initial 20 / cap 30）的依据 = r2 实测 23 reserved（cap 30 余量 7；feature cap 24 余量 1）；同时写明这是**推荐与披露**，不新增 hard cap、不改 TASK_TIERS 数值。
+- **三处 init 披露**：`budget_gate.cmd_init`、`converge_loop._init_budget_config`、`ocsr_spawn_adapter.cmd_config_init` 各加一行"信封可能先于本地上限阻断"（措辞一致）；并为 adapter 的 `config-init` CLI（:760-771）暴露 `--task-tier/--task-envelope-initial/--task-envelope-cap`（否则披露分支不可达，UV 前期调研已证实）。
+- **legacy 兼容**：无 gov 块且无 `--governance` 的路径行为完全不变（现有负例逐一保持）。
+
+## 事实修正（全部三票的 evidence 类 issue）
+
+- 删除"grep disclosed_correction = 0"断言（该词出现在本计划草案与 docs/plans 草案中，self-reference 命中；UV1 N1 / UV2 I2-11 / UV3-10）。
+- O6a/材料规则锚点改为实核行号（UV2 I2-12 / UV3-9：state-schema.md:100 附近，你实核）。
+- `FailClosed` 抛点 `:705`（UV1 N3）；`capture.py` 无 `__all__`（UV1 N4 / UV2 I2-13），改用实核符号。
+- Phase 0 "clean tree"自检改为"除已知未跟踪 `docs/plans/active/`（4 个规划文档）外无未提交改动"（UV1 N9 / UV2 I2-14）。
+- 所有保留的行号断言逐一实核并标注核验日期。
+
+## 结构与质量要求
+
+- Track-1（O1）/ Track-2（O5）各自：File Matrix 行组、Bounded Phase 序列、Acceptance；共享仅 `tests/test_process_controller_contract.py` 静态断言与 Phase 0/6。
+- Acceptance 条条可机械判定；全篇禁"或"式未选定方案；ADR 风格给出 D1/D3 的关键取舍与被拒备选（含 D2/O3 的删除理由）。
+- 对抗回归清单：O1（越权、缺授权、时序颠倒、decision 事件、链式、批量不可表达、未知字段）；O5（legacy 放行、gov 块+未配置+无 opt-out → 拒、gov 块+未配置+opt-out → WARN 通过、gov 块+已配置 → 通过、错误 active-dir → 拒、opt-out 无 reason → 拒）。
+
+## 产物
+
+1. 原地更新 `plan.md`（candidate-2）。
+2. 追加 `attempts.md`：UV1 三票逐条处置表（issue → 处置 → 落点）+ preflight 机器块自验运行输出。
+3. 报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-repair1-report.md`。
+
+## 回执
+
+plan.md 字节数/SHA-256；S1-S5 是否落实；三票 issue 总数与你处置数（修复/因 S1/S2 删除/其他）；preflight 自验结果；你实核修正的行号清单。

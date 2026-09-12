@@ -1,0 +1,41 @@
+# 编排层修订指令 · candidate-2 → candidate-3（outer R1 处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作。除下文明确授权的 calibration 报告产物外，只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-2）
+2. `round-1.md`（outer R1 评议：R1-1/R1-2/R1-3 阻断 + R1-4..R1-8 非阻断）
+3. `uv-init-1/2/3.md`、`attempts.md`
+4. r2 归档对象：`.converge/done/20260910-process-controller-consolidation/`（evidence/events/ 可实读）
+5. 代码：`scripts/archive_contract/model.py`、`scripts/archive_convergence.py`、`scripts/budget_gate.py`（尤其 `_resolve_and_check_report`、calibration 校验）、`scripts/distill_antipatterns.py`（--calibration 生成器）
+
+## 必须落地的修复
+
+### R1-1（阻断 · 立身用例前提失真）
+- 实读 `.converge/done/20260910-process-controller-consolidation/evidence/events/`，数出 terminal-decision 事件**真实数量**（R1 称 3 条，你实数），据此重写 D1 立身用例推导链：r2 事件 55（`reservation_id` 误写 `PENDING`）所在的事件图、被哪些 decision 引用、在新闭包规则下能否更正、manifest/check 各自表现。推导链必须逐步可复算（引用事件 sequence/event_id）。
+
+### R1-2（阻断 · 共享 Acceptance 自相矛盾）
+- 逐条重审 §8 共享 Acceptance 与 Track-2 门禁的交互：凡是"命令 + 期望 exit 0"的条目，若其命令在实现后会因新门禁变 `FAIL_CLOSED`（exit 30），必须改写为带 `--active-dir`/opt-out 的正确形式，或显式声明该条目属于 legacy 放行路径并给证明。把全部此类条目列表化（条目号 → 冲突 → 修法）。
+
+### R1-3（阻断 · bootstrap 例外已被 r2 消耗）
+- 先检索仓库是否已有可用 calibration 报告（r2 Phase 1/3 落地的生成器产物；grep `corpus_digest`/`calibration` 于 `refs/`、`docs/`、`.converge/done/20260910-*/`）。
+- 若存在且 `freshness` 仍有效 → 机器块直接引用（path/sha256/corpus_digest/freshness 逐字段照抄并实核）。
+- 若不存在/已过期 → 用落地生成器**真实产出**一份报告，落盘到 r2 惯例位置（你实核生成器的输出路径约定与 r2 归档中的位置），并在 File Matrix 增加"新建 calibration 报告文件"条目（路径 + 为什么 ultraverge 允许）。生成命令与输出摘录写入 attempts.md。
+- 机器块改为引用真实报告；删除"bootstrap 内嵌块"表述。改完**实际复跑** `python scripts/budget_gate.py preflight --plan <plan路径> --active-dir <对象目录>`，输出全文贴 attempts.md（当前代码无 --active-dir 参数时记录实际行为）。
+
+### 非阻断（一并落实）
+- R1-4：§12 对照表补全为逐字原文（仍差的 5 行）。
+- R1-5：D1 规则 10 的类型谓词映射补闭：白名单放行的每个枚举/字符串字段都要有对应谓词或显式"结构校验由 validate_event 承担"的归属说明。
+- R1-6：`project_manifest` 的派生面（degradations、evidence 闭包、INDEX 渲染）显式声明全部走有效视图，逐一列出行号。
+- R1-7：修正"4 处不受影响用例零改动"表述（共享 helper 被改则其调用同样变化），改为精确表述。
+- R1-8：在 Risks 或验证节记录"全量测试数字与评审环境相关"的环境事实（长路径 TEMP 前置）。
+
+## 质量要求
+
+- 全部新增行号/断言实开核对；禁"或"式未选定方案；Acceptance 条条可机械判定。
+- UV 三票与 R1 的全部 issue 保持可追溯（attempts.md 处置表追加 R1 部分）。
+
+## 回执
+
+plan.md 字节数/SHA-256；R1-1/2/3 处置一句话（含 terminal-decision 实数、A-S4 修法、calibration 报告路径与复跑结论）；非阻断 5 条处置；preflight 复跑输出摘要。

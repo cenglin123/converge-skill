@@ -1,0 +1,40 @@
+# Task: 子计划 B · ultraverge 初审（独立 Reviewer）
+
+你是本收敛对象的 **ultraverge 初审 Reviewer**（fresh、跨厂商、互不共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。**只读**，不得修改任何文件（本任务书指定的输出文件除外）。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-1，ultraverge 对象：O1 契约更正事件 + O3 自指 bootstrap 通道 + O5 治理任务默认信封 + O6 material 增量复核裁决协议）
+
+## 必读
+
+1. 上述 `plan.md`
+2. `CONSTITUTION.md`（第三部清单 :67-78、第四部程序 :91-96）
+3. `SKILL.md` 的 Ultraverge 路径（:157-186）与评议纪律引用
+4. `refs/design-review-prompt.md`（DR 7 维）、`refs/reviewer-discipline.md`、`refs/reviewer-prompt.md`
+5. 代码事实（计划中每个 文件:行 断言都必须实开核对）：`scripts/archive_contract/model.py`、`scripts/archive_contract/capture.py`、`scripts/archive_convergence.py`、`scripts/archive_contract/transaction.py`、`scripts/budget_gate.py`、`scripts/orchest.py`、`scripts/converge_loop.py`、`scripts/ocsr_spawn_adapter.py`、`tests/`（相关用例）、`refs/state-schema.md`、`refs/orchestrator-guide.md`
+
+## 评审框架（ultraverge 扩域）
+
+1. **前置自检 5 问**（产物身份自洽 / 边界诚实 / 数据纯度 / 职责边界自洽 / 命名一致性）逐项给结论。
+2. **DR 7 维设计审查**（按 `refs/design-review-prompt.md` 的维度逐维评审；本计划是机制+治理双对象，特别审：模块边界、失败语义、约定命名、系统边界、向后兼容、可测性、回滚路径）。
+3. **事实核验**：所有行号/符号/行为断言实开核对；凡失真即列 issue（A 对象曾连续 4 轮因此阻断）。
+4. **O1 专项**：更正事件的封闭字段设计是否与 `validate_event` 等集模型一致；图级约束（不可更正已闭合 decision、禁止链式/批量）是否有机械承载；manifest degraded 呈现是否复用既有 `degradations` 通道；与 `--declare-orphan-reservation` 先例的一致性。
+5. **O3 专项**：bootstrap 通道的触发条件、次数上限、审计呈现、与 finish 步骤 7/8（当前代码重放事件）的关系；是否真的打破"用当前代码验证改代码对象"的循环；会不会成为常规后门。
+6. **O5 专项**：preflight 读 state 的参数设计；fail-closed vs BLOCK 的选择；opt-out 的披露；推荐档位的数值依据是否可复核、非拍脑袋；对 legacy（无 gov 块）路径的兼容；三处 init 披露的改动一致性；对未配置任务的影响面。
+7. **O6 专项**：裁决协议是否可判定（是否给了"实现 vs 只记录"的机械判据）；默认 record-only 立场是否被保持。
+8. **治理合规**：File Matrix 对第三部文件的每一处修改是否显式列出"原文 → 新文"对照；升级闸门是否仍保留；是否符合"不要把多个机制塞进同一个巨型计划"的教训（本对象四域合一是否合理，若不合理必须明说并给拆分建议）。
+9. **范围与回归**：新增门禁 × 既有调用点穷举扫描义务是否落实；已知测试区枚举是否完整；Acceptance 是否条条可机械判定。
+
+## 输出（严格）
+
+文件：`.converge\active\20260911-op-envelope-b-contract-correction\uv-init-2.md`
+
+必须包含：
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`（三选一）
+- 前置自检 5 问逐项
+- DR 7 维逐维结论（pass/issue）
+- 逐条 issue：编号 + severity（conceptual/architectural/structural/implementation/wording/evidence）+ 文件:行 + 原文 + 影响 + **单选**建议
+- 结尾：是否建议拆分对象（是/否 + 理由）；是否存在你无法核实的事实断言（列出）
+
+判定纪律：不因"写得长"放行；不为凑数把 wording 升级；conceptual/architectural 阻断必须给出替代设计。

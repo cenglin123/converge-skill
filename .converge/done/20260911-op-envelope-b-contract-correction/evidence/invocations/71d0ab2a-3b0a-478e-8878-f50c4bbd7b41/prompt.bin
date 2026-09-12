@@ -1,0 +1,51 @@
+# 编排层简报 · 子计划 B candidate-1 撰写素材（2026-09-12）
+
+你是 Plan Author（fresh Executor）。任务：把 `docs/plans/active/20260911-op-envelope-b-contract-correction.md`（draft，含 O1+O3+O5+O6）扩展为一份可送 ultraverge 三名初审的收敛计划 **candidate-1**，写到
+`C:\Users\Administrator\Documents\Github\converge-skill\.converge\active\20260911-op-envelope-b-contract-correction\plan.md`。
+**不得修改任何其它文件**（尤其不改 scripts/、tests/、refs/）。UTF-8。不做 git 操作。
+
+写作前必须实开以下文件核对行号与原文（行号以下为 2026-09-12 HEAD `13da605` 工作树调研结果，你须复核）：
+
+## A. 契约事实（O1/O3 依据）
+
+- `scripts/archive_contract/model.py`（1318 行）：`EVENT_TYPES` :21-24（6 类：invocation-started/invocation-terminal/artifact-captured/terminal-decision/design-review-completion/user-message）；`EVENT_FIELDS` :179-205；`validate_event` :444-458 **封闭等集**（extra/missing 即 `event-fields` 拒绝）；terminal-decision 二次特化 :446-455；`validate_event_graph` :958-1037；`validate_ledger` 配对 :633（binding）、:678-686（status；`cancelled+pre_execution=True` 可配 failed）。
+- 错误码：`ledger-binding-missing` :642-644（reservation 未 reserved/未结算）；`ledger-status-conflict` :678-684。
+- manifest：`project_manifest` :740-899，字段 :866-883（含 `degradations` :880、`acknowledged_orphan_reservations` :884-893 omit-when-empty）；降级串生成 :856-865（`model-provenance:{level}`、`artifact:{id}:{capability}`、`ledger:orphan-reservation:{rid}` 等）；INDEX 渲染 :1256-1258。
+- check：`check_archive` :1294-1318 → `validate_archive` :1151-1191；失败码含 markdown-link-missing :1085、decision-summary-missing :1103、tree-closure :1172、content-mismatch :1176、manifest-projection-mismatch :1188、decision-chain :1009 等。**"degraded" 不是 check 状态**（state 枚举 :374-398 仅 valid/missing/malformed/unsupported/invalid）。
+- reopen：`transaction.py:305-327`（marker + 父 manifest 入 revisions/）；`derive_supersedes_decision_event_id` model.py:924-937；capture.py:523-554 强制 derive（`decision-derived-field-conflict`）。
+- 先例（最接近的披露机制）：`archive --declare-orphan-reservation`（archive_convergence.py:291-294）→ manifest `acknowledged_orphan_reservations` + 降级串。**当前契约无任何 correction/disclosed_correction 事件或字段**（全仓 0 命中）。
+- finish 步骤（orchest.py:1445-1702）：0 已归档拒绝 :1456-1460；0.5 verdict 交叉 :1462-1468；1 产物连续 :1470-1475；2 全 settle :1477-1484；2.5 孤儿预检 :1486-1499；3 崩溃恢复 :1501-1558；3.4 manual-fallback :1560-1577；3.5 material+calibration :1579-1582；4 终局 decision :1584-1656；5 stamp :1673-1677；6 prompt 归位 :1679-1684；7 archive :1686-1692；8 check :1694-1698。步骤 7/8 会用**当前代码**重放全部事件（`load_events` 内嵌 validate_event :413）——这就是 O3 鸡生蛋的机制位置。
+
+## B. 治理门与信封事实（O5 依据）
+
+- `scripts/budget_gate.py`（2179 行）：`TASK_TIERS` :124-132（small 4/8、medium 8/16、feature 16/24、critical 20/30、critical/ultraverge=critical）；opt-in 判定 `_task_envelope_configured` :692-694（`"task_tier" in c or "task_envelope_cap" in c`）；未配置时 reserve `--role task-envelope` → `FAIL_CLOSED:task_envelope_not_configured`（:1165-1169 附近；refs/state-schema.md:454 规定未配置行为不变）。
+- 治理 preflight：`cmd_preflight` :1730-1778（fence 提取 :1754-1762、gov 块校验 :1770-1777、:1778 转 `cmd_preflight_governance` :1718-1727 → `_validate_governance_change` :1540-1652 → `_resolve_and_check_report` :1655-1680 → `_numeric_empirical_conflicts` :1683-1715）。**preflight 当前不读 gate state**（parser 仅 `--plan`/`--governance` :2134-2139）——最小侵入点：:1777 之后、:1778 之前；需新增 `--active-dir` 类参数。
+- 初始化披露三处：`budget_gate.cmd_init` :1983-2019（:2012-2014 三行）、`converge_loop._init_budget_config` :1072-1095（:1093-1095）、`ocsr_spawn_adapter.cmd_config_init` :362-404（:394-402；注意其 CLI :760-771 **未暴露 --task-\* 参数**）。"信封可能先于本地上限阻断"一句**无任何代码路径打印**（最接近的散文在 SKILL.md:466）。
+- 第三部受保护清单（CONSTITUTION.md:67-78）：含 `SKILL.md`、`refs/state-schema.md`、`refs/orchestrator-guide.md`、`refs/reviewer-discipline.md` 等；本对象为 ultraverge（第四部程序 :91-96），允许按程序修改这些规范句，但 File Matrix 必须显式列出每一处。
+- O5 数值依据要求：不得发明 hard cap；推荐档位必须给出可复核依据。可用数据点：r2 归档对象 gate-ledger 共 23 条 reserved（executor 5、outer 6、ultraverge-initial 3、design-reviewer 5、blind 4），即单对象实际派发 ≈23；ultraverge 流程机械下限 = 3 初审 + ≥1 修复轮 outer + 2 material 双审 + 1 设计审查 + 1 终审 + 1 实施 + 1 独立审计。你自己核算并给出推导，不要照抄这个数。
+
+## C. O6 评议框架（写入计划的要求，不预设立场）
+
+- 计划必须把 O6 写成"收敛期裁决项"：给出正反两方的证据要求与裁决规则（例如：仅当能论证"delta 复核在X类修订上与全量同字节复核产出相同判定置信"的机制论证 + 至少一个历史对象可作回放样本时才允许实现；否则 record-only）。默认立场 = record-only（呼应"不为未观测故障预设机制"）。
+
+## D. 结构要求（ultraverge 计划的完备性）
+
+1. frontmatter：`status: candidate-1`、`created_at`、`review_mode: ultraverge`、`scope`、`depends_on`（A 已完成）、`object_slug: 20260911-op-envelope-b-contract-correction`。
+2. Goal / 证据（全部带 文件:行，逐条你实核后标注"已核"）/ 决策 D1(O1 更正事件) D2(O3 bootstrap) D3(O5 治理信封默认) D4(O6 裁决协议)。
+3. **Exact File Matrix**：逐文件写明改动与备注；第三部文件（`refs/state-schema.md`、`refs/orchestrator-guide.md`、`SKILL.md`、`refs/reviewer-discipline.md` 若触）必须显式列出"改哪一句、为什么 ultraverge 允许"。行号必须你实核。
+4. **新增门禁 × 既有调用点穷举扫描义务**（A 对象教训）：凡新增 fail-closed 门禁（O1 校验、O3 通道、O5 preflight 门、init 披露变化），计划必须包含 Phase 1 穷举扫描步骤与"未授权文件即停止"规则；并预先枚举已知受影响测试区（`tests/test_archive_convergence.py`、`tests/test_budget_gate.py` 的 TestGovernancePreflight :1448 与 TestTaskEnvelope :785、`tests/test_converge_loop.py` TestInitializationDisclosure :1003、`tests/test_ocsr_spawn_adapter.py` TestConfigInit :315、`tests/test_process_controller_contract.py` :130/:199/:268）。
+5. Bounded Implementation Sequence（Phase 0 升级闸门 → Phase 1 扫描+红测 → Phase 2 O1 → Phase 3 O3 → Phase 4 O5 → Phase 5 O6 裁决落地 → Phase 6 验证（含独立 fresh 审计）→ Phase 7 收尾）。每步有产物与验证。
+6. Acceptance：条条可机械判定（命令+期望）。
+7. Non-Goals（不引入通用事件编辑、不重写历史、不放松 fail-closed、不加控制器、O6 不默认实现）。
+8. Risks（更正事件被当后门、bootstrap 通道过宽、O5 与未配置任务冲突、规范句修改的回滚路径）。
+9. **对抗回归要求**：O1 越权/缺授权/已闭合引用/链式更正/批量重写；O3 通道超限使用/未声明使用/与 reopen 叠加；O5 未配置任务直调 preflight/兼容 legacy 无 gov 块路径。
+10. 全篇禁用"或"式未选定方案；数值必须给依据；规范句修改必须给"原文 → 新文"对照表。
+
+## 产出
+
+- 只写 `.converge\active\20260911-op-envelope-b-contract-correction\plan.md`。
+- 报告写入 `C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-author-report.md`（列出你实核过的文件与行号修正、D1-D4 的一句话方案、File Matrix 行数）。
+
+## 回执
+
+plan.md 字节数与 SHA-256；D1-D4 各一句话；你实核后修正过的行号清单；是否有你无法核实的断言（如有，列出）。

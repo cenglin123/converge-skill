@@ -1,0 +1,31 @@
+# Task: 子计划 B · 终局计划 blank-slate 独立复核（材料双权威之盲审侧）
+
+你是 fresh 独立 Reviewer（blank-slate：此前未参与任何评审）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读（指定输出除外）。UTF-8。
+
+## 受审对象（终局字节，冻结）
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-5；请自行完整计算并记录 SHA-256）
+
+## 任务
+
+对**同一份最终字节**做独立复核，回答："按这份计划实施，能否产出正确、可验收、范围受控的结果？"
+
+1. 计算 plan.md 的 SHA-256 并写进报告（字节核对）。
+2. 通读全文，检查：自洽性（决策之间、决策与 File Matrix/Phase/Acceptance 之间无矛盾）；可执行性（每个 Phase 有明确产物与验证；Acceptance 条条可机械判定）；事实准确性（抽查 ≥12 处 文件:行 断言，实开核对）；范围纪律（是否有超出 File Matrix 的隐含改动）；治理合规（第三部修改是否有逐字对照、机器块、授权事件）。
+3. 特别独立判断（不要被计划自己的论证带着走）：
+   - O1 更正事件的闭包规则与 `resolve_events` 有效视图，在 `model.py` 的真实校验链上是否成立；
+   - O5 门禁在 `tests/test_budget_gate.py` 现有用例上的真实影响面（自己数）；
+   - 机器块（§15/§16）是否能通过 `budget_gate.py preflight` 当前代码的机械校验（可实跑）。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-b-contract-correction\blind-recheck-3.md`
+
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`
+- SHA-256 实算值
+- 抽查核对表（≥12 条：断言 → 实核结果）
+- 独立判断三项的结论
+- 逐条 issue（若有）：编号 + severity + 文件:行 + 单选建议
+- 结尾：作为"第二权威"，你是否认可该计划进入实施（是/否 + 一句话理由）
+
+判定纪律：独立判断，不参考其他评审文件（不要读 round-*.md / uv-init-*.md / attempts.md）；事实失真即阻断。

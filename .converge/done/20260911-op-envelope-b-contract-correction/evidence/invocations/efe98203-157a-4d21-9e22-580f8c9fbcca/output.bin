@@ -1,0 +1,112 @@
+# blank-slate 独立复核报告（blind-recheck-1，材料双权威之盲审侧）
+
+**verdict：可执行**
+
+- 受审对象（终局字节，冻结）：`.converge/active/20260911-op-envelope-b-contract-correction/plan.md`（frontmatter `status: candidate-3`）
+- 复核基线：`git rev-parse HEAD` = `13da6055f173ab1459f62cb36de11bb05b2b19cc`（与计划 §18 声明一致；`git status --porcelain` = `?? docs/plans/active/`，与 §5.3 S-F6 / Phase 0 验证一致）
+- 复核者：fresh blank-slate，未参与本对象任何评审；未读取 `round-*.md` / `uv-init-*.md` / `attempts.md`
+- 日期：2026-09-12
+
+## 0. SHA-256 实算（字节核对）
+
+```
+SHA-256(plan.md) = e7690e761f07330ba76cdb2aef35871af06e6cb7d9cd1c9c372a5b6d439887f8
+```
+
+`certutil -hashfile` 实算，前缀 `e7690e76…` 与任务给定的冻结前缀一致，**通过**。`wc -l` = 695 行。
+
+## 1. 抽查核对表（断言 → 实核结果）
+
+行号均为 2026-09-12 HEAD `13da605` 工作树实开值。共 24 条（要求 ≥12）。
+
+| # | 计划断言（位置） | 实核结果 | 判定 |
+|---|---|---|---|
+| C1 | `EVENT_TYPES` 恰 6 类（§2.1 O1a） | `model.py:21-24` 实为 `invocation-started/invocation-terminal/artifact-captured/terminal-decision/design-review-completion/user-message`（6 类） | 一致 |
+| C2 | `COMMON_EVENT_FIELDS` :178、`EVENT_FIELDS` :179-205（§2.1 O1b） | 实开 `model.py:178`/`:179-205` 完全吻合 | 一致 |
+| C3 | `validate_event` :437、terminal-decision 二次特化 :445-455、等集判定 :456-458（§2.1 O1c） | 实开吻合 | 一致 |
+| C4 | event graph 校验 :958-1037；ledger 配对 :642-644；status 配对 :678-686（§2.1 O1d/O1e/O1f） | 实开吻合（raise `ledger-binding-missing` 在 :644，判定区间 :642-644；:679-682 为 pre_execution 注释与并集，:683-684 为判定） | 一致 |
+| C5 | `validate_archive` :1178-1181 先跑 graph/evidence/ledger，:1185-1188 才 `project_manifest`（§2.1 O1j） | 实开吻合 | 一致 |
+| C6 | `capture.py` 无 `__all__`；`__init__.py:5` 有（§2.1 O1k / T1-F2） | `grep` 仅 `scripts/archive_contract/__init__.py:5` 命中 | 一致 |
+| C7 | `archive_convergence.py` record-* parser :286-287、dispatch :360-362、`--declare-orphan-reservation` :291-294（§2.1 O1i/O1k） | 实开吻合 | 一致 |
+| C8 | `_prepare_terminal_decision` :523-554、`record_terminal_decision` :578-581（§3 D1 调用入口） | 实开吻合 | 一致 |
+| C9 | r2 实含 **3 条** `terminal-decision`（seq 17/45/54）（§0.3 R1-1 / §3 D1 步骤 3） | 脚本全量解析 r2 57 事件：恰 3 条，seq 17/45/54，id/引用全吻合 | 一致 |
+| C10 | `DECISION_REFERENCED = {14,42,53,17,45}`，事件 55 不在内（§3 D1 步骤 3） | 机械求值集合恰为 `{14,42,53,17,45}`；事件 55 `cabcac00…` 不在内 | 一致 |
+| C11 | 事件 55 = `invocation-started`（role=design-reviewer，seq 55），现值 `reservation_id=81a2537ea9eb`（§2.1 O1h / §3 D1） | 实开吻合 | 一致 |
+| C12 | 事件 56 = `user-message`，`host_message_id=opencode-20260911-event55-correction`（§2.1 O1h） | 实开吻合（user_quote 明载「把事件 55 的 reservation_id 从 PENDING 改为真实存在的 81a2537ea9eb」）；该文件 `git log` 仅 `529e691` 一次提交 | 一致 |
+| C13 | 事件 57 = `invocation-terminal`，仅经 `started_event_id` 引用事件 55（§3 D1 步骤 4） | 实开吻合；全 r2 仅事件 57 以 `started_event_id` 引用事件 55 | 一致 |
+| C14 | `O5a` `TASK_TIERS` :126-132（small 4/8、medium 8/16、feature 16/24、critical 20/30，别名 :132） | 实开吻合 | 一致 |
+| C15 | `O5b` opt-in :692-694、`O5c` `_task_envelope_initial` :697-706（raise 在 **:705**）、`O5e` hard_cap :709-718 | 实开吻合（确认 candidate-1 的 :1139 抛出点说法已修正为 :705） | 一致 |
+| C16 | `O5c` ceiling 触发 :679-680、reserve :1137-1139、companion-reserve :1314、`_run` :2077-2086（:2082） | 实开吻合 | 一致 |
+| C17 | `O5f` preflight parser :2134-2139（仅 `--plan`/`--governance`） | 实开吻合 | 一致 |
+| C18 | `O5g` `cmd_preflight` :1730-1778 / gov 函数 :1718-1727 / `_validate_governance_change` :1540-1652 / `_resolve_and_check_report` :1655-1680 / `_numeric_empirical_conflicts` :1683-1715；`O5h` 插入点 :1777→:1778，早返回 :1769/:1770-1771/:1775/:1776 | 逐段实开吻合（早返回行号全对） | 一致 |
+| C19 | `O5i` 三处 init 披露 :2012-2014 / `converge_loop.py:1093-1095` / `ocsr_spawn_adapter.py:400-402`；`O5j` adapter CLI :760-771、config 写入 :378-386 | 实开吻合 | 一致 |
+| C20 | `O5m` `TestGovernancePreflight` :1448、helper :1546-1547、`self.preflight` **共 21 处**、`TestPreflight` :265-279 另 2 处 legacy | `grep -c self.preflight` = **21**；helper/类/legacy 行号全对 | 一致 |
+| C21 | `O5l` r2 gate-ledger 23 条 reserved，breakdown executor 5 / ultraverge-initial 3 / outer-reviewer 6 / design-reviewer 5 / blind-reviewer 4 | 脚本复算：23，breakdown 完全一致 | 一致 |
+| C22 | `O5k` `CONSTITUTION.md:67-78` 清单、`:91-96` 第四部程序；第三部分别 :68/:71/:72/:77 | 实开吻合 | 一致 |
+| C23 | `S-F7` 独立 calibration 报告 `sha256=c4755e11…`、`corpus_digest=ff64a62b…`、`eligible_samples=0`、freshness HEAD=13da605 | 实开文件 hash 与字段全部一致；HEAD 与评议基线一致 | 一致 |
+| C24 | `R1-8` 全量测试基线 `4 failed, 476 passed, 5 skipped, 11 subtests`（§8.4 / §10 R8） | 本机实跑 `python -m pytest -q` = **4 failed, 476 passed, 5 skipped, 11 subtests passed (276s)**；4 失败全为 `test_archive_convergence.py` 的 `ADMINI~1` vs `Administrator` 短路径差异 | 一致 |
+| C25 | `O6a` `SKILL.md:462`、`orchestrator-guide.md:17-36`、`state-schema.md:97-100` | 实开：SKILL:462 为 material 同字节规则；guide:17-36 为 Material revision 段；state-schema:100 为失效句 | 基本一致（:95-96 表述见 I-2） |
+| C26 | `§12` 七处逐字「原文→新文」对照 | 逐句比对 `state-schema.md:40/:42/:60/:454`、`orchestrator-guide.md:44-47`、`SKILL.md:453/:466`，原文均为逐字真实文本；T1-F4/T2-F4/T2-F5/T2-F6 全覆盖 | 一致 |
+| C27 | `S-F6` `docs/plans/active/` 4 个未跟踪规划文档 | `ls` = 4 个；`git status --porcelain` = `?? docs/plans/active/` | 一致 |
+| C28 | `O1g` `disclosed_correction` 仅命中 docs 草案与本计划引述 | 实测 `docs/plans/active/20260911-op-envelope-b-contract-correction.md:25` 命中；「=0」裸断言已删除 | 一致 |
+
+**结论**：28 条全部通过，未发现任何事实失真（`文件:行` 断言无一偏移到错误位置）。
+
+## 2. 特别独立判断三项
+
+### 2.1 O1 闭包规则 + `resolve_events` 有效视图在 `model.py` 真实校验链上是否成立 → **成立**
+
+实开校验链核对：
+
+- `validate_event` 的等集模型（`model.py:456-458`）确实会拒绝任何多字段/批量形态，故「单字段闭集」的机械化论证成立；`EVENT_FIELDS` 是唯一字段单源，动态白名单 `allowed()` 不需要硬编码。
+- `DECISION_REFERENCED` 的四条边（`:137`/`:144`/`:1008`/`:1032`）在 `validate_event_graph`/`validate_reviewer_verdict_authority` 中确实存在；`started_event_id` 的解析边在 `:978`/`:140`，且该字段属 `invocation-terminal`（`:186`），**不是** decision 引用字段——立身用例（事件 55）不被闭合的推导链在真实代码上闭合。
+- 有效视图的落点自洽：`validate_archive`（`:1178-1181`）与 `project_manifest`（`:745-747`）都以 `load_events` raw 输入喂给 `validate_event_graph`/`validate_ledger`，由二者入口自 resolve，`project_manifest` 另以一份 `resolve_events` 供投影、以 raw 磁盘字节出 `events[].sha256`。`_verify_evidence_bytes`（`:1180`）虽在同一块内读事件，但只读 `prompt_evidence/output_evidence/snapshot`——均在计划值域中被判为 `correction-value-type`、**不可更正**，故 raw==effective，不构成漏洞。
+- 立身用例机械可通：有效视图把事件 55 的 `reservation_id` 变为 `81a2537ea9eb`，而 r2 ledger 恰有该 reservation（role=design-reviewer、round=None）且事件 57 的 `settlement_ref=gate-ledger.jsonl:81a2537ea9eb`，故 `validate_ledger` 的 `:642-644`/`:678-686` 绑定通过。r2 现归档实测 `check` 返回 `{"valid":true}`（EXIT=0），与计划 A1-10 一致。
+
+**保留意见（非阻断）**：有效视图的覆盖面对 `find_orphan_reservations`（`model.py:727` 直接 `load_events`）未声明；这是一个只读诊断。见 I-3。另，计划称「`validate_archive` 自身不直接读事件字段」措辞不准（它经 `_verify_evidence_bytes` 读结构字段，但不可更正），见 I-4。
+
+### 2.2 O5 门禁在 `tests/test_budget_gate.py` 现有用例上的真实影响面 → **与计划一致**
+
+自数复核（逐方法体判定「是否到达 :1777→:1778 新门禁」）：
+
+- `self.preflight` 共 **21** 处（行 1554/1566/1575/1584/1591/1602/1613/1623/1633/1641/1656/1666/1675/1682/1690/1699/1708/1717/1724/1736/1743）。
+- **17 处到达门禁**：1554/1566/1575/1584/1591/1602/1613/1623/1633/1641/1656/1666/1675/1690/1699/1708/1717。逐一核对 fixture：这些用例均构造**恰好 1 个** `converge.governance-change/v1` fence（calibration-report fence schema 不同，不计入 `gov_blocks`）。
+- **4 处不到达（早返回）**：`:1682`（2 个 gov 块 → `:1776` 先返回）、`:1724`（CRLF → `:1770-1771`）、`:1736`（无 gov 块 → legacy `:1769`）、`:1743`（`--governance` + 无块 → `:1775`）。
+- 计划 §6.2 的 21→17+4 分类、逐行行号与「4 处测试方法体与断言零改动、仅共享 helper 变化」的表述与实开完全吻合。
+- 迁移可行性：`TestGovernancePreflight` 继承 `unittest.TestCase`（非 `Base`），其 setUp 可自行创建 `self.active` 并 `run("init","--active-dir",…,"--task-tier","critical")`；helper 追加 `--active-dir` 对 4 处早返回用例无害（parser 接受、早返回不使用）。
+- `TestPreflight` :272/:278 两处无 gov 块，legacy 早返回，不受影响（计划已声明）。
+
+**附带实跑**：当前 `python -m pytest tests/test_budget_gate.py -q` = `170 passed, 4 subtests passed`，说明门禁改造前的既有面全绿，改造面计数可信。
+
+### 2.3 机器块（§15/§16）能否通过 `budget_gate.py preflight` 当前代码机械校验 → **能，实跑通过**
+
+```
+> python scripts/budget_gate.py preflight --plan .converge/active/20260911-op-envelope-b-contract-correction/plan.md
+WARN:code_heavy:4,63
+PREFLIGHT_OK:governance-change
+EXIT=0
+```
+
+即 §15 块已通过当前 `_validate_governance_change`（严格 schema、`kind:mechanism` 允许 `null`）、`_resolve_and_check_report`（locator `attempts.md::json-fence[schema=…,id=calibration-op-b]` 解析 + canonical hash 复算 + corpus digest/freshness 比对）、`_numeric_empirical_conflicts`（`mechanism` 不进数值门）三道机械校验；`archaeology_refs` 的 4 个 `git:` SHA 均通过 `git cat-file -e` 存在性验证。独立文件 `evidence/calibration-report.json` SHA-256 实算 = `c4755e11…`，与 §15/§16 声明一致；locator 的 `root-file` 限 bare allowlist 文件名（`_resolve_report_locator` :1511-1514），故 `evidence/` 路径不可寻址、canonical 载体只能落 `attempts.md` 的 fenced 块——计划 §16 的论证与代码一致。
+
+## 3. 逐条 issue
+
+| 编号 | severity | 文件:行 | 问题 | 单选建议 |
+|---|---|---|---|---|
+| I-1 | medium（自洽性/可机械判定） | `plan.md:485`（A1-1）与 `plan.md:516`（A-S2）；对照 §8.4:533 | A1-1 期望字面为「全绿，0 fail」、A-S2 含「通过数 ≥ …480」，但本机同文件既有 4 个短路径失败（实跑确认），§8.4 已把判据改述为「非新增失败」；两处表格单元格未同步，字面不可机械满足，与 §8.4 直接矛盾 | 把 A1-1 期望改为「非新增失败（基线：4 failed/97 passed，见 §8.4）」；把 A-S2 的「≥480」删去，改为「非新增失败（长路径 TEMP 等价 480/全绿）」 |
+| I-2 | low（事实精度） | `plan.md:107`（O6a） | 「`:95-96` 为 calibration bootstrap 例外，`:97-99` 为 `converge.review-target/v1` 字段」不精确：`:95` 为 bootstrap 例外、`:96` 为空行、`:98` 为空行，字段实为 `:99` | 改为「`:95` 为 bootstrap 例外；`:97/:99` 为 review-target/v1；`:100` 为失效句」 |
+| I-3 | low（有效视图覆盖面） | `plan.md:241`；`model.py:727`（`find_orphan_reservations`） | 计划称 `resolve_events` 是唯一语义读取点，但 `find_orphan_reservations` 直接 `load_events` 读 raw `reservation_id`；一旦存在新正，该只读诊断可能报出旧值导致的伪孤儿 | 将该诊断读事件处改走 `resolve_events`（或显式文档化为 raw-view 诊断，避免「唯一读取点」过强声称） |
+| I-4 | low（措辞精度） | `plan.md:241` | 「`validate_archive` 自身不直接读事件字段」不准确：它调用 `_verify_evidence_bytes(root, events)`（`model.py:1180`）读 evidence 结构字段；因这些字段不可更正故无实际风险 | 改为「`validate_archive` 不读任何**可更正**字段；`_verify_evidence_bytes` 仅读不可更正的结构字段」 |
+
+说明：I-1 是本复核唯一触及「Acceptance 可机械判定」的实质项，但计划已在 §8.4 明确给出正确判据且 R8 环境事实准确，属**文档同步残留**，不构成实现阻断；I-2~I-4 为精度/覆盖面备注。**未发现事实失真**。
+
+## 4. 范围纪律与治理合规
+
+- **范围纪律**：Track-1（`model.py`/`capture.py`/`archive_convergence.py`/`state-schema.md` archive 段/`test_archive_convergence.py`）与 Track-2（`budget_gate.py`/`converge_loop.py`/`ocsr_spawn_adapter.py`/`state-schema.md` task-envelope 段/`orchestrator-guide.md`/`SKILL.md`/`scripts/README.md`/三个测试文件）与 §5 File Matrix 一一对应；`preflight` 在 `scripts/` 内的唯一生产定义在 `budget_gate.py`，无其它脚本调用点会被 O5 门禁波及（grep 实核）。未发现超出 File Matrix 的隐含改动。
+- **治理合规**：7 处第三部改动全部在 §12 给出逐字「原文→新文」且原文逐句实核为真；§15 内嵌唯一 `converge.governance-change/v1` 机器块且当前代码实跑通过；授权事件 `execution_authorization=ab8896b1…`（active 事件流 sequence 9，`user-message`）与 `quality_goal=06754e6f…`（sequence 10，`user-message`）实开存在且类型正确；`CONSTITUTION.md`/`refs/reviewer-discipline.md`/`refs/orchestrator-guide.md:17-36` 显式不改。
+
+## 5. 第二权威结论
+
+**作为「第二权威」（盲审侧），我认可该计划进入实施：是。**
+
+一句话理由：逐字节 SHA-256 一致、28 条 `文件:行` 抽样零失真、O1 有效视图与 O5 门禁影响面均在真实代码上独立复现成立、机器块当前代码实跑 `PREFLIGHT_OK:exit 0`，仅存 I-1 一处 Acceptance 文案与 §8.4 未同步的文档残留（已在 §8.4 给出正确判据，不阻断实现）。

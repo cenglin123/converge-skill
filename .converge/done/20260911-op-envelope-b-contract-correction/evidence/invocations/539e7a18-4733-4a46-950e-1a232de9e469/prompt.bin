@@ -1,0 +1,29 @@
+# 编排层修订指令 · candidate-4 → candidate-5（blind-2 处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-4）
+2. `blind-recheck-2.md`（I-1..I-7，每条已给单选修法）
+3. `attempts.md`（含本次披露：record-verdict 误记事件——评审者真实 verdict 为阻断需修复，编排层传错字面量，frontmatter 已恢复，此为 O1 机制立项的活案例）
+
+## 必须落地（严格按 blind-2 单选建议）
+
+- **I-1（high）**：A1-1（`plan.md:506` 附近）的单文件基线改为 `4 failed/97 passed/2 skipped`（本机单文件实测），全量基线 `4 failed/476 passed/5 skipped/11 subtests` 留在 A-S2；或按其建议把 A1-1 命令改为全量命令——**二选一执行后删掉另一表述**。
+- **I-2（high）**：按建议 **(a)** 执行：把 `prompt_evidence`/`output_evidence`/`snapshot`/`source_locator` 并入"不可更正集合"（新增显式常量，如 `CORRECTION_EVIDENCE_FIELDS`），§12 规范句与 §11 O1-10 同步说明；删除"会被 validate_event 拒绝"的失真表述。
+- **I-3（high）**：按建议第一分支执行：`record_correction` 的 prepare 钩子内对 `raw + [pending]` 跑**完整有效视图校验**（`validate_event_graph` 含 reviewer-verdict authority + `validate_ledger`，而非仅 `validate_corrections`）；并加两条对抗用例：更正 reviewer terminal 的 `started_event_id` 所指 started 的 `role` 不得落盘；更正不得使既有 user-decision 的 `presented_degradations` 重算失配。
+- **I-4（low）**：`:643` 改为"完整逐字原行"。
+- **I-5（low）**：选定"门禁直接 `read_state`→改 dict→`write_state(plan.parent, state)`（绕过 `needs_write`）"，写死并同步 R13 与 §6 相应行。
+- **I-6（low）**：§8.2 增加"损坏 state"负例，统一语义写死：捕获 `read_state` 异常 → 映射为 `FAIL_CLOSED:governance_requires_task_envelope`（并说明与 `state_corrupt:*` 的关系）。
+- **I-7（low）**：§16 限定为"canonical 形式逐字节一致"，注明独立文件不被 preflight 机械校验、仅作证据留痕。
+
+## 一致性要求
+
+- frontmatter `status: candidate-5`；修订历史节追加。
+- I-2/I-3 改动会触及 §3 规则、§5 File Matrix（`record_correction`/常量）、§7 Phase、§8 Acceptance、§11 对抗清单、§12 对照表——全文同步，不得只改一处。
+- 修完后重跑 `python scripts/budget_gate.py preflight --plan <plan路径>`，输出贴 attempts.md（机器块字节若因正文变化而失效——注意机器块 canonical hash 是否自我引用：如校验失败，按 `_resolve_and_check_report` 的实际算法修正机器块并再次实跑至通过）。
+
+## 回执
+
+plan.md 字节数/SHA-256；I-1..I-7 逐条一句话；preflight 复跑结论。

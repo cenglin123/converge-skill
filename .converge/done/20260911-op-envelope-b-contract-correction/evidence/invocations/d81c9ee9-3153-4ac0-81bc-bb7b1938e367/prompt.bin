@@ -1,0 +1,35 @@
+# Task: 子计划 B · 完整收敛 outer 评议 R1（candidate-2）
+
+你是 fresh 独立 Reviewer（跨厂商，与 plan 作者及 UV 初审无共享上下文）。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。只读，不得修改任何文件（本任务书指定输出除外）。UTF-8。
+
+## 受审对象
+
+`.converge\active\20260911-op-envelope-b-contract-correction\plan.md`（candidate-2，70,161 B；Track-1 = O1 契约更正事件，Track-2 = O5 治理信封默认；O3/O6 已被编排层裁决为 record-only/移除）
+
+## 必读
+
+1. 上述 `plan.md`
+2. `uv-init-1.md`、`uv-init-2.md`、`uv-init-3.md`（UV 初审三票）与 `attempts.md`（三票处置表 + preflight 机器块自验输出）
+3. `CONSTITUTION.md`（第三部 :67-78、第四部 :91-96）、`SKILL.md`（:157-186 ultraverge）、`refs/design-review-prompt.md`、`refs/reviewer-discipline.md`、`refs/state-schema.md`、`refs/orchestrator-guide.md`
+4. 代码事实：`scripts/archive_contract/model.py`、`scripts/archive_contract/capture.py`、`scripts/archive_convergence.py`、`scripts/budget_gate.py`、`scripts/converge_loop.py`、`scripts/ocsr_spawn_adapter.py`、`tests/`（相关用例）
+
+## 评审重点
+
+1. **UV 三票处置完整性**：attempts.md 的处置表是否逐条对应三票全部 issue；被 S1/S2 删除项是否有处置记录；被"修复"项是否真的修复（不是换个说法）。抽查至少 10 条到 plan 原文。
+2. **D1 设计自洽**（重点，UV2 曾判其核心规则互斥）：可更正字段白名单 vs terminal-decision 不可更正 vs "被 decision 引用"的机械定义，三者是否闭合无矛盾；`resolve_events` 单层视图是否覆盖全部校验点（`validate_event_graph`/`validate_ledger`/`validate_archive`/manifest 投影/check）且不引入"两个真相"；`corrections` 键 omit-when-empty；授权时序 `seq(correction) > seq(user-message) > seq(corrected)`。
+3. **D3 设计完备**：触发谓词、门禁+opt-out、可用谓词、active-dir 生命周期；**既有测试穷举是否真实完整**（自己去 `tests/test_budget_gate.py` 的 TestGovernancePreflight 数一遍，与计划枚举比对，多一个漏项即阻断）；legacy 路径不变性；三处披露一致；数值依据是否可复核。
+4. **机器块自验**：attempts.md 里 `preflight` 自验输出是否真实、机器块是否通过当前代码校验（可自行复跑：`python scripts/budget_gate.py preflight --plan <plan> --active-dir <对象目录>`，注意当前代码尚无 --active-dir 参数时的行为）。
+5. **事实核验**：全部行号/符号实开核对（含第三部文件的"原文 → 新文"对照是否逐字）。
+6. **可执行性**：两 Track 的 Phase 是否 bounded、每步产物与验证明确；Acceptance 条条可机械判定。
+7. **治理合规**：第三部修改是否每处都有逐字对照；第四部程序要素（机器块、用户授权事件、ultraverge 模式）是否齐备；S1 删除 O3 的处置记录是否可追溯（含 r2 实证引用）。
+
+## 输出
+
+文件：`.converge\active\20260911-op-envelope-b-contract-correction\round-1.md`
+
+- 首行 verdict：`可执行` / `阻断需修复` / `需重新设计`
+- 前置自检 5 问；UV 处置抽查表（≥10 条）；逐条 issue（编号 + severity + 文件:行 + 原文 + 影响 + **单选**建议）
+- 若 `可执行`：实施前必须满足的前置条件清单（可为空）
+- 结尾：是否需拆分对象（是/否+理由）；无法核实的断言清单
+
+判定纪律：事实失真即阻断（A 对象教训）；穷举缺一即阻断；不因篇幅放行，不为凑数升级。

@@ -1,0 +1,26 @@
+# 编排层修订指令 · candidate-5 → candidate-6（blind-3 处置；最小手术）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 硬约束：最小手术
+
+- 只做下列 4+2 处修改，**禁止**新增章节、禁止扩写论证、禁止"顺带优化"。修订后 plan.md 总字节增幅不得超过 2000 字节。
+- frontmatter `status: candidate-6`；修订历史追加一行。
+
+## 修改清单（按 blind-recheck-3 的单选建议，逐条）
+
+1. **Issue-1（high）**：把 `"sha256"`、`"size"` 加入 `CORRECTION_EVIDENCE_FIELDS`（plan.md:190-195 附近）；A1-18 增补一条"更正 `artifact-captured.sha256`/`size` → `correction-field-not-allowed`"；同步 plan.md:203-205 不变量句、§11 O1.17、§12 证据字段集列举。
+2. **Issue-2（medium）**：把 plan.md:291 改写为"对 `raw+[pending]` 直接调用 `validate_event_graph`/`validate_ledger`（各自入口 resolve 一次），不得先 `resolve_events` 再把结果传入"；§11 O1.16/A1-19 写死该调用形态。
+3. **Issue-3（low）**：A1-11 场景收敛为"更正先于 **reviewer-verdict** decision"（删除对 `user-decision-degradations` 的泛指，或显式标注"无 user-decision 时"）。
+4. **Issue-4（low）**：§5.3 补一行"对象本地过程文件：`attempts.md`、`scan-report.md`、`_budget-state.json`——仅对象 active 目录内，非源文件、非第三部"。
+5. **观察-a**：`duplicate_governance_block` 锚点 `:1776` 改 `:1777`（判定行 :1776 / print 行 :1777 的表述写准）。
+6. **观察-b**：bootstrap 例外区间引用改 `:95`（`:96` 为空行）。
+
+## 产物
+
+- 更新 `plan.md`；`attempts.md` 追加 blind-3 处置表（6 条）。
+- 报告：`C:\Users\Administrator\AppData\Local\Temp\opencode\op-b-repair5-report.md`。
+
+## 回执
+
+plan.md 字节数/SHA-256（并报告与 candidate-5 的字节差）；6 条处置；确认无其他改动。

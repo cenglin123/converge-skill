@@ -1,0 +1,30 @@
+# 编排层修订指令 · candidate-3 → candidate-4（设计审查 M1-M6 落地）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 输入
+
+1. `plan.md`（candidate-3，字节冻结已解除——设计审查要求修订，修订后将重新双权威复核）
+2. `design-review.md`（M1-M6 + highlights，逐条给单选修法）
+3. `round-2.md` 的非阻断建议 R2-1..R2-8（**本轮一并落进 plan**，避免实施期歧义）
+4. 代码实核：`model.py`、`capture.py`（尤其 `_prepare_terminal_decision` :523-575、continue-parent 查找）、`budget_gate.py`（`cmd_preflight`、`_resolve_and_check_report`）、`tests/test_budget_gate.py`
+
+## 必须落地的设计修订（逐条按设计审查单选修法，不得另立方案）
+
+- **M1**：有效视图提升为"写入期与归档期共用同一 `resolve_events`"——`_prepare_terminal_decision` 与 continue-parent 查找在入口先 resolve 再派生/判定，raw 仅用于身份/字节/哈希读取；Acceptance 增加"更正先于 decision 时 capture 与 archive 结论一致"用例。
+- **M2**：新增最小结构引用集（不可更正）：`invocation-terminal.started_event_id`、`invocation-started.parent_event_id`、`design-review-completion.invocation_event_id`；保留 `reservation_id` 可更正（立身用例）；为三者各加一条"拒绝 + `correction-field-not-allowed`"对抗用例。
+- **M3**：规则 7 改为"后更正取代先更正的 effective 值"：允许对同一 `(target, field)` 追加第二条更正，其 `original_value` 必须等于**当前 effective 值**，每条独立授权；raw 日志 append-only；披露列出全部更正及取代关系。
+- **M4**：删除规则 10 的字段映射表与 `_validate_field_value` 抽取，仅保留"应用全部更正后运行完整 `validate_event`"（规则 10b）作为唯一值/跨字段谓词来源；`original_value` raw 逐字相等校验保留。
+- **M5**：授权内容绑定——`authorized_by` 所指 user-message 的 `user_quote` 必须包含 `corrected_event_id` 或本次更正 `reason` 的逐字子串；不满足即 `correction-unauthorized`。
+- **M6**：**取消 `--active-dir` 参数**，改为以 `plan.parent`（被检 plan 的父目录）作为对象 active 目录读取 state（消除旁路 + 免去 21 处 helper 迁移 + 删除 A2-5 类负例）；opt-out reason 持久写入对象 `_budget-state.json`（或 gate-ledger，你选定一种并写死），不只打印 WARN。相应同步：§6.2 的 21 处穷举结论改写为"无需迁移（M6 消除）"但保留穷举表作为影响面证据；TestGovernancePreflight 的受影响面重新判定（现版不读 state，新实现按 plan.parent 读 state——已有用例的 active 目录即临时目录本身，逐用例重判受影响/不受影响，数字要实核）。
+- **R2-1..R2-8**：按 round-2 第七节的建议逐条落进 plan（文案/行号/边界），处置记入 attempts.md。
+
+## 一致性要求
+
+- M6 改变 O5 的 CLI 面：全文所有 `--active-dir`/A2-5/Phase/Acceptance/机器块相关表述同步重写；机器块 preflight 自验重新实跑（现版命令行为 + 新设计行为说明），输出贴 attempts.md。
+- 更新 frontmatter `status: candidate-4`；记录修订摘要节（§ 末尾"修订历史"）。
+- Acceptance 条条仍可机械判定；对抗清单补 M2 三条 + M3 取代链用例 + M5 未绑定授权用例 + M6 旁路消除证明。
+
+## 回执
+
+plan.md 字节数/SHA-256；M1-M6 与 R2-1..8 逐条一句话；受影响用例数重判结果；preflight 自验摘要。

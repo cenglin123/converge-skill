@@ -1,0 +1,26 @@
+# 编排层修订指令 · candidate-6 → candidate-7（blind-4 错位评审处置）
+
+你是 Plan Repair Executor（fresh）。对象：`.converge\active\20260911-op-envelope-b-contract-correction`。仓库根：`C:\Users\Administrator\Documents\Github\converge-skill`。UTF-8；不做 git 写操作；只改 `plan.md` 与 `attempts.md`。
+
+## 背景必读
+
+`blind-recheck-3.md` 现内容实为对 **candidate-6** 的 blind 侧评审（文件名错位事故见 attempts.md 末尾披露），其 Issue-1..4 是本轮必须处置的输入。注意 Issue-1 的修法会与"立身用例"产生张力，按下文明确指示处理。
+
+## 必须落地（按该评审单选建议，逐条）
+
+1. **Issue-1（high）**：删除 M5 的 `reason` 子串分支。M5 改为：`authorized_by` 所指 `user-message` 的 `user_quote` 必须同时包含（a）`corrected_event_id` 的逐字子串、（b）被更正 `field` 名或逐字 `corrected_value`。同步 `:220`、`:259`、`:682`（§12 对照）、§11 O1.15、A1-17。
+   - **立身用例处理（重要）**：r2 事件 56 的 quote 只写"事件 55/PENDING/81a2537ea9eb"，不含目标 UUID——在新规则下该历史操作**不再可复现**。不要为此放松规则；改为在立身用例推导链中显式写明："r2 的历史更正是在更宽松的手工披露下完成的；本规则比 r2 实践更严格，是刻意收紧——历史个案不可重放恰说明规则收紧的必要性"；推导链其余步骤保持。
+2. **Issue-2（medium）**：采纳建议第一分支——显式写入"`record_correction` 仅可在事件流已闭合（无未闭合 invocation、无未结清 reservation）时调用"为前置条件；`:293` 与 T1-F2 同步；A1-2/A1-19/A1-20 的 fixture 说明注明"完整事件流"。
+3. **Issue-3（low）**：T1-F1 明确 `find_orphan_reservations` 改走 `resolve_events`，加一条回归。
+4. **Issue-4（low）**：把 `invocation_id`/`invocation_kind`/`parent_instance_id` 并入闭合集（与结构引用集合并），并同步 `:209` 叙述。
+5. **O-0（流程）**：在修订历史节注明：现 `blind-recheck-3.md` 内容实为对 candidate-6 的第 4 次盲审（文件名错位，事故披露见 attempts.md），其结论（阻断）已由本轮处置；后续最终双认证的产物名将严格一致。
+
+## 硬约束
+
+- frontmatter `status: candidate-7`；修订历史追加一行。
+- 最小手术：除上述 5 项及其必要联动（§8 Acceptance、§11 对抗、§12 对照的同步行）外不得改动任何内容；禁止新增章节。
+- 修完重跑 `python scripts/budget_gate.py preflight --plan <plan路径>`，输出贴 attempts.md；若机器块 canonical hash 失效，按 `_resolve_and_check_report` 算法修正至实跑通过。
+
+## 回执
+
+plan.md 字节数/SHA-256；5 项逐条一句话；preflight 复跑结论。
