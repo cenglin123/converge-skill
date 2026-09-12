@@ -94,7 +94,7 @@ class AdapterBase(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _adapter_args(self, **overrides) -> list[str]:
+    def _adapter_args(self, prompt_text=None, **overrides) -> list[str]:
         defaults = dict(
             converge_active=str(self.active),
             converge_scripts=str(SCRIPTS),
@@ -113,6 +113,16 @@ class AdapterBase(unittest.TestCase):
             evidence_mode="metadata-only",
         )
         defaults.update(overrides)
+        # Keep the prompt's declared output path in sync with --output-name so the
+        # dispatch path-consistency preflight is exercised positively by the existing
+        # happy/failure fixtures. The dedicated preflight cases pass `prompt_text`.
+        if prompt_text is None:
+            declared_output = Path(str(defaults["output_dir"])) / str(defaults["output_name"])
+            prompt_text = (
+                f"【任务】test dispatch\n【输出】{declared_output.as_posix()}\n"
+                f"【边界与禁区】只写上述输出。\n"
+            )
+        self.prompt.write_text(prompt_text, encoding="utf-8")
         args = ["dispatch"]
         for k, v in defaults.items():
             flag = "--" + k.replace("_", "-")
@@ -121,6 +131,10 @@ class AdapterBase(unittest.TestCase):
             if isinstance(v, bool):
                 if v:
                     args.append(flag)
+                continue
+            if isinstance(v, (list, tuple)):
+                for item in v:
+                    args += [flag, str(item)]
                 continue
             args += [flag, str(v)]
         return args
@@ -825,7 +839,10 @@ class TestAdapterCRLFPollution(unittest.TestCase):
         self.output_dir = self.root / "output"
         self.output_dir.mkdir()
         self.prompt = self.root / "prompt.txt"
-        self.prompt.write_text("test prompt\n", encoding="utf-8")
+        # Name the output file so the dispatch path-consistency preflight passes and the
+        # ledger is actually written (otherwise this test would be vacuous).
+        self.prompt.write_text(
+            f"【输出】{(self.output_dir / 'product.md').as_posix()}\n", encoding="utf-8")
         budget_gate.initialize_state(self.active)
 
     def tearDown(self):
@@ -949,6 +966,108 @@ class TestAdapterCompanionReverseLookup(AdapterBase):
         self.assertTrue(
             post_bytes.startswith(pre_bytes),
             "LEDGER REWRITE DETECTED: adapter path must only append to ledger")
+
+
+# ─── Dispatch path-consistency preflight (two 2026-09 overwrite incidents) ────
+
+class TestDispatchPathPreflight(AdapterBase):
+    """Item 1: --output-name must be named in the prompt text before dispatch."""
+
+    def test_matching_prompt_dispatches(self):
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "happy"}, *self._adapter_args())
+        self.assertEqual(rc, 0, f"rc={rc} stderr={err}")
+        self.assertTrue(_read_gate_ledger(self.active))
+
+    def test_mismatched_prompt_refused_without_reserve_or_ledger(self):
+        args = self._adapter_args(
+            prompt_text="【输出】C:/somewhere/other.md\n")
+        rc, out, err = run_adapter(self.active, {"FAKE_OCSR_MODE": "happy"}, *args)
+        self.assertEqual(rc, 6, f"rc={rc} stderr={err}; expected EXIT_PROMPT_OUTPUT_MISMATCH=6")
+        self.assertIn("path-consistency preflight failed", err)
+        self.assertIn(str(self.prompt.resolve()), err)
+        self.assertIn("product.md", err)
+        self.assertIn("no ledger row written, no reservation issued", err)
+        # Fail-closed before any side effect.
+        self.assertEqual(_read_gate_ledger(self.active), [])
+        self.assertEqual(_read_ocsr_ledger(self.active), [])
+        self.assertEqual(_read_events(self.active), [])
+
+    def test_escape_flag_warns_and_continues(self):
+        args = self._adapter_args(
+            prompt_text="【输出】C:/somewhere/other.md\n",
+            skip_output_name_check=True)
+        rc, out, err = run_adapter(self.active, {"FAKE_OCSR_MODE": "happy"}, *args)
+        self.assertEqual(rc, 0, f"rc={rc} stderr={err}")
+        self.assertIn("WARN", err)
+        self.assertIn("--skip-output-name-check", err)
+        self.assertTrue(_read_gate_ledger(self.active))
+
+
+# ─── pre_execution classification (2a) ────────────────────────────────────────
+
+class TestPreExecutionClassification(unittest.TestCase):
+    """Item 2a: error.log presence is the discriminator; undeterminable → True."""
+
+    def test_tristate(self):
+        from ocsr_spawn_adapter import _map_ocsr_outcome
+        from pathlib import Path as _P
+
+        # rc=1 timeout and rc=3 path collision are post-invocation by contract.
+        self.assertEqual(_map_ocsr_outcome(1, _P("x"), None)[2], False)
+        self.assertEqual(_map_ocsr_outcome(3, _P("x"), None)[2], False)
+        # error.log present → pre-execution.
+        with tempfile.TemporaryDirectory() as tmp:
+            err_log = _P(tmp) / "error.log"
+            err_log.write_text("launcher reject\n", encoding="utf-8")
+            self.assertEqual(_map_ocsr_outcome(2, _P("x"), err_log, determinable=True)[2], True)
+        # work_dir located, no error.log → real post-execution evidence.
+        self.assertEqual(_map_ocsr_outcome(2, _P("x"), None, determinable=True)[2], False)
+        # work_dir NOT locatable → conservative True.
+        self.assertEqual(_map_ocsr_outcome(2, _P("x"), None, determinable=False)[2], True)
+        self.assertEqual(_map_ocsr_outcome(99, _P("x"), None, determinable=False)[2], True)
+
+
+# ─── in-place-edit acceptance (2b) ────────────────────────────────────────────
+
+class TestInPlaceEditAcceptance(AdapterBase):
+    """Item 2b: path-class non-zero is success iff every mark is declared (and product landed)."""
+
+    def test_all_marked_paths_declared_is_success(self):
+        declared = [str(self.output_dir / "inplace-a.md"),
+                    str(self.output_dir / "inplace-b.md")]
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "path-anomaly-landed"},
+            *self._adapter_args(in_place_edit=declared))
+        self.assertEqual(rc, 0, f"rc={rc} stdout={out} stderr={err}")
+        self.assertIn("WARN:in-place-edit-accepted:", out)
+        events = _read_events(self.active)
+        self.assertEqual(events[1]["terminal_status"], "succeeded")
+        gate = _read_gate_ledger(self.active)
+        self.assertTrue(any(e.get("event") == "spawn_succeeded" for e in gate))
+
+    def test_partial_declaration_stays_failure(self):
+        declared = [str(self.output_dir / "inplace-a.md")]   # inplace-b.md undeclared
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "path-anomaly-landed"},
+            *self._adapter_args(in_place_edit=declared))
+        self.assertEqual(rc, 5, f"rc={rc} stdout={out} stderr={err}")
+        self.assertNotIn("in-place-edit-accepted", out)
+        events = _read_events(self.active)
+        self.assertEqual(events[1]["terminal_status"], "failed")
+        gate = _read_gate_ledger(self.active)
+        self.assertTrue(any(e.get("event") == "spawn_failed" for e in gate))
+
+    def test_missing_product_stays_failure(self):
+        declared = [str(self.output_dir / "inplace-a.md"),
+                    str(self.output_dir / "inplace-b.md")]
+        rc, out, err = run_adapter(
+            self.active, {"FAKE_OCSR_MODE": "path-anomaly-no-product"},
+            *self._adapter_args(in_place_edit=declared))
+        self.assertEqual(rc, 5, f"rc={rc} stdout={out} stderr={err}")
+        self.assertNotIn("in-place-edit-accepted", out)
+        events = _read_events(self.active)
+        self.assertEqual(events[1]["terminal_status"], "failed")
 
 
 if __name__ == "__main__":

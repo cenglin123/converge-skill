@@ -18,6 +18,7 @@ check（valid-v1）。
     0  = 全链路成功（spawn succeeded，complete-invocation 已记录）
     3  = Archive Contract 子 CLI 错误（begin/complete/recover/reserve/settle 返回非零）
     5  = ocsr dispatch 未落盘（看门狗超时 / exit≠0 / error.log）
+    6  = 派发前路径一致性 preflight 拒绝（prompt 未声明 --output-name）
     10 = budget_gate reserve BLOCK（透传 gate 的决策）
     11 = budget_gate reserve DENY
     30 = FAIL_CLOSED
@@ -46,6 +47,7 @@ import budget_gate  # noqa: E402
 EXIT_PROCEED = 0
 EXIT_ARCHIVE_CLI = 3
 EXIT_OCSR_NO_PRODUCT = 5
+EXIT_PROMPT_OUTPUT_MISMATCH = 6
 EXIT_BLOCK = 10
 EXIT_DENY = 11
 EXIT_FAIL_CLOSED = 30
@@ -312,7 +314,8 @@ def _ensure_te_companion(gate_script: Path, active_dir: Path,
     return False
 
 
-def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -> tuple[str, str, bool]:
+def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None,
+                      *, determinable: bool = True) -> tuple[str, str, bool]:
     """Map ocsr dispatch outcome to (recover_status, failure_reason_code, pre_execution).
 
     pre_execution semantics (budget_gate.py + archive capture.py):
@@ -341,6 +344,14 @@ def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -
          because rc=2 covers *both* the pre-execution launcher error and the
          post-execution "opencode ran but produced nothing" case.
       2. The caller must not decide success from the product alone (see `cmd_dispatch`).
+
+    `determinable` (2026-09 fix): the caller locates the batch's ocsr work_dir (from the
+    dispatch ledger's `launched.work_dir`, or a best-effort TEMP glob). When the work_dir
+    itself cannot be located, the presence/absence of `error.log` is unknowable and the
+    classifier must fail conservatively toward `pre_execution=True` — the historical bug
+    was an actual pre-execution failure (e.g. model-whitelist rejection) recorded as
+    `false`. When the work_dir *is* located, a missing error.log is real evidence the model
+    ran, so `false` is used.
     """
     # Watchdog timeout: model was invoked but stalled past deadline → not pre_execution
     if ocsr_rc == 1:
@@ -350,13 +361,193 @@ def _map_ocsr_outcome(ocsr_rc: int, output_path: Path, error_log: Path | None) -
     if ocsr_rc == 3:
         return "failed", "backend-error", False
     # rc=2 (deterministic failure) and any unexpected non-zero code: `error.log` is the
-    # only evidence that separates "launcher never started opencode" (pre_execution) from
-    # "opencode ran and failed / wrote nothing" (post-execution). Absent that evidence we
-    # assume the model *was* called — the honest default, since claiming pre_execution
-    # would under-report budget consumption.
+    # discriminator between "launcher never started opencode" (pre_execution) and
+    # "opencode ran and failed / wrote nothing" (post-execution).
     if error_log is not None and error_log.is_file():
         return "failed", "backend-error", True
+    if not determinable:
+        # No locatable work_dir → cannot prove error.log absence → conservative pre_execution.
+        return "failed", "backend-error", True
     return "failed", "backend-error", False
+
+
+def _prompt_declares_output(prompt_path: Path, output_name: str) -> bool:
+    """Path-consistency preflight predicate: does the prompt text name the product file?
+
+    Two 2026-09 incidents (blind-recheck-3.md and design-review.md overwritten) had the
+    same root cause: the prompt's 【输出】 path and the adapter's `--output-name` disagreed,
+    so the worker wrote under the prompt's name while ocsr watched the other. A prompt that
+    does not contain the expected filename cannot be dispatched safely.
+    """
+    try:
+        text = prompt_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(output_name) and output_name in text
+
+
+def _find_launched_row(ledger_path: Path, label: str, model: str, prompt_file: str,
+                       invocation_id: str | None) -> dict | None:
+    """Return the most recent `launched` ledger row for this batch, or None.
+
+    Matching priority mirrors `_extract_ocsr_instance_id`:
+      1. `converge_invocation_id` equality (correlation-key-first).
+      2. Legacy (label, model, prompt_file) tuple fallback.
+    """
+    if not ledger_path.is_file():
+        return None
+    corr_match: tuple[str, dict] | None = None
+    tuple_match: tuple[str, dict] | None = None
+    try:
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("event") != "launched":
+                continue
+            ts = row.get("ts", "")
+            if invocation_id and row.get("converge_invocation_id") == invocation_id:
+                if corr_match is None or ts > corr_match[0]:
+                    corr_match = (ts, row)
+            if (row.get("label") == label and row.get("model") == model
+                    and row.get("prompt_file") == prompt_file):
+                if tuple_match is None or ts > tuple_match[0]:
+                    tuple_match = (ts, row)
+    except OSError:
+        return None
+    if corr_match:
+        return corr_match[1]
+    if tuple_match:
+        return tuple_match[1]
+    return None
+
+
+def _locate_error_evidence(ledger_path: Path, label: str, model: str, prompt_file: str,
+                           invocation_id: str | None) -> tuple[Path | None, bool]:
+    """Locate the batch's ocsr work_dir error.log and report whether that was determinable.
+
+    Returns `(error_log_or_None, determinable)`:
+      - work_dir found in the launched ledger row → determinable=True; error.log is the
+        file iff it actually exists (absence is then real post-execution evidence);
+      - work_dir not found → best-effort TEMP glob fallback; a hit is determinable=True,
+        a miss is determinable=False (pre_execution cannot be decided).
+    """
+    row = _find_launched_row(ledger_path, label, model, prompt_file, invocation_id)
+    work_dir_value = row.get("work_dir") if row else None
+    if isinstance(work_dir_value, str) and work_dir_value:
+        error_log = Path(work_dir_value) / "error.log"
+        return (error_log if error_log.is_file() else None), True
+    # Legacy fallback: TEMP glob (the pre-2026-09 probe).
+    try:
+        work_root = Path(os.environ.get("TEMP", "/tmp"))
+        candidates = sorted(work_root.glob(f"ocsr_dispatch_*/{label}/error.log"),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
+        if candidates:
+            return candidates[0], True
+    except OSError:
+        pass
+    return None, False
+
+
+def _path_anomaly_marked(ledger_path: Path, invocation_id: str | None, label: str,
+                         model: str, prompt_file: str) -> list[str]:
+    """Collect this batch's `path_anomaly` marks (overwritten ∪ unexpected_new).
+
+    ocsr's `path_anomaly` row carries no batch_id, so rows are scoped by their position:
+    every matching row appearing at or after this batch's `launched` row. Names are
+    output-dir-relative basenames as written by `ocsr_dispatch._collision_report`.
+    """
+    if not ledger_path.is_file():
+        return []
+    try:
+        rows: list[dict] = []
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        return []
+    start_idx = None
+    for i, row in enumerate(rows):
+        if row.get("event") != "launched":
+            continue
+        if invocation_id and row.get("converge_invocation_id") == invocation_id:
+            start_idx = i
+        elif (row.get("label") == label and row.get("model") == model
+                and row.get("prompt_file") == prompt_file):
+            start_idx = i
+    if start_idx is None:
+        return []
+    marked: list[str] = []
+    for row in rows[start_idx:]:
+        if row.get("event") != "path_anomaly":
+            continue
+        for key in ("overwritten", "unexpected_new"):
+            values = row.get(key)
+            if isinstance(values, list):
+                marked.extend(v for v in values if isinstance(v, str) and v)
+    return marked
+
+
+def _canon_path(path: Path) -> str:
+    try:
+        return path.resolve().as_posix().casefold()
+    except OSError:
+        return str(path).replace("\\", "/").casefold()
+
+
+def _in_place_edit_accepted(marked: list[str], declared: list[str], output_dir: Path) -> bool:
+    """True iff every path ocsr flagged is explicitly declared via --in-place-edit.
+
+    Marked names are output-dir-relative; declared values may be relative or absolute.
+    Declared relative values are accepted against both the output dir and the cwd.
+    """
+    if not marked or not declared:
+        return False
+    marked_norm = {_canon_path(output_dir / name) for name in marked}
+    declared_norm: set[str] = set()
+    for value in declared:
+        candidate = Path(value)
+        if candidate.is_absolute():
+            declared_norm.add(_canon_path(candidate))
+        else:
+            declared_norm.add(_canon_path(output_dir / candidate))
+            declared_norm.add(_canon_path(Path.cwd() / candidate))
+    return bool(marked_norm) and marked_norm <= declared_norm
+
+
+def _finish_success(archive_script: Path, active_dir: Path, gate_script: Path, *,
+                    invocation_id: str, reservation_id: str, instance_id: str | None,
+                    receipt: str, backend: str | None, backend_version: str | None,
+                    output_path: Path, evidence_mode: str) -> int:
+    """Complete-invocation(succeeded) + settle(succeeded); shared by happy and accepted paths."""
+    complete_rc = _archive_complete(
+        archive_script, active_dir, invocation_id,
+        status="succeeded", instance_id=instance_id, receipt=receipt,
+        backend=backend, backend_version=backend_version,
+        output_path=output_path, evidence_mode=evidence_mode,
+    )
+    settle_rc = _gate_settle(gate_script, active_dir, reservation_id,
+                              result="succeeded", instance_id=instance_id)
+    if complete_rc != 0:
+        _err(f"[adapter] complete-invocation failed (invocation_id={invocation_id}, rc={complete_rc}) but product landed; "
+             "settle recorded as succeeded since model was actually called. "
+             "Archive will need reconciliation before archive-time check.")
+        return complete_rc
+    if settle_rc != 0:
+        _err(f"[adapter] settle succeeded failed rc={settle_rc}")
+        return settle_rc
+    print(f"[adapter] OK invocation={invocation_id} reservation={reservation_id} "
+          f"instance={instance_id} output={output_path}")
+    return EXIT_PROCEED
 
 
 def cmd_config_init(args) -> int:
@@ -441,6 +632,27 @@ def cmd_dispatch(args) -> int:
     if not active_dir.is_dir():
         _err(f"active_dir not a directory: {active_dir}")
         return EXIT_INTERNAL
+
+    # Step 0: path-consistency preflight (before any ledger write / reservation).
+    # The prompt's declared output path and --output-name must agree; when they diverged,
+    # workers wrote under the prompt's name while ocsr watched --output-name, silently
+    # overwriting a same-directory artifact (two 2026-09 incidents). Refuse to dispatch
+    # unless the prompt text names the product file, with an explicit escape hatch.
+    skip_name_check = bool(getattr(args, "skip_output_name_check", False))
+    if not _prompt_declares_output(prompt_path, args.output_name):
+        if skip_name_check:
+            _err(f"[adapter] WARN: prompt does not declare --output-name={args.output_name}; "
+                 "continuing because --skip-output-name-check was passed.")
+        else:
+            _err("[adapter] REFUSE: dispatch path-consistency preflight failed — "
+                 "--output-name is not named anywhere in the prompt text.")
+            _err(f"[adapter]   prompt:                {prompt_path}")
+            _err(f"[adapter]   output-name:           {args.output_name}")
+            _err(f"[adapter]   expected output path:  {output_path}")
+            _err("[adapter]   fix: make the prompt's 【输出】 path exactly match --output-name "
+                 "(same variable), or pass --skip-output-name-check to override (not recommended).")
+            _err("[adapter]   no ledger row written, no reservation issued.")
+            return EXIT_PROMPT_OUTPUT_MISMATCH
 
     try:
         requested_provider, requested_model = _parse_provider_model(args.model)
@@ -543,42 +755,45 @@ def cmd_dispatch(args) -> int:
         # clobbered. Recording that as `succeeded` would let a path collision enter the
         # archive as a clean Spawn. Conversely rc alone is not sufficient either: ocsr can
         # return 0 when `--watch` was not requested, in which case no product recovery ran.
-        complete_rc = _archive_complete(
-            archive_script, active_dir, invocation_id,
-            status="succeeded", instance_id=instance_id, receipt=receipt,
+        return _finish_success(
+            archive_script, active_dir, gate_script,
+            invocation_id=invocation_id, reservation_id=reservation_id,
+            instance_id=instance_id, receipt=receipt,
             backend=backend, backend_version=backend_version,
-            output_path=output_path, evidence_mode=evidence_mode,
-        )
-        settle_result = "succeeded"
-        settle_rc = _gate_settle(gate_script, active_dir, reservation_id,
-                                  result="succeeded", instance_id=instance_id)
-        if complete_rc != 0:
-            _err(f"[adapter] complete-invocation failed (invocation_id={invocation_id}, rc={complete_rc}) but product landed; "
-                 "settle recorded as succeeded since model was actually called. "
-                 "Archive will need reconciliation before archive-time check.")
-            return complete_rc
-        if settle_rc != 0:
-            _err(f"[adapter] settle succeeded failed rc={settle_rc}")
-            return settle_rc
-        print(f"[adapter] OK invocation={invocation_id} reservation={reservation_id} "
-              f"instance={instance_id} output={output_path}")
-        return EXIT_PROCEED
+            output_path=output_path, evidence_mode=evidence_mode)
+
+    # In-place-edit acceptance (2026-09): ocsr returns a path-class non-zero code (rc=3)
+    # because the worker rewrote existing files. An operator may have explicitly declared
+    # those files as permitted in-place edits via `--in-place-edit`. When the worker's own
+    # product landed, the ledger's path_anomaly marks are exactly the declared set, and no
+    # other marked path exists, reconcile the batch as a success. Partial declaration or a
+    # missing product keeps the failure classification (fail-closed).
+    in_place_edit = list(getattr(args, "in_place_edit", None) or [])
+    if product_landed and ocsr_rc == 3 and in_place_edit:
+        marked = _path_anomaly_marked(ledger_path, invocation_id, args.label,
+                                      args.model, str(prompt_path))
+        if marked and _in_place_edit_accepted(marked, in_place_edit, output_dir):
+            print(f"WARN:in-place-edit-accepted:{','.join(marked)}")
+            return _finish_success(
+                archive_script, active_dir, gate_script,
+                invocation_id=invocation_id, reservation_id=reservation_id,
+                instance_id=instance_id, receipt=receipt,
+                backend=backend, backend_version=backend_version,
+                output_path=output_path, evidence_mode=evidence_mode)
 
     # Failure path: the product did not land, or the dispatch reported a non-zero code.
-    # Locate the work_dir's error.log (ocsr creates batch_dir/label/error.log)
-    # Best-effort: walk ~/.ocsr or $TEMP for ocsr_dispatch_<batch>/error.log — but
-    # this is fragile. Use _map_ocsr_outcome heuristics on exit code + work_dir probe.
-    error_log = None
-    try:
-        work_root = Path(os.environ.get("TEMP", "/tmp"))
-        candidates = sorted(work_root.glob(f"ocsr_dispatch_*/{args.label}/error.log"),
-                            key=lambda p: p.stat().st_mtime, reverse=True)
-        if candidates:
-            error_log = candidates[0]
-    except OSError:
-        pass
+    # Locate the batch's ocsr work_dir from the dispatch ledger (authoritative) with a
+    # TEMP-glob fallback; `error.log` presence is the pre_execution discriminator. When the
+    # work_dir cannot be located, classification defaults conservatively to pre_execution
+    # (see _map_ocsr_outcome) instead of asserting the model ran.
+    error_log, error_determinable = _locate_error_evidence(
+        ledger_path, args.label, args.model, str(prompt_path), invocation_id)
 
-    status, failure_reason, pre_exec = _map_ocsr_outcome(ocsr_rc, output_path, error_log)
+    status, failure_reason, pre_exec = _map_ocsr_outcome(
+        ocsr_rc, output_path, error_log, determinable=error_determinable)
+    if pre_exec and not (error_log and error_log.is_file()):
+        _err("[adapter] WARN: pre_execution defaulted to true (ocsr work_dir / error.log "
+             "not determinable); conservative classification per the pre_execution contract.")
     # State the product's real status. When a dispatch fails with the product *present*
     # (rc=3 path collision is the live case), a detail line reading "missing or empty"
     # would be a false statement in the permanent archive record.
@@ -676,7 +891,8 @@ def cmd_selftest(args) -> int:
                model=args.model or "deepseek/deepseek-v4-flash",
                label="adapter-selftest",
                output_dir=str(output_dir), output_name=output_name,
-               watch=True, timeout=5, tier="auditable-only"),
+               watch=True, timeout=5, tier="auditable-only",
+               skip_output_name_check=False, in_place_edit=None),
     }))
     if rc != 0:
         print(f"[selftest] FAIL adapter dispatch rc={rc}")
@@ -739,6 +955,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--output-name", required=True, help="product filename (no path).")
     d.add_argument("--reserved-reservation-id",
                    help="if set, skip reserve (caller asserts they already reserved).")
+    d.add_argument("--skip-output-name-check", action="store_true",
+                   help="Escape hatch: bypass the preflight that requires the prompt text "
+                        "to name --output-name. Prints WARN and continues.")
+    d.add_argument("--in-place-edit", action="append", metavar="PATH", default=None,
+                   help="Declare a file the worker is allowed to rewrite in place (repeatable). "
+                        "A path-class non-zero ocsr result is reconciled as success only when "
+                        "the product landed and every path_anomaly mark is declared.")
     d.add_argument("--watch", action="store_true", help="ocsr --watch (blocking product wait).")
     d.add_argument("--timeout", type=int, default=15, help="ocsr watchdog minutes (default 15).")
     d.add_argument("--tier", default="auditable-only", choices=["auditable-only", "enforced"])

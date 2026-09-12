@@ -751,6 +751,8 @@ CONSUMES_VALUES = {"outer", "blind", "ultraverge", "none", "task-envelope"}
 # **额外可选键**出现在这两个 dict 中（见 cmd_reserve），不加入本必填集合。
 SCOPE_KEYS = ("outer", "blind", "ultraverge", "total")
 DECISION_SCOPES = (None, "outer", "blind", "ultraverge", "total", "task-envelope")
+# 可扩展 scope 闭集（extension CLI 与 validate_extensions 的 scope 域一致）。
+EXTENSION_SCOPES = ("outer", "blind", "ultraverge", "total", "task-envelope")
 DECISION_EXACT = {"MODE_SWITCH_REQUIRED"}
 BLOCK_SUFFIXES = {"budget_exhausted", "blind_exhausted", "ultraverge_exhausted", "total_spawn_cap", "task_envelope_exhausted"}
 DENY_SUFFIXES = {"unknown_role", "illegal_role"}
@@ -1914,6 +1916,69 @@ def cmd_summary(args) -> int:
     return EXIT_PROCEED
 
 
+# ---- 预算扩展 CLI（extension，plan §6.2）-------------------------------------
+def cmd_extension(args) -> int:
+    """Apply a registered budget extension through the same validator the ledger uses.
+
+    Historically extensions were hand-written into `_budget-state.json` (r2 precedent):
+    error-prone and unvalidated. This command derives every mechanical field from the
+    triggering BLOCK decision and current state, appends the candidate record, and runs
+    `validate_extensions` (monotonicity, supersede-chain continuity, BLOCK cross-check,
+    task-envelope hard cap) before `write_state`. Nothing is written on rejection.
+    """
+    active = Path(args.active_dir)
+    if not active.is_dir():
+        print("FAIL_CLOSED:no_active_dir"); return EXIT_FAIL_CLOSED
+    if args.scope not in EXTENSION_SCOPES:
+        raise FailClosed(f"ext_unknown_scope:{args.scope}")
+    with Lock(active):
+        state = read_state(active)
+        events = read_ledger(active)
+        validate_integrity(active, events, state)
+
+        # Resolve the triggering BLOCK decision: explicit id, else the latest BLOCK row
+        # for this scope. A missing decision is a hard reject (no extension without one).
+        trigger_id = args.triggering_block_event_id
+        decision = None
+        if trigger_id:
+            for ev in events:
+                if ev.get("event") == "decision" and ev.get("decision_event_id") == trigger_id:
+                    decision = ev
+                    break
+        else:
+            for ev in reversed(events):
+                if (ev.get("event") == "decision" and ev.get("scope") == args.scope
+                        and str(ev.get("verdict", "")).startswith("BLOCK")):
+                    decision = ev
+                    break
+        if decision is None:
+            raise FailClosed("ext_no_block_decision")
+        trigger_id = decision.get("decision_event_id")
+
+        active_ext = active_extension(state, args.scope)
+        new_ext = {
+            "extension_id": f"ext-{args.scope}-{_new_id()}",
+            "ts": _now(),
+            "scope": args.scope,
+            "triggering_block_event_id": trigger_id,
+            "granted_at_usage": decision.get("observed_usage"),
+            "prior_ceiling": decision.get("effective_ceiling"),
+            "new_ceiling": args.new_ceiling,
+            "supersedes": active_ext["extension_id"] if active_ext else None,
+            "user_quote": args.user_quote,
+            "user_message_event_id": args.user_message_event_id,
+            "reason": args.reason,
+        }
+        candidate = dict(state)
+        candidate["extensions"] = list(state.get("extensions", [])) + [new_ext]
+        # Reuse the ledger validator as the single mechanical authority: monotonicity,
+        # chain continuity, BLOCK cross-check and task-envelope cap all live there.
+        validate_extensions(candidate, events)
+        write_state(active, candidate)
+        print(f"EXTENDED:{args.scope}:ceiling={args.new_ceiling}")
+        return EXIT_PROCEED
+
+
 # ---- best-effort guarded：宿主绑定 + PreToolUse 总量硬上限 hook --------------
 # 这**不是** "enforced" tier（不提供角色不可伪造/权限锁定保证）。命名为
 # **best-effort guarded**（亦即 hook-blocked auditable-only）：hook 在**绑定的收敛
@@ -2224,6 +2289,21 @@ def main() -> int:
     sm = sub.add_parser("summary")     # 可验证预算汇总（attempted_dispatch/model_invocation 双计数）
     sm.add_argument("--active-dir", required=True)
     sm.set_defaults(func=cmd_summary)
+
+    ex = sub.add_parser("extension")   # 经 validate_extensions 落盘的预算扩展（plan §6.2）
+    ex.add_argument("--active-dir", required=True)
+    ex.add_argument("--scope", required=True, choices=list(EXTENSION_SCOPES))
+    ex.add_argument("--new-ceiling", type=int, required=True)
+    ex.add_argument("--reason", required=True,
+                    help="扩展理由（审计留痕，写入 extension 记录）")
+    ex.add_argument("--user-quote", required=True,
+                    help="用户授权原话（审计留痕）")
+    ex.add_argument("--user-message-event-id", required=True,
+                    help="授权 user-message 事件 UUID（审计留痕）")
+    ex.add_argument("--triggering-block-event-id", default=None,
+                    help="触发本次扩展的 BLOCK decision_event_id；缺省自动取该 scope "
+                         "最近一条 BLOCK 决策行")
+    ex.set_defaults(func=cmd_extension)
 
     bd = sub.add_parser("bind")        # 会话开始时绑定 session→active（cap 派生自 validated state）
     bd.add_argument("--session-id", required=True)

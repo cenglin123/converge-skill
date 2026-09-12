@@ -141,6 +141,24 @@ def main() -> int:
         output_path.write_text("fake-product-content\n", encoding="utf-8")
         return 3
 
+    if mode in ("path-anomaly-landed", "path-anomaly-no-product"):
+        # Simulate ocsr's path-collision report: a path_anomaly row marks one overwritten
+        # and one unexpected-new file, then dispatch exits 3. `path-anomaly-landed` also
+        # writes the expected product (the in-place-edit acceptance case); the
+        # `-no-product` variant omits it (acceptance must stay fail-closed).
+        if mode == "path-anomaly-landed":
+            output_path.write_text("fake-product-content\n", encoding="utf-8")
+        if args.ledger_dir:
+            ledger = Path(args.ledger_dir) / "ocsr-dispatch-ledger.jsonl"
+            with ledger.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "ts": datetime.datetime.now().astimezone().isoformat(),
+                    "event": "path_anomaly",
+                    "overwritten": ["inplace-a.md"],
+                    "unexpected_new": ["inplace-b.md"],
+                }, ensure_ascii=False) + "\n")
+        return 3
+
     print(f"[fake] unknown FAKE_OCSR_MODE: {mode}", file=sys.stderr)
     return 99
 

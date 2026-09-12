@@ -2128,20 +2128,30 @@ class EventCorrectionTests(unittest.TestCase):
 
     # ---- A1-6 / A1-15：supersede chain allowed + manifest disclosure ------------
     def test_a1_6_a1_15_supersede_chain_allowed_and_disclosed(self):
-        from archive_contract.capture import record_user_message, record_correction
+        from archive_contract.capture import append_event, record_user_message
 
+        # Distinct-value supersede chain PENDING -> r1 -> r2 on a *ledger-bound* field.
+        # Such a chain cannot be replayed through `record_correction`: its write-time
+        # `validate_ledger` resolves the intermediate effective value (r1) and would reject
+        # it against the canonical ledger (r2). The archive-time closure is exactly the
+        # guard under test here, so the two corrections are synthesized with the public
+        # `append_event` and the whole chain is validated by `archive`/`check` end to end.
         stream = self._closed_stream(role="outer-reviewer", ledger_role="outer-reviewer",
-            raw_reservation="r1", ledger_reservation="r1")
+            raw_reservation="PENDING", ledger_reservation="r2")
         self._write_markers(stream["decision"])
         target_uuid = stream["started"]["event_id"]
         message = record_user_message(self.active, host_message_id="auth",
-            user_quote=f"更正事件 {target_uuid} 的 reservation_id 为 r1")
-        c1 = record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
-            original_value="r1", corrected_value="r1", authorized_by_user_message_event_id=message["event_id"],
-            reason="first")
-        c2 = record_correction(self.active, corrected_event_id=target_uuid, field="reservation_id",
-            original_value="r1", corrected_value="r1", authorized_by_user_message_event_id=message["event_id"],
-            reason="second")
+            user_quote=f"更正事件 {target_uuid} 的 reservation_id：PENDING→r1→r2")
+        c1 = append_event(self.active, {
+            "event_type": "event-correction", "corrected_event_id": target_uuid,
+            "field": "reservation_id", "original_value": "PENDING", "corrected_value": "r1",
+            "authorized_by_user_message_event_id": message["event_id"],
+            "reason": "first", "corrected_at": "2026-07-12T00:00:04+00:00"})
+        c2 = append_event(self.active, {
+            "event_type": "event-correction", "corrected_event_id": target_uuid,
+            "field": "reservation_id", "original_value": "r1", "corrected_value": "r2",
+            "authorized_by_user_message_event_id": message["event_id"],
+            "reason": "second", "corrected_at": "2026-07-12T00:00:05+00:00"})
         target, view = self._archive_and_check()
         self.assertTrue(view["valid"], view)
         manifest = json.loads((target / "manifest.json").read_text(encoding="utf-8"))
@@ -2151,6 +2161,52 @@ class EventCorrectionTests(unittest.TestCase):
         self.assertEqual(corrs[1]["supersedes_correction_event_id"], c1["event_id"])
         self.assertFalse(corrs[0]["effective"])
         self.assertTrue(corrs[1]["effective"])
+        # Discriminative assertion: the effective view takes the *latter* distinct value
+        # (r2), not the first correction's r1. Same-value chains could not show this.
+        started_projection = next(i for i in manifest["invocations"]
+                                  if i["event_id"] == target_uuid)
+        self.assertEqual(started_projection["reservation_id"], "r2")
+
+    # ---- §9-c：three direct negatives left by the Phase 6 audit -----------------
+    def test_correction_target_missing_rejected(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, "更正 reservation_id")
+        corr = self._correction(
+            5, "00000000-0000-4000-8000-999999999999", "reservation_id", "r1", "r1",
+            msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, corr])
+        self.assertEqual(caught.exception.code, "correction-target-missing")
+
+    def test_correction_sequence_must_reference_earlier_event(self):
+        from archive_contract.model import ArchiveError, validate_corrections
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, f"更正 {start['event_id']} reservation_id")
+        # A correction cannot target itself: sequence(target) == sequence(correction),
+        # and the contract requires a strictly earlier target (self-correction invisible).
+        self_id = "00000000-0000-4000-8000-000000000005"
+        corr = self._correction(5, self_id, "reservation_id", "r1", "r1", msg["event_id"])
+        with self.assertRaises(ArchiveError) as caught:
+            validate_corrections([start, terminal, decision, msg, corr])
+        self.assertEqual(caught.exception.code, "correction-sequence")
+
+    def test_correction_batch_not_expressible_event_fields(self):
+        from archive_contract.model import ArchiveError, validate_event
+
+        start, terminal, decision = self._model_graph()
+        msg = self._message(4, "更正 reservation_id")
+        corr = self._correction(5, start["event_id"], "reservation_id", "r1", "r1",
+                                msg["event_id"])
+        # A "batch" correction carrying a second field is structurally inexpressible:
+        # `event-correction` has a closed single-field key set, so the extra key is
+        # rejected by the equal-set check before any correction semantics are evaluated.
+        corr["field_2"] = "phase"
+        with self.assertRaises(ArchiveError) as caught:
+            validate_event(corr)
+        self.assertEqual(caught.exception.code, "event-fields")
 
     # ---- A1-7：closed / unknown fields -----------------------------------------
     def test_a1_7_closed_and_unknown_fields_rejected(self):

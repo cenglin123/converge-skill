@@ -208,6 +208,73 @@ class TestExtensions(Base):
         self.assertTrue(out.startswith("FAIL_CLOSED"), out)
 
 
+class TestExtensionCLI(Base):
+    """Item 3: `extension` subcommand derives mechanical fields and validates via
+    validate_extensions (monotonic / chain / BLOCK cross-check / task-envelope cap)."""
+
+    def _run_extension(self, scope, new_ceiling, **kw):
+        args = ["extension", "--active-dir", str(self.active),
+                "--scope", scope, "--new-ceiling", str(new_ceiling),
+                "--reason", kw.get("reason", "user authorized"),
+                "--user-quote", kw.get("user_quote", "继续"),
+                "--user-message-event-id",
+                kw.get("user_message_event_id", "00000000-0000-4000-8000-000000000001")]
+        if kw.get("triggering_block_event_id"):
+            args += ["--triggering-block-event-id", kw["triggering_block_event_id"]]
+        return run(*args)
+
+    def test_normal_extension_lifts_ceiling(self):
+        self.set_config(max_outer_loops=0)
+        c, out, _ = self.reserve("outer-reviewer", "blk", rnd=1)
+        self.assertEqual(out, "BLOCK:budget_exhausted")
+        c, out, err = self._run_extension("outer", 1)
+        self.assertEqual(c, 0, out + err)
+        self.assertIn("EXTENDED:outer:ceiling=1", out)
+        state = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(state["extensions"]), 1)
+        ext = state["extensions"][0]
+        self.assertEqual(ext["scope"], "outer")
+        self.assertEqual(ext["new_ceiling"], 1)
+        self.assertEqual(ext["prior_ceiling"], 0)
+        self.assertEqual(ext["granted_at_usage"], 0)
+        self.assertIsNone(ext["supersedes"])
+        self.assertEqual(budget_gate.ceiling(budget_gate.read_state(self.active), "outer"), 1)
+        c, out, _ = self.reserve("outer-reviewer", "after", rnd=1)
+        self.assertTrue(out.startswith("PROCEED"), out)
+
+    def test_non_increasing_extension_rejected(self):
+        self.set_config(max_outer_loops=2)
+        self.reserve("outer-reviewer", "r1", rnd=1)
+        (self.active / "round-1.md").write_text("x", encoding="utf-8")
+        self.reserve("outer-reviewer", "r2", rnd=2)
+        (self.active / "round-2.md").write_text("x", encoding="utf-8")
+        c, out, _ = self.reserve("outer-reviewer", "r3", rnd=3)
+        self.assertEqual(out, "BLOCK:budget_exhausted")
+        c, out, err = self._run_extension("outer", 2)   # not > prior 2
+        self.assertEqual(c, 30, out + err)
+        self.assertIn("ext_not_increasing", out)
+        state = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["extensions"], [])
+
+    def test_missing_block_decision_rejected(self):
+        c, out, err = self._run_extension("outer", 9)
+        self.assertEqual(c, 30, out + err)
+        self.assertIn("ext_no_block_decision", out)
+
+    def test_task_envelope_over_hard_cap_rejected(self):
+        self.set_config(task_tier="small")   # initial 4, cap 8
+        for i in range(4):
+            c, out, _ = self.reserve("task-envelope", f"te{i}")
+            self.assertTrue(out.startswith("PROCEED"), out)
+        c, out, _ = self.reserve("task-envelope", "te-block")
+        self.assertEqual(out, "BLOCK:task_envelope_exhausted")
+        c, out, err = self._run_extension("task-envelope", 9)   # > cap 8
+        self.assertEqual(c, 30, out + err)
+        self.assertIn("ext_task_envelope_exceeds_cap", out)
+        state = json.loads((self.active / "_budget-state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["extensions"], [])
+
+
 class TestSettleLifecycle(Base):
     def test_settle_without_reserve(self):
         c, out, _ = self.settle("ghost", "succeeded")
