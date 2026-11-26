@@ -94,7 +94,7 @@ python scripts/orchest.py register-round --active-dir <dir> --invocation-id <iid
 python scripts/orchest.py finish --active-dir <dir> --verdict 可执行
 ```
 
-落地执行（收敛完成后）**不进**上述循环：spawn 走宿主原生 + instance_id 记 plan frontmatter，仅改动清单核对经 `checkpoint-paths`——映射表见 `refs/orchestrator-guide.md` §落地执行编排。
+落地执行（收敛完成后）**不进**上述循环：执行方按 `SKILL.md` C-21 与 `refs/orchestrator-guide.md` §落地执行编排 选定载体，执行标识与 M 侧改动清单（优先由 `checkpoint-paths` 产出 `implementation_paths`，无统一 commit 边界时降级汇总并标注，详见 §落地执行编排「脚本化映射」）记入项目源计划文件的「落地记录」节（绝不回写已封存的 `.converge/done/` 文件）——操作权威与映射表见 `refs/orchestrator-guide.md` §落地执行编排。
 
 ## converge_loop.py — 可选循环调度器（loop-spec 驱动的机械调度）
 

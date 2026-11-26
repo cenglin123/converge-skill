@@ -170,7 +170,7 @@ generated_at: <ISO datetime>
 
 ## relay-ledger（`relay-ledger.md`）
 
-> 传话编排（relay orchestration）的**转发事件日志**。放在收敛对象目录下（`active/<slug>/`），与 `attempts.md`、`_orchestrator-state.md` 同级。
+> 传话编排（relay orchestration）的**转发事件日志**。因 C-21 落地发生在 `finish` 归档之后、`.converge/done/<slug>/` 全部文件已封存只读且不得重建 `active/<slug>/`，转发记录追加于项目源计划文件（`docs/plans/...`）的「落地记录」节（沿用下方字段集，append-only，不改写）。
 
 **硬约束**：
 

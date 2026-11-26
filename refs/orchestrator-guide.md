@@ -392,19 +392,19 @@ L1 信号检测由非 LLM 脚本执行，编排器通过 shell 调用。触发�
 ### 流程
 
 ```
-用户要求落地 → 读取方案中的"文件改动清单"表 → Spawn executor（Plan-Execution 模板）
-→ 等待 executor 完成 → 记录 instance_id → 核对清单项数 vs 实改文件数 → 报告用户
+用户要求落地 → 读取方案中的"文件改动清单"表 → 按 C-21(a) 与 `SKILL.md` §传话编排 统一适用门启动执行方（默认 Spawn executor）
+→ 等待执行完成 → 记录客观执行标识（按 §执行标识留痕（instance_id））→ 核对清单项数 vs 实改文件数 → 报告用户
 ```
 
-**脚本化映射（落地执行 spawn 不进收敛预算门与 Archive Contract，设计裁决见 SKILL.md §执行阶段）**：落地 spawn 走宿主原生 Spawn；`instance_id` 记 plan frontmatter implementation 条目；N vs M 核对经 `scripts/orchest.py checkpoint-paths`（README 见 `scripts/README.md` ⑥；前置条件 = executor 落地改动先 commit，无 commit 则 M 侧无法机械生成，降级为 LLM 人工核对并标注）。
+**脚本化映射（落地执行方不进收敛预算门与 Archive Contract，设计裁决见 `SKILL.md` C-21 与 M-11）**：落地执行走宿主原生（未过 gate 的）通道，载体按 C-21(a) 与 `SKILL.md` §传话编排 统一适用门选定；客观执行标识（单次 Spawn 记 executor `instance_id`，佐证独立执行方启动；手工传话记参与执行方 `instance_id` 列表；宿主原生实时协同记宿主协作会话标识、实际执行成员标识及所选协作方式；**诚实边界**：上述标识为启动/在场参与的客观留痕、非纯 self-report，但对复用/持续会话或宿主协同**不单独证明逐文件写入归属或 fresh 启动**；若触发 §A.4 `orchestrator_self` 降级，仅如实标注降级记录，不要求也不得伪造不存在的独立执行标识）统一记录于**项目源计划文件（如 `docs/plans/active/<slug>.md` 或对应已移入 `docs/plans/done/` 的源计划文件——与 `.converge/done/<slug>/` 完全隔离）末尾追加的「落地记录」小节（含协作载体、执行标识、以及 `scripts/orchest.py checkpoint-paths` 产出的 `implementation_paths` 或降级汇总文件清单）**，完全处于 Archive Contract 封存域之外；**`.converge/done/<slug>/` 下的全部已封存文件（含 `plan.md`、`retrospective.md`、`gate-ledger.jsonl` 等，均受 Archive Contract v1 `manifest.json` 哈希保护）均为只读，落地阶段绝不向其追加字节或重建 `active/<slug>/`**（亦不触发 reopen）；`scripts/orchest.py checkpoint-paths` 仅负责机械生成 M 侧已改文件清单（同时产出 `implementation_paths`；前置条件 = 落地改动已 commit，无论是单 Executor 还是多 Executor），凡尚未 commit 或无统一 commit 边界导致无法机械生成时，一律降级为 LLM 汇总全部执行方实改文件集并显式标注；N vs M 比较始终由 Orchestrator 完成。
 
-**显式不适用**：reserve-round / register-round / cancel-round（落地执行 spawn 不进收敛预算门；spawn 生命周期三命令仅限**收敛循环内** executor 修复轮，即 SKILL.md 主循环 step f）、record-verdict（落地阶段无 verdict，产物亦非 round-N.md/blind-recheck-N.md）、finish（落地发生在归档之后，无归档动作）。
+**显式不适用（收敛后的 C-21 落地阶段）**：reserve-round / register-round / cancel-round（收敛后落地阶段的执行方与手工传话振荡裁判均不进收敛预算门，亦不回写已封存的 `.converge/done/<slug>/gate-ledger.jsonl`；spawn 生命周期三命令仅适用于**收敛循环内**全部受门控角色派发（见 `scripts/budget_gate.py` `ROLE_CONSUMES` 及 Inner Loop Continue））、record-verdict（落地阶段无 verdict，产物亦非 round-N.md/blind-recheck-N.md）、finish（落地发生在归档之后，无归档动作）。
 
 ### 自主推进判据（普通 converge）
 
 普通 converge 默认**自主推进落地**，无中途请示——但仅当原始指令含执行意图时：
 
-- **执行意图机械明线**：原始指令含执行动词（如「并执行 / 落地 / apply」等）→ 收敛后**自主**spawn executor 落地，**不**追加"现在要执行吗"check-in。
+- **执行意图机械明线**：原始指令含执行动词（如「并执行 / 落地 / apply」等）→ 收敛后按 C-21(a) **自主推进落地**，**不**追加"现在要执行吗"check-in。
 - **指令不含执行意图** → 落地前**仍需用户确认**（不得以「autonomous」为由跳过）。
 - 此判据与 GD-1 一致（GD-1 已授权"走 converge 并执行"推进至默认预算 + 落地），不扩大授权范围。
 
@@ -412,25 +412,25 @@ L1 信号检测由非 LLM 脚本执行，编排器通过 shell 调用。触发�
 
 ### 硬约束
 
-- **必须 spawn executor，不得直接编辑** — 宪法硬约束 #7 在落地阶段同样适用。Orchestrator 不兼任 executor
-- executor 使用 `refs/executor-prompt.md` Plan-Execution 模式（fresh-context spawn，仅读方案文件）
+- **除 Spawn 完全不可用触发 `refs/framework-adapters.md` §A.4 降级（在项目源计划文件「落地记录」节标注 `source: orchestrator_self` 并向用户说明降级及影响）外，必须由独立执行方落地，Orchestrator 不得兼任 executor 或直接编辑产物**（宪法 #7 在单次 Spawn、传话编排与宿主原生实时协同下均适用）
+- 默认路径下 executor 使用 `refs/executor-prompt.md` Plan-Execution 模式（fresh-context spawn，仅读方案文件）；选用宿主原生实时协同或传话编排时，须满足 `SKILL.md` §传话编排 统一适用门、遵守独立性降级声明（宪法 #6），并遵守范围约束（任务消息自足、以方案文件为唯一需求输入、禁止读取或转述审计历史；持续会话不主张 fresh 上下文）。
 
-### instance_id 留痕
+### 执行标识留痕（instance_id）
 
-Spawn executor 后，将 executor 的 `instance_id` 记录到 retrospective.md 的落地执行条目中。**这是客观证据（executor 是否被 spawn 是有/无 instance_id 的二元事实），非 self-report。**
+启动落地执行后，将客观执行标识（单次 Spawn 记 executor `instance_id`，佐证独立执行方启动；手工传话记参与执行方 `instance_id` 列表；宿主原生实时协同记宿主协作会话标识、实际执行成员标识及所选协作方式）统一记录于**项目源计划文件（如 `docs/plans/active/<slug>.md` 或对应已移入 `docs/plans/done/` 的源计划文件——与 `.converge/done/<slug>/` 完全隔离）末尾追加的「落地记录」小节（含协作载体、执行标识、以及 `scripts/orchest.py checkpoint-paths` 产出的 `implementation_paths` 或降级汇总文件清单）**，完全处于 Archive Contract 封存域之外；**`.converge/done/<slug>/` 下的全部已封存文件（含 `plan.md`、`retrospective.md`、`gate-ledger.jsonl` 等，均受 Archive Contract v1 `manifest.json` 哈希保护）均为只读，落地阶段绝不向其追加字节或重建 `active/<slug>/`**（亦不触发 reopen）。**诚实边界**：上述标识为启动/在场参与的客观留痕（非纯 self-report），但对复用/持续会话或宿主协同**不单独证明逐文件写入归属或 fresh 启动**；若触发 §A.4 `orchestrator_self` 降级，仅如实标注降级记录，不要求也不得伪造不存在的独立执行标识。
 
 ### 清单项数核对
 
-executor 完成后报告已修改文件列表，Orchestrator 交叉核对：
+执行方完成后，Orchestrator 交叉核对改动清单与实际修改文件数：
 
 1. 统计改动清单中的项数（N）
-2. 统计 executor 报告的已修改文件数（M）
+2. 按 `§八`「脚本化映射」单源规则获取 M 侧已修改文件数（优先由 `scripts/orchest.py checkpoint-paths` 机械生成，降级时汇总全部执行方报告的实改文件集并显式标注；执行方报告同时用于交叉核验）
 3. N ≠ M → 向用户报告不一致，列出差异项
 4. N = M → 确认，报告用户落地完成
 
 ### 传话编排（relay orchestration）
 
-C-21 后收敛执行编排的变体，适用条件见 SKILL.md Orchestrator 责任清单。以下为操作指引：
+C-21 后收敛执行编排的变体，适用条件、宿主原生实时协同替代边界与降级要求见 `SKILL.md` §传话编排（relay orchestration）。以下为操作指引：
 
 #### 1. 包裹格式
 
@@ -464,7 +464,7 @@ C-21 后收敛执行编排的变体，适用条件见 SKILL.md Orchestrator 责�
 - **越界**（禁止）：直接编辑产物、替对方完成工作、绕过 spawn executor 修改文件。
 
 自检违反时记录：
-- 在 relay ledger（若已创建）中标注 `boundary_violation_pending`
+- 在项目源计划文件「落地记录」节的转发记录中（如已记录转发条目）标注 `boundary_violation_pending`（绝不回写已封存的 `.converge/done/<slug>/`）
 - 若已越界执行 → 标注 `source: orchestrator_self`，告知用户降级影响（参照 C-21(b) 与宪法 #7）
 
 ---

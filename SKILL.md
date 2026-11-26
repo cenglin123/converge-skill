@@ -67,6 +67,11 @@ Converge **不使生成项目依赖 Converge**——由 `init-agent-docs` 生成
 | **Reviewer** | 每轮 Spawn 的独立 agent | **全新上下文**（看不到历史对话）；prompt 自足 |
 | **Executor** | 每轮 Spawn 的独立 agent | 全新上下文；prompt 自足 |
 
+> **独立审计红线与宿主原生实时协同能力（可选扩展）**：
+> - **独立审计上下文隔离（硬红线）**：凡输出进入 verdict、blocking 判定、收敛裁决或独立验收的角色——功能判据为穷尽标准，例如 outer loop Reviewer、Inner Loop Reviewer、盲审复核 Reviewer、ultraverge 并行 Reviewer、Round 0 合同挑战 Reviewer、L2 gate Reviewer、收敛后设计审查 Reviewer、仲裁/振荡裁判——**必须**保持上下文隔离，既不得与被审者共享公开消息板或持续对话，并行 Reviewer 之间亦不得共享；审计会话与落地协同板生命周期分离。
+> - **宿主原生实时协同能力（可选宿主扩展）**：核心角色表的『Executor = 全新上下文』约束作用于收敛主循环；落地执行阶段的持续会话/共享板参与方按 `§传话编排` 适用门与独立性降级声明执行。抽象能力层的 canonical 路径仍为 `Spawn` / `Continue` / `Identify`；本扩展**不是**第四个抽象能力，不入 `refs/framework-adapters.md` 适配层矩阵，宿主协作协议由宿主文档定义。仅在**收敛后落地执行阶段（C-21）**且满足 `§传话编排（relay orchestration）` 统一适用门时，Orchestrator 可按该节载体裁量规则选用该扩展；宿主不支持时自动回退至 `Spawn` / 手工传话，不触发能力缺失阻断。
+> - **不适用范围**：本裁量权**不适用于收敛主循环内的角色派发**（仍严格走主循环与 M-11 预算门），亦**不减损层级模式「子收敛之间不通信」与「子任务间无实时数据依赖」的不变量**。实时协同中的并行互查属**独立性降级模式**下的协作建议，必须按宪法 #6 告知用户当前处于独立性降级模式**及其对结论可靠性的影响**，不得产出 verdict、不入 gate ingest、不可替代任何独立审计角色。
+
 ### 模型分层
 
 Executor 可降档（模型档位下调）至该家族低档执行，**仅当同时满足以下三条件**：
@@ -249,7 +254,7 @@ Round 0 **不计入** max_outer_loops 预算。若跳过，Round 1 的 Reviewer 
         d1. 若本次收敛经历 ≥2 轮 outer loop → 进入盲审复核（见下方"盲审复核"小节）
         d2. 若本次收敛经历 = 1 轮 → 直接收敛
          收敛！执行完成前必检清单（语义项，逐项确认保持，见 §完成前必检清单）→ 写 retrospective.md（★LLM 撰写内容）→ `finish`（命令用法见 scripts/README.md；机械归档：finish 只执行步骤 0→8 机械序列——verdict 交叉核对/round 连续/全 settle/孤儿恢复/终局 decision/prompt 归位/原子归档/归档后 check——不覆盖必检清单语义项、不代写 retrospective）
-         d3. 落地执行（将方案改动清单写入目标文件）：**当原始指令含执行意图时**（机械明线：指令含执行动词「并执行 / 落地 / apply」等，见 §确认点分类）→ Orchestrator **默认自主推进**，不追加"现在要执行吗"check-in，按 `refs/orchestrator-guide.md` §落地执行编排 流程 spawn executor（落地执行 spawn 不进收敛预算门与 Archive Contract，改动清单核对经 `orchest.py checkpoint-paths`——操作权威与映射表见该节），使用 `refs/executor-prompt.md` Plan-Execution 模板。**指令不含执行意图时**：落地前仍需用户确认。全部宪法强制 gate（终止-b/c、预算软停/`*_exhausted`、`MODE_SWITCH_REQUIRED`、`FAIL_CLOSED`、`需重新设计`）不受此影响、逐字保留。
+         d3. 落地执行（将方案改动清单写入目标文件）：**当原始指令含执行意图时**（机械明线：指令含执行动词「并执行 / 落地 / apply」等，见 §确认点分类）→ Orchestrator **默认自主推进**，不追加"现在要执行吗"check-in，按 `refs/orchestrator-guide.md` §落地执行编排 与 C-21 执行落地（默认使用 `refs/executor-prompt.md` Plan-Execution 模板 spawn executor，必要时按 C-21(a) 选用宿主原生实时协同或传话编排；落地执行不进收敛预算门与 Archive Contract，M 侧清单生成与降级规则以 `refs/orchestrator-guide.md` §八「脚本化映射」为单源，N vs M 比较由 Orchestrator 完成）。**指令不含执行意图时**：落地前仍需用户确认。全部宪法强制 gate（终止-b/c、预算软停/`*_exhausted`、`MODE_SWITCH_REQUIRED`、`FAIL_CLOSED`、`需重新设计`）不受此影响、逐字保留。
     e. 若有 contract_amendment_required → 先回写 contract.md 再继续
      f. **executor 修复轮**：`reserve-round`（role=executor，consumes=none，不建产物骨架）→ Spawn executor
         （prompt 模板见 refs/executor-prompt.md）→ `register-round`（须 `--output attempts.md`）；失败/取消 → `cancel-round`。
@@ -376,24 +381,24 @@ E-18. **设计审查触发与报告** — 收敛后判断是否满足设计审�
 **条件触发** ——
 C-19. **意图漂移检测 + 规则触发记录** — (a) 意图漂移：当 escalated_issues 存在或 contract_amendment_required 反复出现（≥2 次）时，从 _orchestrator-state.md 提取 progress_summary 摘要注入下一轮 reviewer prompt 的 `<drift_context>` 块；reviewer 通过 drift_detected: true 标记反馈漂移。与 C-6 的关系：C-6 是 Orchestrator 第一方循环内检测（plan 内容偏移，每 5 轮/触 Type O），本条是 Reviewer 独立第三方产物-合同对齐检测（条件注入），互补而非重叠。(b) 规则触发记录：在步骤 c/c+1 更新 boundary_check 时顺带更新 rule_frequency 的 boundary_guard / reviewer_boundary_audit 触发状态；gate_l1 / design_review_trigger 在对应事件发生时更新。rule_frequency 字段格式和规则 key 注册表见 `refs/state-schema.md`。不新增独立循环步骤。retrospective 中必须包含对追踪机制执行成本的评估（约 1 句话）；当被追踪规则总数降至 2 条以下时，必须显式评估追踪机制是否仍有必要
   C-20. **盲审复核编排** — 当收敛经历 ≥2 轮 outer loop 且 verdict=可执行时：(a) 判断触发（≥2 轮）；(b) Spawn 盲审 Reviewer（refs/reviewer-prompt.md 盲审变体）；(c) 阻断 findings 以 BR- 前缀独立注入块转为 escalated_issues 注入下一主循环轮；(d) attempts.md 建 entry（source: blind_recheck, attribution: pending）；(e) pending 归因下一主循环轮硬过期；(f) retrospective 记 blind_recheck（pass / fail / waived）。职责要点；编排指引单源见 `refs/orchestrator-guide.md` §盲审复核编排
-  C-21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) Spawn executor（refs/executor-prompt.md Plan-Execution 模板，fresh-context）；(b) **不得直接编辑文件**（宪法 #7 落地阶段适用）；(c) 记录 executor instance_id 至 retrospective/落地日志（客观证据）；(d) 核对改动清单项数与 executor 报告文件数一致（M 侧经 orchest.py checkpoint-paths 机械生成，N vs M 比较仍 LLM）；(e) 落地后建议（非强制）`.meta/audit` plan-landing 子模式（条件触发、小落地豁免、ultraverge 不豁免——阈值与细节单源 `.meta/audit/README.md`）。职责要点；编排指引单源见 `refs/orchestrator-guide.md` §落地执行编排
+  C-21. **后收敛执行编排** — 方案收敛后用户要求落地执行时：(a) 选用落地载体——默认为 fresh-context Spawn executor（`refs/executor-prompt.md` Plan-Execution 模板）；满足 `§传话编排` 统一适用门时按该节载体裁量规则选用宿主原生实时协同或手工传话；(b) **不得直接编辑文件**（无论采用何种载体，宪法 #7 在落地阶段均适用；仅当 Spawn 完全不可用时，按 `refs/framework-adapters.md` §A.4 优先触发降级为 `orchestrator_self` 执行，须在项目源计划文件末尾「落地记录」节如实标注 `source: orchestrator_self` 并向用户说明降级及对结论可靠性的影响，不得伪造独立执行标识）；(c) 将客观执行标识（单次 Spawn 记 executor `instance_id`，佐证独立执行方启动；手工传话记参与执行方 `instance_id` 列表；宿主原生实时协同记宿主协作会话标识、实际执行成员标识及所选协作方式；**诚实边界**：上述标识为启动/在场参与的客观留痕、非纯 self-report，但对复用/持续会话或宿主协同**不单独证明逐文件写入归属或 fresh 启动**；若触发 §A.4 `orchestrator_self` 降级，仅如实标注降级记录，不要求也不得伪造不存在的独立执行标识）统一记录于**项目源计划文件（如 `docs/plans/active/<slug>.md` 或对应已移入 `docs/plans/done/` 的源计划文件——与 `.converge/done/<slug>/` 完全隔离）末尾追加的「落地记录」小节（含协作载体、执行标识、以及 `scripts/orchest.py checkpoint-paths` 产出的 `implementation_paths` 或降级汇总文件清单）**，完全处于 Archive Contract 封存域之外；**`.converge/done/<slug>/` 下的全部已封存文件（含 `plan.md`、`retrospective.md`、`gate-ledger.jsonl` 等，均受 Archive Contract v1 `manifest.json` 哈希保护）均为只读，落地阶段绝不向其追加字节或重建 `active/<slug>/`**（亦不触发 reopen）；(d) 核对改动清单项数与实改文件数一致（M 侧清单生成与降级规则以 `refs/orchestrator-guide.md` §八「脚本化映射」为单源，N vs M 比较由 Orchestrator 完成）；(e) 落地后建议（非强制）`.meta/audit` plan-landing 子模式（条件触发、小落地豁免、ultraverge 不豁免——阈值与细节单源 `.meta/audit/README.md`）。职责要点；编排指引单源见 `refs/orchestrator-guide.md` §落地执行编排
 
 ### 传话编排（relay orchestration）
 
 > **C-21 后收敛执行编排的变体**，不是主循环替代，不新增模式。
 
-**适用条件（三条同时满足，缺一不可）**：
-1. 产物已收敛且方案已定稿
-2. 验收判据机械可核（测试退出码 / hook 返回码 / diff / 计数）
-3. 参与方 ≤ 2
+**适用门（持续会话 / 共享消息板落地的单一权威定义；本节不进入收敛主循环，进入主循环须按步骤 a0+a 过 gate）**：
+1. **硬前置**：产物已收敛且方案已定稿（该 slug 已完成终局 decision 并经 finish 归档至 .converge/done/<slug>/）
+2. **硬前置**：验收判据机械可核（测试退出码 / hook 返回码 / diff / 计数；强耦合落地场景最低形态为接口契约测试或 diff/计数校验）
+3. **载体与规模裁量**（由 Orchestrator 按需决定）：手工传话默认参与方 ≤ 2；多 Executor 强耦合且宿主具备原生实时协同能力时，优先选用宿主原生能力替代手工传话，不支持则回退 `Spawn` 或手工传话。
 
-**载荷强制**：载荷必须为**文件引用**，**不得为消息全文**——消息载荷下两侧 agent 各自累积对方全部历史，输入 token 随轮次二次增长，与该模式的成本论据方向相反。
+**载荷与成本边界**：手工传话载荷必须为**文件引用**，**不得为消息全文**——消息载荷下两侧 agent 各自累积对方全部历史，输入 token 随轮次二次增长。改用宿主原生实时协同能力时，亦须以文件/提交引用为主、控制板面上下文膨胀。
 
-**独立性降级声明**：传话编排的两侧 agent 若为持续会话，则 converge 的反锚定机制（executor 纪律「打破过往同意惯性」/「打破上轮 reviewer 偏好锚定」、盲审复核、`past_commitment_anchoring` 巡查）**不生效**。使用该变体时 orchestrator **必须**按宪法 #6 告知用户当前处于独立性降级模式。
+**独立性降级声明**：无论经手工传话还是宿主原生实时协同，只要参与方为持续会话或共享消息板，converge 的反锚定机制（executor 纪律「打破过往同意惯性」/「打破上轮 reviewer 偏好锚定」、盲审复核、`past_commitment_anchoring` 巡查）即**不生效**。使用前 orchestrator **必须**按宪法 #6 告知用户当前处于独立性降级模式**及其对结论可靠性的影响**。
 
-**角色边界**：传话编排中 orchestrator 的「纠偏」限定为**指出偏差并要求对方修正**，**不含直接修改产物**（宪法 #7 在落地阶段同样适用，C-21(b) 已有明文）。若偏差需要改产物，仍须 **spawn executor**。Orchestrator **不得直接修改**产物文件。
+**角色边界**：传话编排与宿主原生实时协同中，orchestrator 的「纠偏」均限定为**指出偏差并要求执行方修正**，**不含直接修改产物**（宪法 #7 连同其 `refs/framework-adapters.md` §A.4 不可用降级例外在落地阶段同样适用，C-21(b) 已有明文）。除 Spawn 完全不可用按 `refs/framework-adapters.md` §A.4 降级为 `orchestrator_self` 并如实标注告知外，Orchestrator **不得直接修改**产物文件。
 
-**振荡裁判**：orchestrator 对每次转发追加一条 relay-ledger 记录。每 `relay_oscillation_interval` 轮（默认 3），spawn 一个一次性「振荡裁判」agent——**输入仅为 relay-ledger**，**输出仅为 Type O/R/F/S 的枚举判定**。orchestrator 只负责 spawn 与转发判定结果，**保持沉默**——不自行做语义判定。该 spawn 记入现有 gate ledger，落在 `total_safety`（1.5）的余量内，不单列新预算 scope。
+**振荡检测**：手工传话路径下，因 C-21 落地发生在 `finish` 归档之后、`.converge/done/<slug>/` 全部文件（含 `gate-ledger.jsonl`）均已封存只读且不得重建 `active/<slug>/`，orchestrator 对每次转发在项目源计划文件（`docs/plans/...`）的「落地记录」节追加一条转发记录（字段格式仍沿用 `refs/state-schema.md` §relay-ledger 单源）。每 `relay_oscillation_interval` 轮（默认 3），spawn 一个一次性「振荡裁判」agent——**输入仅为该「落地记录」节中的转发记录**，**输出仅为 Type O/R/F/S 的枚举判定**。orchestrator 只负责 spawn 与转发判定结果，**保持沉默**——不自行做语义判定；裁判 spawn 与判定结论同样记入源计划「落地记录」节，与落地执行方同享不回写已封存 `gate-ledger.jsonl` 的豁免（不再尝试经 `orchest.py` 写入已封存账本）。宿主原生实时协同路径下无手工转发，**不新增停止条件或计数阈值**；由 Orchestrator 依据宿主板面与执行日志自主识别反复推翻或往返翻转等无效循环，及时中止协同或回退单次 `Spawn`。
 
 > 操作细节（默认不发言、仅偏差介入的转发纪律与包裹格式）见 `refs/orchestrator-guide.md` §八；relay-ledger 记录格式以 `refs/state-schema.md` §relay-ledger 为**唯一单源**。
 

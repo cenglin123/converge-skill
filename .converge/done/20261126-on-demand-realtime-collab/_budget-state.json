@@ -1,0 +1,46 @@
+{
+  "defaults_version": 2,
+  "config": {},
+  "extensions": [
+    {
+      "extension_id": "ext-outer-0614d0668fab",
+      "ts": "2026-11-25T18:38:02.695971+00:00",
+      "scope": "outer",
+      "triggering_block_event_id": "c588dab53f25",
+      "granted_at_usage": 8,
+      "prior_ceiling": 8,
+      "new_ceiling": 10,
+      "supersedes": null,
+      "user_quote": "1",
+      "user_message_event_id": "66ee3e35-43f4-46d4-bf4a-863e34533be1",
+      "reason": "用户选择决策菜单选项1：授权 scope=outer 扩容 8->10 完成 BR-2 复审"
+    }
+  ],
+  "fsm": {
+    "mode": "ultraverge",
+    "severities": {
+      "1": [
+        "architectural",
+        "implementation"
+      ],
+      "2": [
+        "architectural",
+        "structural"
+      ],
+      "3": [
+        "structural",
+        "implementation"
+      ],
+      "4": [
+        "structural",
+        "implementation"
+      ],
+      "6": [
+        "structural"
+      ],
+      "8": [
+        "architectural"
+      ]
+    }
+  }
+}
